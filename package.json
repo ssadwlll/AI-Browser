@@ -1,0 +1,35 @@
+{
+  "name": "ai-browser",
+  "version": "1.0.0",
+  "description": "AI浏览器 - 支持配置大模型调用，输入提示词做逆向分析",
+  "main": "electron/main.js",
+  "scripts": {
+    "dev": "concurrently -k \"vite\" \"wait-on http://localhost:5173 && cross-env NODE_ENV=development electron .\"",
+    "build": "vite build",
+    "preview": "vite preview",
+    "start": "cross-env NODE_ENV=production electron .",
+    "dist": "vite build && electron-builder"
+  },
+  "build": {
+    "appId": "com.aibrowser.app",
+    "productName": "AI Browser",
+    "files": ["dist/**/*", "electron/**/*"],
+    "mac": { "target": "dmg" },
+    "win": { "target": "nsis" },
+    "linux": { "target": "AppImage" }
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-markdown": "^9.0.1"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.1",
+    "concurrently": "^8.2.2",
+    "cross-env": "^7.0.3",
+    "electron": "^31.0.0",
+    "electron-builder": "^24.13.3",
+    "vite": "^5.3.1",
+    "wait-on": "^7.2.0"
+  }
+}
