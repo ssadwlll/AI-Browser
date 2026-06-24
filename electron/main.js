@@ -52,6 +52,7 @@ function getTabInfo(tab) {
     title: tab.title,
     loading: tab.loading,
     favicon: tab.favicon,
+    active: tab.id === activeTabId,
   }
 }
 
@@ -90,6 +91,12 @@ function attachTabEvents(tab) {
       tab.favicon = favicons[0]
       sendTabUpdated(tab)
     }
+  })
+
+  // 新窗口链接改为新标签页打开
+  wc.setWindowOpenHandler(({ url }) => {
+    createTab(url)
+    return { action: 'deny' } // 阻止默认新窗口，由createTab处理
   })
 }
 

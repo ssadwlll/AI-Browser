@@ -12,6 +12,7 @@ export default function App() {
   const [activeTab, setActiveTab] = useState('assistant')
   const [sidebarRatio, setSidebarRatio] = useState(0.35)
   const [sidebarVisible, setSidebarVisible] = useState(true)
+  const [panelPosition, setPanelPosition] = useState('right') // 'right' | 'left' | 'bottom'
   const [dragging, setDragging] = useState(false)
 
   // 标签页状态
@@ -51,12 +52,26 @@ export default function App() {
   // 监听标签页更新事件
   useEffect(() => {
     const unsub = window.api.tabs.onUpdated((data) => {
-      setTabs(prev => prev.map(t => t.id === data.id ? { ...t, ...data } : t))
+      setTabs(prev => {
+        const exists = prev.find(t => t.id === data.id)
+        if (exists) {
+          return prev.map(t => t.id === data.id ? { ...t, ...data } : t)
+        } else {
+          // 新标签页（由 setWindowOpenHandler 创建）
+          return [...prev, { id: data.id, url: '', title: '', loading: false, active: false, ...data }]
+        }
+      })
       // 如果是活跃标签，同步URL和标题
       if (data.id === activeTabId) {
         if (data.url) setUrl(data.url)
         if (data.title !== undefined) setPageTitle(data.title)
         if (data.loading !== undefined) setIsLoading(data.loading)
+      }
+      // 新标签页自动变为活跃
+      if (data.active) {
+        setActiveTabId(data.id)
+        if (data.url) setUrl(data.url)
+        if (data.title) setPageTitle(data.title)
       }
     })
     return unsub
@@ -238,6 +253,13 @@ export default function App() {
     window.api.browser.togglePanel(newVisible)
   }
 
+  const handleSetPanelPosition = (pos) => {
+    setPanelPosition(pos)
+    window.api.browser.resize(1 - sidebarRatio) // 同步比例
+    // 通过 panel:set-position 更新后端
+    window.api.panel.setPosition({ position: pos, ratio: sidebarRatio })
+  }
+
   // 拖动分隔条
   const handleMouseDown = (e) => { e.preventDefault(); setDragging(true) }
 
@@ -245,9 +267,21 @@ export default function App() {
     if (!dragging) return
     const handleMouseMove = (e) => {
       const windowWidth = window.innerWidth
-      const sidebarWidth = windowWidth - e.clientX
-      const ratio = Math.max(0.2, Math.min(0.6, sidebarWidth / windowWidth))
-      setSidebarRatio(ratio)
+      const windowHeight = window.innerHeight
+      if (panelPosition === 'right') {
+        const sidebarWidth = windowWidth - e.clientX
+        const ratio = Math.max(0.2, Math.min(0.6, sidebarWidth / windowWidth))
+        setSidebarRatio(ratio)
+      } else if (panelPosition === 'left') {
+        const sidebarWidth = e.clientX
+        const ratio = Math.max(0.2, Math.min(0.6, sidebarWidth / windowWidth))
+        setSidebarRatio(ratio)
+      } else if (panelPosition === 'bottom') {
+        const navbarHeight = 72
+        const sidebarHeight = windowHeight - e.clientY
+        const ratio = Math.max(0.15, Math.min(0.6, sidebarHeight / (windowHeight - navbarHeight)))
+        setSidebarRatio(ratio)
+      }
     }
     const handleMouseUp = () => {
       setDragging(false)
@@ -259,7 +293,7 @@ export default function App() {
       document.removeEventListener('mousemove', handleMouseMove)
       document.removeEventListener('mouseup', handleMouseUp)
     }
-  }, [dragging, sidebarRatio])
+  }, [dragging, sidebarRatio, panelPosition])
 
   // 从URL提取域名作为标签标题简写
   const getTabLabel = (tab) => {
@@ -312,6 +346,13 @@ export default function App() {
         <div className="nav-actions">
           <button className="nav-btn-icon" onClick={() => setShowFind(true)} title="页面内查找 (Ctrl+F)">🔍</button>
           <button className={`nav-btn ${sidebarVisible ? 'nav-btn-active' : ''}`} onClick={handleToggleSidebar} title="AI助手面板">✦</button>
+          {sidebarVisible && (
+            <div className="panel-position-btns">
+              <button className={`nav-btn-icon ${panelPosition === 'left' ? 'active' : ''}`} onClick={() => handleSetPanelPosition('left')} title="面板在左侧">◀</button>
+              <button className={`nav-btn-icon ${panelPosition === 'right' ? 'active' : ''}`} onClick={() => handleSetPanelPosition('right')} title="面板在右侧">▶</button>
+              <button className={`nav-btn-icon ${panelPosition === 'bottom' ? 'active' : ''}`} onClick={() => handleSetPanelPosition('bottom')} title="面板在底部">▼</button>
+            </div>
+          )}
           <button className={`nav-btn ${activeTab === 'settings' ? 'nav-btn-active' : ''}`} onClick={() => setActiveTab(activeTab === 'settings' ? 'assistant' : 'settings')} title="设置">⚙</button>
         </div>
       </div>
@@ -375,12 +416,54 @@ export default function App() {
       )}
 
       {/* 主布局 */}
-      <div className="main-layout">
-        <div className="browser-container" style={{ flex: sidebarVisible ? `0 0 ${((1 - sidebarRatio) * 100).toFixed(2)}%` : '1 1 100%' }} />
-        {sidebarVisible && (
+      <div className={`main-layout layout-${panelPosition}`}>
+        {/* 左侧面板 */}
+        {sidebarVisible && panelPosition === 'left' && (
+          <>
+            <div className="sidebar" style={{ flex: `0 0 ${(sidebarRatio * 100).toFixed(2)}%` }}>
+              <div className="sidebar-tabs">
+                <div className={`tab ${activeTab === 'assistant' ? 'active' : ''}`} onClick={() => setActiveTab('assistant')}>AI 助手</div>
+                <div className={`tab ${activeTab === 'settings' ? 'active' : ''}`} onClick={() => setActiveTab('settings')}>设置</div>
+              </div>
+              <div style={{ display: activeTab === 'assistant' ? 'flex' : 'none', flex: 1, flexDirection: 'column', overflow: 'hidden' }}>
+                <UnifiedPanel config={config} />
+              </div>
+              <div style={{ display: activeTab === 'settings' ? 'flex' : 'none', flex: 1, flexDirection: 'column', overflow: 'hidden' }}>
+                <SettingsPanel config={config} setConfig={setConfig} />
+              </div>
+            </div>
+            <div className={`sidebar-resizer ${dragging ? 'dragging' : ''}`} onMouseDown={handleMouseDown} />
+          </>
+        )}
+
+        <div className="browser-container" style={{
+          flex: sidebarVisible ? `0 0 ${((1 - sidebarRatio) * 100).toFixed(2)}%` : '1 1 100%',
+        }} />
+
+        {/* 右侧面板 */}
+        {sidebarVisible && panelPosition === 'right' && (
           <>
             <div className={`sidebar-resizer ${dragging ? 'dragging' : ''}`} onMouseDown={handleMouseDown} />
             <div className="sidebar" style={{ flex: `0 0 ${(sidebarRatio * 100).toFixed(2)}%` }}>
+              <div className="sidebar-tabs">
+                <div className={`tab ${activeTab === 'assistant' ? 'active' : ''}`} onClick={() => setActiveTab('assistant')}>AI 助手</div>
+                <div className={`tab ${activeTab === 'settings' ? 'active' : ''}`} onClick={() => setActiveTab('settings')}>设置</div>
+              </div>
+              <div style={{ display: activeTab === 'assistant' ? 'flex' : 'none', flex: 1, flexDirection: 'column', overflow: 'hidden' }}>
+                <UnifiedPanel config={config} />
+              </div>
+              <div style={{ display: activeTab === 'settings' ? 'flex' : 'none', flex: 1, flexDirection: 'column', overflow: 'hidden' }}>
+                <SettingsPanel config={config} setConfig={setConfig} />
+              </div>
+            </div>
+          </>
+        )}
+
+        {/* 底部面板 */}
+        {sidebarVisible && panelPosition === 'bottom' && (
+          <>
+            <div className={`sidebar-resizer resizer-horizontal ${dragging ? 'dragging' : ''}`} onMouseDown={handleMouseDown} />
+            <div className="sidebar sidebar-bottom" style={{ flex: `0 0 ${(sidebarRatio * 100).toFixed(2)}%` }}>
               <div className="sidebar-tabs">
                 <div className={`tab ${activeTab === 'assistant' ? 'active' : ''}`} onClick={() => setActiveTab('assistant')}>AI 助手</div>
                 <div className={`tab ${activeTab === 'settings' ? 'active' : ''}`} onClick={() => setActiveTab('settings')}>设置</div>

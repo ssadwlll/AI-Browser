@@ -17,6 +17,11 @@ contextBridge.exposeInMainWorld('api', {
     resize: (ratio) => ipcRenderer.send('browser:resize', { browserRatio: ratio }),
     togglePanel: (visible) => ipcRenderer.invoke('panel:toggle', { visible }),
   },
+  // 面板控制
+  panel: {
+    setPosition: ({ position, ratio }) => ipcRenderer.invoke('panel:set-position', { position, ratio }),
+    getPosition: () => ipcRenderer.invoke('panel:get-position'),
+  },
   // 标签页管理
   tabs: {
     create: (url) => ipcRenderer.invoke('tabs:create', { url }),
