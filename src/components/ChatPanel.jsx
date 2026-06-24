@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react'
+import React, { useState, useRef, useEffect, useCallback } from 'react'
 import ReactMarkdown from 'react-markdown'
 
 export default function ChatPanel({ config }) {
@@ -11,30 +11,38 @@ export default function ChatPanel({ config }) {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
 
-  useEffect(() => {
-    const handleChunk = (chunk) => {
-      setMessages(prev => {
-        const last = prev[prev.length - 1]
-        if (last && last.role === 'assistant' && last.streaming) {
-          return [...prev.slice(0, -1), { ...last, content: last.content + chunk }]
-        }
-        return [...prev, { role: 'assistant', content: chunk, streaming: true }]
-      })
-    }
-    const handleDone = () => {
-      setMessages(prev => {
-        const last = prev[prev.length - 1]
-        if (last && last.streaming) {
-          return [...prev.slice(0, -1), { ...last, streaming: false }]
-        }
-        return prev
-      })
-      setLoading(false)
-    }
-
-    window.api.ai.onStreamChunk(handleChunk)
-    window.api.ai.onStreamDone(handleDone)
+  // 统一的流式事件监听
+  const handleStreamChunk = useCallback((data) => {
+    if (data.source !== 'chat') return
+    setMessages(prev => {
+      const last = prev[prev.length - 1]
+      if (last && last.role === 'assistant' && last.streaming) {
+        return [...prev.slice(0, -1), { ...last, content: last.content + data.chunk }]
+      }
+      return [...prev, { role: 'assistant', content: data.chunk, streaming: true }]
+    })
   }, [])
+
+  const handleStreamDone = useCallback((data) => {
+    if (data.source !== 'chat') return
+    setMessages(prev => {
+      const last = prev[prev.length - 1]
+      if (last && last.streaming) {
+        return [...prev.slice(0, -1), { ...last, streaming: false }]
+      }
+      return prev
+    })
+    setLoading(false)
+  }, [])
+
+  useEffect(() => {
+    const unsub1 = window.api.ai.onStreamChunk(handleStreamChunk)
+    const unsub2 = window.api.ai.onStreamDone(handleStreamDone)
+    return () => {
+      unsub1()
+      unsub2()
+    }
+  }, [handleStreamChunk, handleStreamDone])
 
   const send = async () => {
     if (!input.trim() || loading) return
@@ -49,12 +57,17 @@ export default function ChatPanel({ config }) {
       { role: 'user', content: userMsg },
     ]
 
-    const result = await window.api.ai.chat(apiMessages, config)
-    if (!result.success) {
-      setMessages(prev => [...prev, { role: 'assistant', content: `错误: ${result.error}` }])
-      setLoading(false)
-    } else if (result.reply) {
-      setMessages(prev => [...prev, { role: 'assistant', content: result.reply }])
+    if (config.streaming) {
+      // 流式输出
+      await window.api.ai.chatStream(apiMessages, config)
+    } else {
+      // 非流式输出
+      const result = await window.api.ai.chat(apiMessages, config)
+      if (!result.success) {
+        setMessages(prev => [...prev, { role: 'assistant', content: `错误: ${result.error}` }])
+      } else if (result.reply) {
+        setMessages(prev => [...prev, { role: 'assistant', content: result.reply }])
+      }
       setLoading(false)
     }
   }

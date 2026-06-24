@@ -1,6 +1,7 @@
 /**
  * 多模型适配层
  * 支持 OpenAI兼容API、Ollama本地模型、Qwen DashScope
+ * 支持 Function Calling / Tool Use
  */
 const { net } = require('electron')
 
@@ -14,70 +15,116 @@ class LLMProvider {
   }
 
   /**
-   * 非流式对话
+   * 非流式对话（支持tools）
    */
-  async chat(messages) {
+  async chat(messages, options = {}) {
     const provider = this.config.provider
 
     if (provider === 'ollama') {
-      return await this._callOllama(messages, false)
+      return await this._callOllama(messages, false, options)
     } else if (provider === 'qwen') {
-      return await this._callQwen(messages, false)
+      return await this._callQwen(messages, false, options)
     } else {
-      // 默认 OpenAI 兼容
-      return await this._callOpenAI(messages, false)
+      return await this._callOpenAI(messages, false, options)
     }
   }
 
   /**
-   * 流式对话 (async generator)
+   * 流式对话 (async generator，支持tools)
    */
-  async *chatStream(messages) {
+  async *chatStream(messages, options = {}) {
     const provider = this.config.provider
 
     if (provider === 'ollama') {
-      yield* this._streamOllama(messages)
+      yield* this._streamOllama(messages, options)
     } else if (provider === 'qwen') {
-      yield* this._streamQwen(messages)
+      yield* this._streamQwen(messages, options)
     } else {
-      yield* this._streamOpenAI(messages)
+      yield* this._streamOpenAI(messages, options)
     }
   }
 
   // ============ OpenAI 兼容 API ============
-  async _callOpenAI(messages, stream) {
+  async _callOpenAI(messages, stream, options = {}) {
     const { apiKey, baseUrl, model } = this.config
     const url = `${baseUrl || 'https://api.openai.com/v1'}/chat/completions`
 
-    const response = await this._postRequest(url, {
+    const body = {
       model: model || 'gpt-4o',
       messages,
       stream: false,
       temperature: 0.7,
-    }, apiKey)
+    }
+    if (options.tools) body.tools = options.tools
 
+    const response = await this._postRequest(url, body, apiKey)
     const data = JSON.parse(response)
-    return data.choices[0].message.content
+    return data.choices[0].message
   }
 
-  async *_streamOpenAI(messages) {
+  async *_streamOpenAI(messages, options = {}) {
     const { apiKey, baseUrl, model } = this.config
     const url = `${baseUrl || 'https://api.openai.com/v1'}/chat/completions`
 
-    const body = JSON.stringify({
+    const body = {
       model: model || 'gpt-4o',
       messages,
       stream: true,
       temperature: 0.7,
-    })
+    }
+    if (options.tools) body.tools = options.tools
 
-    const chunks = await this._streamRequest(url, body, apiKey)
+    const chunks = await this._streamRequest(url, JSON.stringify(body), apiKey)
+
+    // 流式模式下需要累积tool_calls的delta
+    let toolCallsAccum = {}
+
     for (const chunk of chunks) {
-      if (chunk === '[DONE]') return
+      if (chunk === '[DONE]') {
+        // 如果有累积的tool_calls，yield出来
+        if (Object.keys(toolCallsAccum).length > 0) {
+          const toolCalls = Object.values(toolCallsAccum).sort((a, b) => a.index - b.index)
+          yield { type: 'tool_calls', tool_calls: toolCalls }
+        }
+        return
+      }
       try {
         const data = JSON.parse(chunk)
-        const delta = data.choices?.[0]?.delta?.content
-        if (delta) yield delta
+        const choice = data.choices?.[0]
+        if (!choice) continue
+
+        const delta = choice.delta
+
+        // 处理content
+        if (delta?.content) {
+          yield { type: 'content', content: delta.content }
+        }
+
+        // 处理tool_calls (流式增量)
+        if (delta?.tool_calls) {
+          for (const tc of delta.tool_calls) {
+            const idx = tc.index
+            if (!toolCallsAccum[idx]) {
+              toolCallsAccum[idx] = {
+                index: idx,
+                id: tc.id || '',
+                type: tc.type || 'function',
+                function: { name: '', arguments: '' },
+              }
+            }
+            if (tc.id) toolCallsAccum[idx].id = tc.id
+            if (tc.type) toolCallsAccum[idx].type = tc.type
+            if (tc.function?.name) toolCallsAccum[idx].function.name += tc.function.name
+            if (tc.function?.arguments) toolCallsAccum[idx].function.arguments += tc.function.arguments
+          }
+        }
+
+        // 如果流结束且有tool_calls
+        if (choice.finish_reason === 'tool_calls' && Object.keys(toolCallsAccum).length > 0) {
+          const toolCalls = Object.values(toolCallsAccum).sort((a, b) => a.index - b.index)
+          yield { type: 'tool_calls', tool_calls: toolCalls }
+          toolCallsAccum = {}
+        }
       } catch (e) {
         // 跳过解析失败的块
       }
@@ -85,36 +132,62 @@ class LLMProvider {
   }
 
   // ============ Ollama 本地模型 ============
-  async _callOllama(messages, stream) {
+  async _callOllama(messages, stream, options = {}) {
     const { baseUrl, model } = this.config
     const url = `${baseUrl || 'http://localhost:11434'}/api/chat`
 
-    const response = await this._postRequest(url, {
+    const body = {
       model: model || 'qwen2.5:14b',
       messages,
       stream: false,
-    }, null)
+    }
+    if (options.tools) body.tools = options.tools
 
+    const response = await this._postRequest(url, body, null)
     const data = JSON.parse(response)
-    return data.message.content
+    return data.message
   }
 
-  async *_streamOllama(messages) {
+  async *_streamOllama(messages, options = {}) {
     const { baseUrl, model } = this.config
     const url = `${baseUrl || 'http://localhost:11434'}/api/chat`
 
-    const body = JSON.stringify({
+    const body = {
       model: model || 'qwen2.5:14b',
       messages,
       stream: true,
-    })
+    }
+    if (options.tools) body.tools = options.tools
 
-    const chunks = await this._streamRequest(url, body, null)
+    const chunks = await this._streamRequest(url, JSON.stringify(body), null)
+
+    let toolCallsAccum = {}
+
     for (const chunk of chunks) {
       try {
         const data = JSON.parse(chunk)
-        if (data.message?.content) yield data.message.content
-        if (data.done) return
+        const msg = data.message
+        if (!msg) continue
+
+        // 处理content
+        if (msg.content) {
+          yield { type: 'content', content: msg.content }
+        }
+
+        // Ollama tool_calls 格式
+        if (msg.tool_calls) {
+          for (const tc of msg.tool_calls) {
+            yield { type: 'tool_call', tool_call: tc }
+          }
+        }
+
+        if (data.done) {
+          // 如果有累积的tool_calls
+          if (Object.keys(toolCallsAccum).length > 0) {
+            yield { type: 'tool_calls', tool_calls: Object.values(toolCallsAccum) }
+          }
+          return
+        }
       } catch (e) {
         // 跳过
       }
@@ -122,37 +195,79 @@ class LLMProvider {
   }
 
   // ============ Qwen DashScope ============
-  async _callQwen(messages, stream) {
+  async _callQwen(messages, stream, options = {}) {
     const { apiKey, model } = this.config
     const url = 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions'
 
-    const response = await this._postRequest(url, {
+    const body = {
       model: model || 'qwen-plus',
       messages,
       stream: false,
-    }, apiKey)
+    }
+    if (options.tools) body.tools = options.tools
 
+    const response = await this._postRequest(url, body, apiKey)
     const data = JSON.parse(response)
-    return data.choices[0].message.content
+    return data.choices[0].message
   }
 
-  async *_streamQwen(messages) {
+  async *_streamQwen(messages, options = {}) {
     const { apiKey, model } = this.config
     const url = 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions'
 
-    const body = JSON.stringify({
+    const body = {
       model: model || 'qwen-plus',
       messages,
       stream: true,
-    })
+    }
+    if (options.tools) body.tools = options.tools
 
-    const chunks = await this._streamRequest(url, body, apiKey)
+    const chunks = await this._streamRequest(url, JSON.stringify(body), apiKey)
+
+    let toolCallsAccum = {}
+
     for (const chunk of chunks) {
-      if (chunk === '[DONE]') return
+      if (chunk === '[DONE]') {
+        if (Object.keys(toolCallsAccum).length > 0) {
+          const toolCalls = Object.values(toolCallsAccum).sort((a, b) => a.index - b.index)
+          yield { type: 'tool_calls', tool_calls: toolCalls }
+        }
+        return
+      }
       try {
         const data = JSON.parse(chunk)
-        const delta = data.choices?.[0]?.delta?.content
-        if (delta) yield delta
+        const choice = data.choices?.[0]
+        if (!choice) continue
+
+        const delta = choice.delta
+
+        if (delta?.content) {
+          yield { type: 'content', content: delta.content }
+        }
+
+        if (delta?.tool_calls) {
+          for (const tc of delta.tool_calls) {
+            const idx = tc.index
+            if (!toolCallsAccum[idx]) {
+              toolCallsAccum[idx] = {
+                index: idx,
+                id: tc.id || '',
+                type: tc.type || 'function',
+                function: { name: '', arguments: '' },
+              }
+            }
+            if (tc.id) toolCallsAccum[idx].id = tc.id
+            if (tc.type) toolCallsAccum[idx].type = tc.type
+            if (tc.function?.name) toolCallsAccum[idx].function.name += tc.function.name
+            if (tc.function?.arguments) toolCallsAccum[idx].function.arguments += tc.function.arguments
+          }
+        }
+
+        if (choice.finish_reason === 'tool_calls' && Object.keys(toolCallsAccum).length > 0) {
+          const toolCalls = Object.values(toolCallsAccum).sort((a, b) => a.index - b.index)
+          yield { type: 'tool_calls', tool_calls: toolCalls }
+          toolCallsAccum = {}
+        }
       } catch (e) {
         // 跳过
       }
@@ -210,9 +325,8 @@ class LLMProvider {
       request.on('response', (response) => {
         response.on('data', (chunk) => {
           buffer += chunk.toString()
-          // SSE 格式: data: {...}\n\n
           const lines = buffer.split('\n')
-          buffer = lines.pop() // 保留最后不完整的行
+          buffer = lines.pop()
 
           for (const line of lines) {
             const trimmed = line.trim()
@@ -224,13 +338,11 @@ class LLMProvider {
                 chunks.push(data)
               }
             } else if (trimmed && !trimmed.startsWith(':')) {
-              // Ollama 直接返回JSON
               chunks.push(trimmed)
             }
           }
         })
         response.on('end', () => {
-          // 处理最后剩余的buffer
           if (buffer.trim()) {
             const trimmed = buffer.trim()
             if (trimmed.startsWith('data: ')) {

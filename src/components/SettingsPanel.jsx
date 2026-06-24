@@ -68,12 +68,28 @@ export default function SettingsPanel({ config, setConfig }) {
         />
       </div>
 
+      <div className="form-group">
+        <label className="form-label" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span>流式输出</span>
+          <input
+            type="checkbox"
+            checked={config.streaming || false}
+            onChange={(e) => handleChange('streaming', e.target.checked)}
+            style={{ width: 16, height: 16, cursor: 'pointer' }}
+          />
+        </label>
+        <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 4 }}>
+          开启后AI对话、逆向分析、智能操作将实时逐字输出，关闭则等待完整结果后一次性显示
+        </div>
+      </div>
+
       <div style={{ marginTop: 16, padding: 12, background: 'var(--bg-input)', borderRadius: 8, fontSize: 12, color: 'var(--text-secondary)' }}>
         <div style={{ marginBottom: 8, color: 'var(--accent)' }}>当前配置预览</div>
         <div>服务商: {PROVIDER_PRESETS[config.provider]?.label || config.provider}</div>
         <div>Base URL: {config.baseUrl}</div>
         <div>模型: {config.model}</div>
         <div>API Key: {config.apiKey ? '已配置 (' + config.apiKey.slice(0, 6) + '...)' : '未配置'}</div>
+        <div>流式输出: {config.streaming ? '已开启' : '已关闭'}</div>
       </div>
 
       <div style={{ marginTop: 16, fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.8 }}>

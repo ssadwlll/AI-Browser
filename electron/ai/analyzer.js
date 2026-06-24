@@ -10,6 +10,8 @@ class Analyzer {
     this.requests = []
     this.responses = []
     this.errors = []
+    this.analysisHistory = []     // 分析历史记录
+    this.maxAnalysisHistory = 30
   }
 
   reset() {
@@ -177,6 +179,33 @@ ${JSON.stringify(allRequests.slice(0, 50), null, 2)}`
       { role: 'system', content: systemContent },
       { role: 'user', content: userPrompt || '请综合分析这个网页的技术栈、API接口和关键JS逻辑。' },
     ]
+  }
+
+  /**
+   * 添加分析历史记录
+   */
+  addAnalysisHistory(entry) {
+    this.analysisHistory.push({
+      ...entry,
+      timestamp: Date.now(),
+    })
+    if (this.analysisHistory.length > this.maxAnalysisHistory) {
+      this.analysisHistory = this.analysisHistory.slice(-this.maxAnalysisHistory)
+    }
+  }
+
+  /**
+   * 获取分析历史记录
+   */
+  getAnalysisHistory() {
+    return this.analysisHistory
+  }
+
+  /**
+   * 清空分析历史记录
+   */
+  clearAnalysisHistory() {
+    this.analysisHistory = []
   }
 }
 
