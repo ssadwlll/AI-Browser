@@ -1,4 +1,4 @@
-const { app, BrowserWindow, BrowserView, ipcMain, session, shell, Tray, Menu, nativeImage } = require('electron')
+const { app, BrowserWindow, BrowserView, ipcMain, session, shell, Tray, Menu, nativeImage, clipboard } = require('electron')
 const path = require('path')
 const LLMProvider = require('./ai/llm_provider')
 const Analyzer = require('./ai/analyzer')
@@ -56,6 +56,92 @@ function getTabInfo(tab) {
   }
 }
 
+function sendNavStateUpdated(tab) {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    const wc = tab.browserView.webContents
+    mainWindow.webContents.send('browser:nav-state', {
+      tabId: tab.id,
+      canGoBack: wc.canGoBack(),
+      canGoForward: wc.canGoForward(),
+    })
+  }
+}
+
+function buildContextMenu(tab, params) {
+  const wc = tab.browserView.webContents
+  const menuItems = []
+  const hasSelection = params.selectionText && params.selectionText.length > 0
+  const isLink = params.linkURL && params.linkURL.length > 0
+  const isImage = params.mediaType === 'image'
+  const isInput = params.isEditable || ['input', 'textarea'].includes(params.tagName?.toLowerCase())
+
+  if (isLink) {
+    menuItems.push({ label: '在新标签页中打开链接', click: () => createTab(params.linkURL) })
+    menuItems.push({ label: '在新窗口中打开链接', click: () => shell.openExternal(params.linkURL) })
+    menuItems.push({ label: '复制链接地址', click: () => clipboard.writeText(params.linkURL) })
+    menuItems.push({ type: 'separator' })
+  }
+
+  if (isImage) {
+    menuItems.push({ label: '在新标签页中打开图片', click: () => createTab(params.srcURL) })
+    menuItems.push({ label: '复制图片', click: () => wc.copyImageAt(params.x, params.y) })
+    menuItems.push({ label: '复制图片地址', click: () => clipboard.writeText(params.srcURL) })
+    menuItems.push({ label: '图片另存为...', click: () => wc.downloadURL(params.srcURL) })
+    menuItems.push({ type: 'separator' })
+  }
+
+  if (hasSelection) {
+    menuItems.push({ label: '复制', role: 'copy', accelerator: 'Ctrl+C' })
+    menuItems.push({ type: 'separator' })
+  }
+
+  if (isInput) {
+    menuItems.push({ label: '撤销', role: 'undo', accelerator: 'Ctrl+Z' })
+    menuItems.push({ label: '重做', role: 'redo', accelerator: 'Ctrl+Y' })
+    menuItems.push({ type: 'separator' })
+    menuItems.push({ label: '剪切', role: 'cut', accelerator: 'Ctrl+X' })
+    menuItems.push({ label: '复制', role: 'copy', accelerator: 'Ctrl+C' })
+    menuItems.push({ label: '粘贴', role: 'paste', accelerator: 'Ctrl+V' })
+    menuItems.push({ label: '全选', role: 'selectall', accelerator: 'Ctrl+A' })
+    menuItems.push({ type: 'separator' })
+  }
+
+  menuItems.push({
+    label: '后退',
+    enabled: wc.canGoBack(),
+    accelerator: 'Alt+Left',
+    click: () => wc.goBack(),
+  })
+  menuItems.push({
+    label: '前进',
+    enabled: wc.canGoForward(),
+    accelerator: 'Alt+Right',
+    click: () => wc.goForward(),
+  })
+  menuItems.push({ label: '重新加载', role: 'reload', accelerator: 'Ctrl+R' })
+  menuItems.push({
+    label: '强制重新加载',
+    accelerator: 'Ctrl+Shift+R',
+    click: () => wc.reloadIgnoringCache(),
+  })
+  menuItems.push({ type: 'separator' })
+  menuItems.push({ label: '另存为...', role: 'save', accelerator: 'Ctrl+S' })
+  menuItems.push({ label: '打印...', role: 'print', accelerator: 'Ctrl+P' })
+  menuItems.push({ type: 'separator' })
+  menuItems.push({
+    label: '查看网页源代码',
+    accelerator: 'Ctrl+U',
+    click: () => createTab('view-source:' + wc.getURL()),
+  })
+  menuItems.push({
+    label: '检查',
+    accelerator: 'Ctrl+Shift+I',
+    click: () => wc.openDevTools({ mode: 'detach' }),
+  })
+
+  return Menu.buildFromTemplate(menuItems)
+}
+
 // 为 BrowserView 的 webContents 绑定标签事件
 function attachTabEvents(tab) {
   const wc = tab.browserView.webContents
@@ -64,11 +150,13 @@ function attachTabEvents(tab) {
     tab.url = url
     tab.loading = false
     sendTabUpdated(tab)
+    sendNavStateUpdated(tab)
   })
 
   wc.on('did-navigate-in-page', (event, url) => {
     tab.url = url
     sendTabUpdated(tab)
+    sendNavStateUpdated(tab)
   })
 
   wc.on('page-title-updated', (event, title) => {
@@ -84,6 +172,7 @@ function attachTabEvents(tab) {
   wc.on('did-stop-loading', () => {
     tab.loading = false
     sendTabUpdated(tab)
+    sendNavStateUpdated(tab)
   })
 
   wc.on('page-favicon-updated', (event, favicons) => {
@@ -93,10 +182,20 @@ function attachTabEvents(tab) {
     }
   })
 
+  wc.on('did-frame-navigate', () => {
+    sendNavStateUpdated(tab)
+  })
+
+  // 右键菜单
+  wc.on('context-menu', (event, params) => {
+    const menu = buildContextMenu(tab, params)
+    menu.popup({ window: mainWindow })
+  })
+
   // 新窗口链接改为新标签页打开
   wc.setWindowOpenHandler(({ url }) => {
     createTab(url)
-    return { action: 'deny' } // 阻止默认新窗口，由createTab处理
+    return { action: 'deny' }
   })
 }
 
@@ -213,6 +312,11 @@ function closeTab(id) {
   const tab = tabs.get(id)
   if (!tab) return null
 
+  // 不允许关闭最后一个标签页
+  if (tabs.size <= 1) {
+    return 'last_tab'
+  }
+
   // 从主窗口移除 BrowserView
   if (mainWindow) {
     mainWindow.removeBrowserView(tab.browserView)
@@ -291,7 +395,11 @@ ipcMain.handle('tabs:create', async (event, { url } = {}) => {
 })
 
 ipcMain.handle('tabs:close', async (event, { id }) => {
-  return closeTab(id)
+  const result = closeTab(id)
+  if (result === 'last_tab') {
+    return { success: false, error: '无法关闭最后一个标签页' }
+  }
+  return result
 })
 
 ipcMain.handle('tabs:switch', async (event, { id }) => {
@@ -402,8 +510,8 @@ ipcMain.handle('browser:navigate', async (event, url) => {
 // 后退
 ipcMain.handle('browser:back', async () => {
   const bv = getActiveBrowserView()
-  if (bv && bv.webContents.navigationHistory.canGoBack()) {
-    bv.webContents.navigationHistory.goBack()
+  if (bv && bv.webContents.canGoBack()) {
+    bv.webContents.goBack()
     return { success: true }
   }
   return { success: false }
@@ -412,11 +520,29 @@ ipcMain.handle('browser:back', async () => {
 // 前进
 ipcMain.handle('browser:forward', async () => {
   const bv = getActiveBrowserView()
-  if (bv && bv.webContents.navigationHistory.canGoForward()) {
-    bv.webContents.navigationHistory.goForward()
+  if (bv && bv.webContents.canGoForward()) {
+    bv.webContents.goForward()
     return { success: true }
   }
   return { success: false }
+})
+
+// 是否可以后退
+ipcMain.handle('browser:can-go-back', async () => {
+  const bv = getActiveBrowserView()
+  if (bv) {
+    return bv.webContents.canGoBack()
+  }
+  return false
+})
+
+// 是否可以前进
+ipcMain.handle('browser:can-go-forward', async () => {
+  const bv = getActiveBrowserView()
+  if (bv) {
+    return bv.webContents.canGoForward()
+  }
+  return false
 })
 
 // 获取当前URL
@@ -659,6 +785,11 @@ ipcMain.handle('ai:unified-chat', async (event, { messages, config, maxToolRound
           browserView: getActiveBrowserView(),
           analyzer,
           actionExecutor,
+          tabManager: {
+            createTab: (url) => createTab(url),
+            closeTab: (id) => closeTab(id),
+            getActiveTabId: () => activeTabId,
+          },
         })
 
         // 通知前端：工具执行结果

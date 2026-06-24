@@ -83,6 +83,28 @@ export default function SettingsPanel({ config, setConfig }) {
         </div>
       </div>
 
+      <div className="section-title" style={{ marginTop: 20 }}>AI 行为设置</div>
+
+      <div className="form-group">
+        <label className="form-label">最大工具调用轮次</label>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <input
+            type="range"
+            min="1"
+            max="50"
+            value={config.maxToolRounds || 20}
+            onChange={(e) => handleChange('maxToolRounds', parseInt(e.target.value))}
+            style={{ flex: 1 }}
+          />
+          <span style={{ fontSize: 14, fontWeight: 600, minWidth: 24, textAlign: 'center', color: 'var(--accent)' }}>
+            {config.maxToolRounds || 20}
+          </span>
+        </div>
+        <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 4 }}>
+          AI对话中最大工具调用轮次，每轮可调用多个工具。值越大AI可执行越复杂的任务，但可能消耗更多API费用。
+        </div>
+      </div>
+
       <div style={{ marginTop: 16, padding: 12, background: 'var(--bg-input)', borderRadius: 8, fontSize: 12, color: 'var(--text-secondary)' }}>
         <div style={{ marginBottom: 8, color: 'var(--accent)' }}>当前配置预览</div>
         <div>服务商: {PROVIDER_PRESETS[config.provider]?.label || config.provider}</div>
@@ -90,6 +112,7 @@ export default function SettingsPanel({ config, setConfig }) {
         <div>模型: {config.model}</div>
         <div>API Key: {config.apiKey ? '已配置 (' + config.apiKey.slice(0, 6) + '...)' : '未配置'}</div>
         <div>流式输出: {config.streaming ? '已开启' : '已关闭'}</div>
+        <div>最大工具调用轮次: {config.maxToolRounds || 20}</div>
       </div>
 
       <div style={{ marginTop: 16, fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.8 }}>

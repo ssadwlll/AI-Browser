@@ -134,6 +134,178 @@ const TOOL_DEFINITIONS = [
       },
     },
   },
+  {
+    type: 'function',
+    function: {
+      name: 'click_element',
+      description: '点击页面上的指定元素。通过CSS选择器定位元素并模拟点击。用于与页面交互、触发按钮、打开链接等。',
+      parameters: {
+        type: 'object',
+        properties: {
+          selector: {
+            type: 'string',
+            description: 'CSS选择器，用于定位目标元素，如 "#id"、".class"、"button.submit" 等',
+          },
+          index: {
+            type: 'number',
+            description: '当选择器匹配多个元素时，指定点击第几个（从0开始），默认0',
+          },
+          wait_after_click: {
+            type: 'number',
+            description: '点击后等待时间（毫秒），默认500ms',
+          },
+        },
+        required: ['selector'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'wait_for_element',
+      description: '等待指定元素出现在页面上。用于等待页面加载完成后再进行后续操作。',
+      parameters: {
+        type: 'object',
+        properties: {
+          selector: {
+            type: 'string',
+            description: 'CSS选择器，用于检测目标元素是否出现',
+          },
+          timeout: {
+            type: 'number',
+            description: '等待超时时间（毫秒），默认10000ms',
+          },
+          visible: {
+            type: 'boolean',
+            description: '是否要求元素可见（非隐藏），默认true',
+          },
+        },
+        required: ['selector'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'wait_for_navigation',
+      description: '等待页面导航完成（如点击链接后跳转）。用于在触发导航操作后等待新页面加载。',
+      parameters: {
+        type: 'object',
+        properties: {
+          timeout: {
+            type: 'number',
+            description: '等待超时时间（毫秒），默认30000ms',
+          },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'open_new_tab',
+      description: '在新标签页中打开指定URL。用于同时浏览多个页面。',
+      parameters: {
+        type: 'object',
+        properties: {
+          url: {
+            type: 'string',
+            description: '要打开的URL',
+          },
+          active: {
+            type: 'boolean',
+            description: '是否切换到新标签页，默认true',
+          },
+        },
+        required: ['url'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'close_current_tab',
+      description: '关闭当前标签页。如果只有一个标签页则不会关闭。',
+      parameters: {
+        type: 'object',
+        properties: {},
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'extract_images',
+      description: '提取当前页面中所有图片的URL和相关信息。用于收集页面的图片资源。',
+      parameters: {
+        type: 'object',
+        properties: {
+          min_width: {
+            type: 'number',
+            description: '最小图片宽度（像素），过滤小图标，默认0',
+          },
+          min_height: {
+            type: 'number',
+            description: '最小图片高度（像素），过滤小图标，默认0',
+          },
+          limit: {
+            type: 'number',
+            description: '最多返回的图片数量，默认50',
+          },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'extract_links',
+      description: '提取当前页面中所有链接的URL和文本。用于收集页面的超链接资源。',
+      parameters: {
+        type: 'object',
+        properties: {
+          domain_only: {
+            type: 'boolean',
+            description: '是否只提取同域名链接，默认false',
+          },
+          filter: {
+            type: 'string',
+            description: '按URL关键词过滤链接',
+          },
+          limit: {
+            type: 'number',
+            description: '最多返回的链接数量，默认100',
+          },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'scroll_to_element',
+      description: '滚动页面到指定元素位置。用于将目标元素滚动到可视区域。',
+      parameters: {
+        type: 'object',
+        properties: {
+          selector: {
+            type: 'string',
+            description: 'CSS选择器，定位要滚动到的目标元素',
+          },
+          behavior: {
+            type: 'string',
+            enum: ['smooth', 'auto'],
+            description: '滚动动画方式，smooth为平滑滚动，auto为立即跳转，默认smooth',
+          },
+          offset: {
+            type: 'number',
+            description: '距离元素顶部的偏移量（像素），默认0',
+          },
+        },
+        required: ['selector'],
+      },
+    },
+  },
 ]
 
 module.exports = TOOL_DEFINITIONS

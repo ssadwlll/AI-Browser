@@ -13,9 +13,16 @@ contextBridge.exposeInMainWorld('api', {
     getTitle: () => ipcRenderer.invoke('browser:get-title'),
     getHtml: () => ipcRenderer.invoke('browser:get-html'),
     isLoading: () => ipcRenderer.invoke('browser:is-loading'),
+    canGoBack: () => ipcRenderer.invoke('browser:can-go-back'),
+    canGoForward: () => ipcRenderer.invoke('browser:can-go-forward'),
     openExternal: (url) => ipcRenderer.invoke('browser:open-external', url),
     resize: (ratio) => ipcRenderer.send('browser:resize', { browserRatio: ratio }),
     togglePanel: (visible) => ipcRenderer.invoke('panel:toggle', { visible }),
+    onNavState: (callback) => {
+      const handler = (e, data) => callback(data)
+      ipcRenderer.on('browser:nav-state', handler)
+      return () => ipcRenderer.removeListener('browser:nav-state', handler)
+    },
   },
   // 面板控制
   panel: {

@@ -13,10 +13,19 @@
   "build": {
     "appId": "com.aibrowser.app",
     "productName": "AI Browser",
-    "files": ["dist/**/*", "electron/**/*"],
-    "mac": { "target": "dmg" },
-    "win": { "target": "nsis" },
-    "linux": { "target": "AppImage" }
+    "files": [
+      "dist/**/*",
+      "electron/**/*"
+    ],
+    "mac": {
+      "target": "dmg"
+    },
+    "win": {
+      "target": "nsis"
+    },
+    "linux": {
+      "target": "AppImage"
+    }
   },
   "dependencies": {
     "react": "^18.3.1",

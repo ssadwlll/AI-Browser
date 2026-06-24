@@ -10,9 +10,18 @@ const TOOL_LABELS = {
   extract_page_scripts: '提取页面脚本',
   get_page_html: '获取页面HTML',
   screenshot: '页面截图',
+  click_element: '点击元素',
+  wait_for_element: '等待元素',
+  wait_for_navigation: '等待导航',
+  open_new_tab: '打开新标签',
+  close_current_tab: '关闭标签',
+  extract_images: '提取图片',
+  extract_links: '提取链接',
+  scroll_to_element: '滚动到元素',
 }
 
 const SESSIONS_KEY = 'ai-browser-sessions'
+const SAVED_SCRIPTS_KEY = 'ai-browser-scripts'
 
 // 会话管理
 function loadSessions() {
@@ -30,6 +39,18 @@ function createSessionId() {
   return 'sess_' + Date.now() + '_' + Math.random().toString(36).substring(2, 8)
 }
 
+// 已保存的脚本管理
+function loadSavedScripts() {
+  try {
+    const data = localStorage.getItem(SAVED_SCRIPTS_KEY)
+    return data ? JSON.parse(data) : []
+  } catch { return [] }
+}
+
+function saveSavedScripts(scripts) {
+  localStorage.setItem(SAVED_SCRIPTS_KEY, JSON.stringify(scripts))
+}
+
 export default function UnifiedPanel({ config }) {
   const [messages, setMessages] = useState([])
   const [input, setInput] = useState('')
@@ -37,6 +58,8 @@ export default function UnifiedPanel({ config }) {
   const [sessions, setSessions] = useState(() => loadSessions())
   const [activeSessionId, setActiveSessionId] = useState(null)
   const [showSessionList, setShowSessionList] = useState(false)
+  const [savedScripts, setSavedScripts] = useState(() => loadSavedScripts())
+  const [showSavedScripts, setShowSavedScripts] = useState(false)
   const messagesEndRef = useRef(null)
   const nextIdRef = useRef(1)
   const chatHistoryRef = useRef([]) // 发送给AI的对话历史
@@ -259,7 +282,7 @@ export default function UnifiedPanel({ config }) {
       await window.api.unified.chatStream(
         chatHistoryRef.current,
         config,
-        20,
+        config.maxToolRounds || 20,
       )
       // 不再添加 [completed] 占位符
       // AI的实际回复内容通过 handleFinalReply 事件获取
@@ -290,6 +313,108 @@ export default function UnifiedPanel({ config }) {
       addMessage({
         role: 'assistant', type: 'error',
         content: `代码执行异常: ${e.message}`,
+      })
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  // 重新注入JS代码（先执行，然后将结果反馈给AI）
+  const handleReInject = async (jsCode) => {
+    if (!jsCode.trim() || loading) return
+
+    setLoading(true)
+    addMessage({ role: 'system', type: 'tool_call', content: '重新注入JS代码' })
+
+    try {
+      const result = await window.api.action.executeJs(jsCode)
+      const resultMsg = result.success
+        ? result.result?.message || '代码执行成功'
+        : `执行失败: ${result.error || '未知错误'}`
+
+      addMessage({
+        role: 'assistant', type: 'tool_execute',
+        content: resultMsg,
+        jsCode,
+        result: result.result,
+        error: result.success ? null : result.error,
+      })
+
+      // 将结果反馈给AI继续对话
+      chatHistoryRef.current.push({
+        role: 'user',
+        content: `我重新执行了以下代码:\n\`\`\`javascript\n${jsCode}\n\`\`\`\n\n执行结果: ${resultMsg}${result.result?.data ? '\n返回数据: ' + JSON.stringify(result.result.data) : ''}\n\n请根据结果继续任务。`,
+      })
+      addMessage({ role: 'user', content: `已重新注入代码并反馈结果给AI` })
+    } catch (e) {
+      addMessage({
+        role: 'assistant', type: 'error',
+        content: `代码执行异常: ${e.message}`,
+      })
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  // 保存JS代码
+  const handleSaveScript = (jsCode) => {
+    if (!jsCode.trim()) return
+
+    const name = jsCode.trim().substring(0, 60).replace(/\n/g, ' ')
+    const newScript = {
+      id: 'script_' + Date.now(),
+      name: name.length < 60 ? name : name + '...',
+      code: jsCode,
+      savedAt: Date.now(),
+    }
+
+    setSavedScripts(prev => {
+      const updated = [newScript, ...prev]
+      saveSavedScripts(updated)
+      return updated
+    })
+  }
+
+  // 删除已保存的脚本
+  const handleDeleteScript = (scriptId) => {
+    setSavedScripts(prev => {
+      const updated = prev.filter(s => s.id !== scriptId)
+      saveSavedScripts(updated)
+      return updated
+    })
+  }
+
+  // 注入已保存的脚本
+  const handleInjectSaved = async (script) => {
+    if (loading) return
+    setShowSavedScripts(false)
+
+    setLoading(true)
+    addMessage({ role: 'system', type: 'tool_call', content: `注入已保存脚本: ${script.name}` })
+
+    try {
+      const result = await window.api.action.executeJs(script.code)
+      const resultMsg = result.success
+        ? result.result?.message || '代码执行成功'
+        : `执行失败: ${result.error || '未知错误'}`
+
+      addMessage({
+        role: 'assistant', type: 'tool_execute',
+        content: resultMsg,
+        jsCode: script.code,
+        result: result.result,
+        error: result.success ? null : result.error,
+      })
+
+      chatHistoryRef.current.push({
+        role: 'user',
+        content: `我执行了保存的脚本 "${script.name}":\n\`\`\`javascript\n${script.code}\n\`\`\`\n\n执行结果: ${resultMsg}${result.result?.data ? '\n返回数据: ' + JSON.stringify(result.result.data) : ''}\n\n请根据结果继续任务。`,
+      })
+      addMessage({ role: 'user', content: `已注入脚本 "${script.name}" 并反馈结果给AI` })
+    } catch (e) {
+      addMessage({
+        role: 'assistant', type: 'error',
+        content: `脚本执行异常: ${e.message}`,
       })
     } finally {
       setLoading(false)
@@ -407,14 +532,31 @@ export default function UnifiedPanel({ config }) {
             <div className="code-block-with-replay">
               <div className="code-block-header">
                 <span className="code-block-label">执行的代码</span>
-                <button
-                  className="code-replay-btn"
-                  onClick={() => handleReExecute(msg.jsCode)}
-                  disabled={loading}
-                  title="重新执行这段代码"
-                >
-                  重新执行
-                </button>
+                <div className="code-block-actions">
+                  <button
+                    className="code-replay-btn"
+                    onClick={() => handleReExecute(msg.jsCode)}
+                    disabled={loading}
+                    title="重新执行这段代码"
+                  >
+                    重新执行
+                  </button>
+                  <button
+                    className="code-replay-btn code-replay-inject"
+                    onClick={() => handleReInject(msg.jsCode)}
+                    disabled={loading}
+                    title="重新注入并反馈结果给AI继续对话"
+                  >
+                    重新注入
+                  </button>
+                  <button
+                    className="code-replay-btn code-replay-save"
+                    onClick={() => handleSaveScript(msg.jsCode)}
+                    title="保存代码到脚本库"
+                  >
+                    保存代码
+                  </button>
+                </div>
               </div>
               <pre className="code-preview">{msg.jsCode}</pre>
             </div>
@@ -459,6 +601,9 @@ export default function UnifiedPanel({ config }) {
           <button className="toolbar-btn" onClick={() => setShowSessionList(!showSessionList)} title="历史会话">
             历史 ({sessions.length})
           </button>
+          <button className="toolbar-btn" onClick={() => setShowSavedScripts(!showSavedScripts)} title="已保存的脚本">
+            脚本 ({savedScripts.length})
+          </button>
           {loading && (
             <button className="toolbar-btn stop-btn" onClick={handleAbort}>
               停止
@@ -493,6 +638,41 @@ export default function UnifiedPanel({ config }) {
                 className="session-delete-btn"
                 onClick={(e) => handleDeleteSession(s.id, e)}
                 title="删除会话"
+              >
+                ✗
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* 已保存的脚本列表 */}
+      {showSavedScripts && (
+        <div className="session-list">
+          <div className="session-list-header">
+            <span>已保存的脚本 ({savedScripts.length})</span>
+            <span style={{ fontSize: 11, color: 'var(--text-secondary)' }}>
+              点击注入到页面并反馈给AI
+            </span>
+          </div>
+          {savedScripts.length === 0 && (
+            <div className="session-empty">暂无保存的脚本，在AI生成的代码块中点击"保存代码"即可保存</div>
+          )}
+          {savedScripts.map(script => (
+            <div
+              key={script.id}
+              className="session-item script-item"
+              onClick={() => handleInjectSaved(script)}
+            >
+              <div className="session-item-title">{script.name}</div>
+              <div className="session-item-meta">
+                <span>{new Date(script.savedAt).toLocaleString()}</span>
+                <span>{script.code.length} 字符</span>
+              </div>
+              <button
+                className="session-delete-btn"
+                onClick={(e) => { e.stopPropagation(); handleDeleteScript(script.id) }}
+                title="删除脚本"
               >
                 ✗
               </button>

@@ -9,6 +9,8 @@ export default function App() {
   const [url, setUrl] = useState('')
   const [pageTitle, setPageTitle] = useState('')
   const [isLoading, setIsLoading] = useState(false)
+  const [canGoBack, setCanGoBack] = useState(false)
+  const [canGoForward, setCanGoForward] = useState(false)
   const [activeTab, setActiveTab] = useState('assistant')
   const [sidebarRatio, setSidebarRatio] = useState(0.35)
   const [sidebarVisible, setSidebarVisible] = useState(true)
@@ -41,7 +43,7 @@ export default function App() {
   })
 
   function defaultConfig() {
-    return { provider: 'openai', apiKey: '', baseUrl: 'https://api.openai.com/v1', model: 'gpt-4o', streaming: false }
+    return { provider: 'openai', apiKey: '', baseUrl: 'https://api.openai.com/v1', model: 'gpt-4o', streaming: false, maxToolRounds: 20 }
   }
 
   useEffect(() => { localStorage.setItem(STORAGE_KEY, JSON.stringify(config)) }, [config])
@@ -57,21 +59,29 @@ export default function App() {
         if (exists) {
           return prev.map(t => t.id === data.id ? { ...t, ...data } : t)
         } else {
-          // 新标签页（由 setWindowOpenHandler 创建）
           return [...prev, { id: data.id, url: '', title: '', loading: false, active: false, ...data }]
         }
       })
-      // 如果是活跃标签，同步URL和标题
       if (data.id === activeTabId) {
         if (data.url) setUrl(data.url)
         if (data.title !== undefined) setPageTitle(data.title)
         if (data.loading !== undefined) setIsLoading(data.loading)
       }
-      // 新标签页自动变为活跃
       if (data.active) {
         setActiveTabId(data.id)
         if (data.url) setUrl(data.url)
         if (data.title) setPageTitle(data.title)
+      }
+    })
+    return unsub
+  }, [activeTabId])
+
+  // 监听导航状态变化
+  useEffect(() => {
+    const unsub = window.api.browser.onNavState((data) => {
+      if (data.tabId === activeTabId) {
+        setCanGoBack(data.canGoBack)
+        setCanGoForward(data.canGoForward)
       }
     })
     return unsub
@@ -88,6 +98,8 @@ export default function App() {
         setPageTitle(active.title || '')
       }
     })
+    window.api.browser.canGoBack().then(setCanGoBack)
+    window.api.browser.canGoForward().then(setCanGoForward)
   }, [])
 
   // 定期同步活跃标签状态
@@ -133,6 +145,10 @@ export default function App() {
     setActiveTabId(tabId)
     const tab = tabs.find(t => t.id === tabId)
     if (tab) { setUrl(tab.url || ''); setPageTitle(tab.title || '') }
+    const back = await window.api.browser.canGoBack()
+    const forward = await window.api.browser.canGoForward()
+    setCanGoBack(back)
+    setCanGoForward(forward)
   }
 
   // 标签拖拽排序
@@ -311,8 +327,8 @@ export default function App() {
       {/* 导航栏 */}
       <div className="navbar">
         <div className="nav-nav-btns">
-          <button className="nav-btn" onClick={handleBack} title="后退">←</button>
-          <button className="nav-btn" onClick={handleForward} title="前进">→</button>
+          <button className="nav-btn" onClick={handleBack} disabled={!canGoBack} title="后退">←</button>
+          <button className="nav-btn" onClick={handleForward} disabled={!canGoForward} title="前进">→</button>
           <button className="nav-btn" onClick={isLoading ? handleStop : handleReload} title={isLoading ? '停止' : '刷新'}>
             {isLoading ? '✕' : '↻'}
           </button>

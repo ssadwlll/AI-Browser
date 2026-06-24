@@ -52,6 +52,8 @@ body {
 }
 
 .nav-btn:hover { background: var(--bg-tertiary); color: var(--text-primary); }
+.nav-btn:disabled { opacity: 0.3; cursor: default; }
+.nav-btn:disabled:hover { background: transparent; color: var(--text-secondary); }
 .nav-btn-active { background: var(--bg-tertiary); color: var(--accent) !important; }
 
 /* 地址栏包装器 */
@@ -922,6 +924,25 @@ body {
   font-size: 12px;
 }
 
+.session-list-header {
+  padding: 8px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.script-item {
+  border-left: 3px solid #f59e0b;
+}
+
+.script-item:hover {
+  border-left-color: #f59e0b;
+}
+
 .session-item {
   display: flex;
   flex-wrap: wrap;
@@ -1332,6 +1353,11 @@ body {
   color: var(--text-secondary);
 }
 
+.code-block-actions {
+  display: flex;
+  gap: 4px;
+}
+
 .code-block-with-replay .code-preview {
   margin: 0;
   border: none;
@@ -1356,6 +1382,23 @@ body {
 .code-replay-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+.code-replay-inject {
+  background: #10b981;
+}
+
+.code-replay-inject:hover {
+  opacity: 0.85;
+}
+
+.code-replay-save {
+  background: #f59e0b;
+  color: #1a1a2e;
+}
+
+.code-replay-save:hover {
+  opacity: 0.85;
 }
 
 .code-details pre {
