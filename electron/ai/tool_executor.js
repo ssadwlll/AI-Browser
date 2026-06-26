@@ -1,23 +1,23 @@
 /**
- * 工具执行器
- * 负责执行AI调用的各种工具，返回结果
- * 客户端负责执行，AI负责决策
+ * 工具执行器（双引擎架构）
+ * 引擎1: Electron API（click_element, type_text, press_key）— 可靠交互
+ * 引擎2: JS 注入（execute_js 及数据提取工具）— 灵活操作
+ * 不确定性检测: DOM变更感知、循环检测、操作验证
  */
+
+const ElectronEngine = require('./electron_engine')
+const UncertaintyGuard = require('./uncertainty_guard')
 
 class ToolExecutor {
   constructor() {
-    this.maxToolResultLength = 30000 // 工具返回结果最大长度
+    this.maxToolResultLength = 30000
+    this.electronEngine = new ElectronEngine()
+    this.uncertaintyGuard = new UncertaintyGuard()
   }
 
-  /**
-   * 执行工具调用
-   * @param {string} toolName - 工具名称
-   * @param {object} args - 工具参数
-   * @param {object} deps - 依赖注入 { browserView, analyzer, actionExecutor }
-   * @returns {object} - { success, result }
-   */
   async execute(toolName, args, deps) {
     const { browserView, analyzer, actionExecutor, tabManager } = deps
+    const webContents = browserView ? browserView.webContents : null
 
     try {
       switch (toolName) {
@@ -43,7 +43,16 @@ class ToolExecutor {
           return await this._screenshot(browserView)
 
         case 'click_element':
-          return await this._clickElement(browserView, args)
+          // 引擎1: Electron API（sendInputEvent 完整事件链）
+          return await this._clickElement(webContents, args)
+
+        case 'type_text':
+          // 引擎1: Electron API（insertText 可靠输入）
+          return await this._typeText(webContents, args)
+
+        case 'press_key':
+          // 引擎1: Electron API（sendInputEvent 键盘事件）
+          return await this._pressKey(webContents, args)
 
         case 'wait_for_element':
           return await this._waitForElement(browserView, args)
@@ -87,7 +96,6 @@ class ToolExecutor {
       return { success: false, error: '无法获取页面上下文' }
     }
 
-    // 截断过大的DOM摘要
     if (context.domSummary && context.domSummary.length > (args.max_elements || 300)) {
       context.domSummary = context.domSummary.slice(0, args.max_elements || 300)
       context.domSummaryTruncated = true
@@ -97,7 +105,7 @@ class ToolExecutor {
   }
 
   /**
-   * 执行JS代码
+   * 执行JS代码（引擎2: JS注入）
    */
   async _executeJs(browserView, actionExecutor, args) {
     if (!browserView) {
@@ -108,24 +116,55 @@ class ToolExecutor {
       return { success: false, error: '缺少code参数' }
     }
 
+    // 循环检测
+    const loopCheck = this.uncertaintyGuard.checkLoop(args.code)
+    let loopWarning = ''
+    if (loopCheck.isLoop) {
+      loopWarning = this.uncertaintyGuard.getLoopGuidance(loopCheck)
+    }
+
+    // DOM 变更感知：执行前拍快照
+    const beforeSnapshot = await this.uncertaintyGuard.captureDomSnapshot(browserView.webContents)
+
     const result = await actionExecutor.executeInPage(browserView, args.code)
 
+    // DOM 变更感知：执行后对比
+    const afterSnapshot = await this.uncertaintyGuard.captureDomSnapshot(browserView.webContents)
+    const domChanges = this.uncertaintyGuard.detectDomChanges(beforeSnapshot, afterSnapshot)
+
+    // 构建返回结果，附加变更信息
+    const enrichedResult = {
+      ...result,
+      domChanges: domChanges.changed ? {
+        changed: true,
+        details: domChanges.details,
+        urlChanged: domChanges.urlChanged || false,
+        elementCountDelta: domChanges.elementCountDelta || 0,
+      } : { changed: false },
+    }
+
     // 截断过大的结果
-    const resultStr = JSON.stringify(result)
+    const resultStr = JSON.stringify(enrichedResult)
     if (resultStr.length > this.maxToolResultLength) {
       return {
         success: true,
         result: {
-          ...result,
-          data: result.data ? JSON.stringify(result.data).substring(0, 5000) + '...(数据已截断)' : undefined,
+          ...enrichedResult,
+          data: enrichedResult.data ? JSON.stringify(enrichedResult.data).substring(0, 5000) + '...(数据已截断)' : undefined,
           _truncated: true,
           _originalLength: resultStr.length,
         },
         description: args.description || '代码已执行',
+        loopWarning: loopWarning || undefined,
       }
     }
 
-    return { success: true, result, description: args.description || '代码已执行' }
+    return {
+      success: true,
+      result: enrichedResult,
+      description: args.description || '代码已执行',
+      loopWarning: loopWarning || undefined,
+    }
   }
 
   /**
@@ -134,25 +173,21 @@ class ToolExecutor {
   async _getNetworkRequests(analyzer, args) {
     let requests = analyzer.getRequests()
 
-    // 按URL过滤
     if (args.filter_url) {
       const pattern = args.filter_url.toLowerCase()
       requests = requests.filter(r => r.url && r.url.toLowerCase().includes(pattern))
     }
 
-    // 按方法过滤
     if (args.method) {
       const method = args.method.toUpperCase()
       requests = requests.filter(r => r.method === method)
     }
 
-    // 限制数量
     const limit = args.limit || 20
     if (requests.length > limit) {
       requests = requests.slice(0, limit)
     }
 
-    // 精简每个请求的数据，避免过大
     const simplified = requests.map(r => ({
       url: r.url ? r.url.substring(0, 500) : '',
       method: r.method,
@@ -160,10 +195,8 @@ class ToolExecutor {
       type: r.resourceType,
       mimeType: r.mimeType,
       contentLength: r.contentLength,
-      // 请求头中的关键信息
       hasRequestBody: !!r.requestBody,
       requestBodyPreview: r.requestBody ? JSON.stringify(r.requestBody).substring(0, 2000) : null,
-      // 响应体预览
       responseBodyPreview: r.responseBody ? r.responseBody.substring(0, 2000) : null,
     }))
 
@@ -187,6 +220,9 @@ class ToolExecutor {
       url = 'https://' + url
     }
 
+    // 重置不确定性检测状态（新页面）
+    this.uncertaintyGuard.reset()
+
     return new Promise((resolve) => {
       browserView.webContents.loadURL(url)
       browserView.webContents.once('did-finish-load', () => {
@@ -202,7 +238,6 @@ class ToolExecutor {
         resolve({ success: false, error: `页面加载失败: ${desc}` })
       })
 
-      // 超时保护
       setTimeout(() => {
         resolve({
           success: true,
@@ -291,7 +326,6 @@ class ToolExecutor {
         result: {
           message: '截图成功',
           size: `${image.getSize().width}x${image.getSize().height}`,
-          // 返回base64，前端可显示
           base64: base64.substring(0, 100) + '...(base64数据过大，仅显示前100字符)',
         },
       }
@@ -299,11 +333,14 @@ class ToolExecutor {
       return { success: false, error: e.message }
     }
   }
-/**
-   * 点击元素
+
+  /**
+   * 点击元素（引擎1: Electron API sendInputEvent）
+   * 使用完整鼠标事件链: mouseMove → mouseDown → mouseUp
+   * 替代 JS .click()，解决事件链不完整问题
    */
-  async _clickElement(browserView, args) {
-    if (!browserView) {
+  async _clickElement(webContents, args) {
+    if (!webContents) {
       return { success: false, error: '没有打开的页面' }
     }
     if (!args.selector) {
@@ -312,41 +349,108 @@ class ToolExecutor {
 
     const index = args.index || 0
     const waitAfter = args.wait_after_click || 500
-    const selector = args.selector.replace(/'/g, "\\'")
 
-    try {
-      const result = await browserView.webContents.executeJavaScript(`
-        (function() {
-          const els = document.querySelectorAll('${selector}')
-          if (els.length === 0) {
-            return { success: false, error: '未找到匹配元素: ${selector}' }
-          }
-          const idx = ${index}
-          if (idx >= els.length) {
-            return { success: false, error: '索引越界: 共' + els.length + '个元素，请求第' + (idx + 1) + '个' }
-          }
-          const el = els[idx]
-          const tag = el.tagName.toLowerCase()
-          const text = (el.textContent || '').trim().substring(0, 100)
-          const id = el.id || ''
-          const className = el.className || ''
-          el.scrollIntoView({ behavior: 'smooth', block: 'center' })
-          el.click()
-          return {
-            success: true,
-            element: { tag, id, className, text, index: idx },
-            totalMatching: els.length,
-          }
-        })()
-      `)
+    // 循环检测
+    const loopCheck = this.uncertaintyGuard.checkLoop(`click:${args.selector}:${index}`)
+    let loopWarning = ''
+    if (loopCheck.isLoop) {
+      loopWarning = this.uncertaintyGuard.getLoopGuidance(loopCheck)
+    }
 
-      if (result && result.success && waitAfter > 0) {
-        await new Promise(resolve => setTimeout(resolve, waitAfter))
-      }
+    // 操作前 DOM 快照
+    const beforeSnapshot = await this.uncertaintyGuard.captureDomSnapshot(webContents)
 
-      return { success: true, result, description: `已点击元素: ${args.selector}` }
-    } catch (e) {
-      return { success: false, error: e.message }
+    // 使用 Electron API 引擎点击
+    const clickResult = await this.electronEngine.clickElement(webContents, args.selector, index)
+
+    if (!clickResult.success) {
+      return { success: false, error: clickResult.error, loopWarning: loopWarning || undefined }
+    }
+
+    // 等待
+    if (waitAfter > 0) {
+      await new Promise(resolve => setTimeout(resolve, waitAfter))
+    }
+
+    // 操作结果验证
+    const verification = await this.uncertaintyGuard.verifyOperation(
+      webContents, 'click', { selector: args.selector }, beforeSnapshot
+    )
+
+    return {
+      success: true,
+      result: {
+        ...clickResult,
+        verification: verification.verified
+          ? { verified: true, message: verification.message }
+          : { verified: false, message: verification.message, suggestion: '点击后页面无变化，可能需要换一种交互方式或检查元素是否可点击' },
+        domChanges: verification.changes,
+      },
+      description: `已点击元素: ${args.selector} (sendInputEvent)`,
+      loopWarning: loopWarning || undefined,
+    }
+  }
+
+  /**
+   * 输入文本（引擎1: Electron API insertText）
+   * 替代 JS .value=，触发完整 input/change 事件
+   */
+  async _typeText(webContents, args) {
+    if (!webContents) {
+      return { success: false, error: '没有打开的页面' }
+    }
+    if (!args.selector) {
+      return { success: false, error: '缺少selector参数' }
+    }
+    if (!args.text) {
+      return { success: false, error: '缺少text参数' }
+    }
+
+    const index = args.index || 0
+    const clearFirst = args.clear_first !== false
+
+    // 使用 Electron API 引擎输入
+    const result = await this.electronEngine.typeText(webContents, args.selector, args.text, clearFirst, index)
+
+    if (!result.success) {
+      return { success: false, error: result.error }
+    }
+
+    // 操作验证
+    const verification = await this.uncertaintyGuard.verifyOperation(
+      webContents, 'type',
+      { selector: args.selector, expectedValue: args.text }
+    )
+
+    return {
+      success: true,
+      result: {
+        ...result,
+        verification: verification.verified
+          ? { verified: true, message: verification.message }
+          : { verified: false, message: verification.message },
+      },
+      description: `已输入文本: "${args.text.substring(0, 50)}" (insertText)`,
+    }
+  }
+
+  /**
+   * 按键（引擎1: Electron API sendInputEvent）
+   */
+  async _pressKey(webContents, args) {
+    if (!webContents) {
+      return { success: false, error: '没有打开的页面' }
+    }
+    if (!args.key) {
+      return { success: false, error: '缺少key参数' }
+    }
+
+    await this.electronEngine.pressKey(webContents, args.key)
+
+    return {
+      success: true,
+      result: { key: args.key, message: `已按下: ${args.key}` },
+      description: `按键: ${args.key}`,
     }
   }
 
@@ -367,7 +471,6 @@ class ToolExecutor {
     const pollInterval = 200
 
     const startTime = Date.now()
-    let found = false
     let lastError = ''
 
     while (Date.now() - startTime < timeout) {
@@ -387,7 +490,6 @@ class ToolExecutor {
         `)
 
         if (result && result.found) {
-          found = true
           return {
             success: true,
             result: {
@@ -532,7 +634,6 @@ class ToolExecutor {
       let images = await browserView.webContents.executeJavaScript(`
         (function() {
           const results = []
-          const baseUrl = window.location.origin
           const seen = new Set()
 
           document.querySelectorAll('img').forEach(img => {
@@ -555,7 +656,6 @@ class ToolExecutor {
             }
           })
 
-          // 也收集 picture 标签中的 source
           document.querySelectorAll('picture source').forEach(source => {
             const srcset = source.getAttribute('srcset')
             if (srcset && !seen.has(srcset)) {

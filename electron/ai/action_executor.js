@@ -224,7 +224,7 @@ ${JSON.stringify(pageContext?.domSummary || [], null, 2)}`
   }
 
   /**
-   * 在BrowserView中执行JS代码（支持页面导航感知）
+   * 在BrowserView中执行JS代码（支持页面导航感知 + DOM变更检测）
    */
   async executeInPage(browserView, jsCode) {
     if (!browserView) {
@@ -233,6 +233,9 @@ ${JSON.stringify(pageContext?.domSummary || [], null, 2)}`
 
     const webContents = browserView.webContents
     const urlBefore = webContents.getURL()
+
+    // DOM 变更检测：执行前拍快照
+    const domBefore = await this._captureDomFingerprint(webContents)
 
     try {
       // 先等待页面加载完成（避免在页面加载中执行）
@@ -267,7 +270,18 @@ ${JSON.stringify(pageContext?.domSummary || [], null, 2)}`
           'window.__actionResult || null'
         )
         if (result) {
-          return result
+          // DOM 变更检测：执行后对比
+          const domAfter = await this._captureDomFingerprint(webContents)
+          const domChanged = !domBefore || !domAfter || domBefore.hash !== domAfter.hash
+
+          return {
+            ...result,
+            domChanged,
+            domChanges: domChanged ? {
+              elementCountBefore: domBefore?.elementCount || 0,
+              elementCountAfter: domAfter?.elementCount || 0,
+            } : null,
+          }
         }
         // 每次检查前也看看是否导航了
         if (webContents.getURL() !== urlAfter || webContents.isLoading()) {
@@ -283,7 +297,19 @@ ${JSON.stringify(pageContext?.domSummary || [], null, 2)}`
         await new Promise(r => setTimeout(r, 300))
       }
 
-      return { success: true, message: '代码已执行（未返回明确结果）' }
+      // DOM 变更检测：超时后也检查
+      const domAfter = await this._captureDomFingerprint(webContents)
+      const domChanged = !domBefore || !domAfter || domBefore.hash !== domAfter.hash
+
+      return {
+        success: true,
+        message: '代码已执行（未返回明确结果）',
+        domChanged,
+        domChanges: domChanged ? {
+          elementCountBefore: domBefore?.elementCount || 0,
+          elementCountAfter: domAfter?.elementCount || 0,
+        } : null,
+      }
     } catch (e) {
       // 执行出错，可能是页面导航导致的上下文丢失
       if (webContents.isLoading()) {
@@ -297,6 +323,28 @@ ${JSON.stringify(pageContext?.domSummary || [], null, 2)}`
         }
       }
       return { success: false, error: e.message }
+    }
+  }
+
+  /**
+   * 捕获 DOM 指纹（轻量级快照，用于检测页面内容是否变化）
+   */
+  async _captureDomFingerprint(webContents) {
+    try {
+      return await webContents.executeJavaScript(`
+        (function() {
+          const all = document.querySelectorAll('*')
+          const bodyHTML = document.body ? document.body.innerHTML : ''
+          let hash = 0
+          const step = Math.max(1, Math.floor(bodyHTML.length / 5000))
+          for (let i = 0; i < bodyHTML.length; i += step) {
+            hash = ((hash << 5) - hash + bodyHTML.charCodeAt(i)) | 0
+          }
+          return { elementCount: all.length, hash, url: location.href }
+        })()
+      `)
+    } catch (e) {
+      return null
     }
   }
 

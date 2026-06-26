@@ -138,7 +138,7 @@ const TOOL_DEFINITIONS = [
     type: 'function',
     function: {
       name: 'click_element',
-      description: '点击页面上的指定元素。通过CSS选择器定位元素并模拟点击。用于与页面交互、触发按钮、打开链接等。',
+      description: '点击页面上的指定元素。使用Electron原生事件（mouseMove+mouseDown+mouseUp完整事件链），比JS .click()更可靠。用于与页面交互、触发按钮、打开链接等。',
       parameters: {
         type: 'object',
         properties: {
@@ -156,6 +156,52 @@ const TOOL_DEFINITIONS = [
           },
         },
         required: ['selector'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'type_text',
+      description: '在指定输入框中输入文本。使用Electron原生insertText，触发完整input/change事件链，比JS .value=更可靠。用于填写表单、输入搜索词等。',
+      parameters: {
+        type: 'object',
+        properties: {
+          selector: {
+            type: 'string',
+            description: 'CSS选择器，定位输入框元素',
+          },
+          text: {
+            type: 'string',
+            description: '要输入的文本内容',
+          },
+          clear_first: {
+            type: 'boolean',
+            description: '是否先清空已有内容，默认true',
+          },
+          index: {
+            type: 'number',
+            description: '当选择器匹配多个元素时，指定第几个（从0开始），默认0',
+          },
+        },
+        required: ['selector', 'text'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'press_key',
+      description: '模拟键盘按键。使用Electron原生键盘事件。用于按下Enter提交、Escape关闭、Tab切换焦点等。',
+      parameters: {
+        type: 'object',
+        properties: {
+          key: {
+            type: 'string',
+            description: '按键名称，如 "Enter", "Escape", "Tab", "Backspace", "ArrowDown" 等',
+          },
+        },
+        required: ['key'],
       },
     },
   },

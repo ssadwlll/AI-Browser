@@ -23,6 +23,11 @@ class AgentLoop {
     this.currentRound = 0
     this.taskDescription = ''
     this.onProgress = null   // 进度回调 (round, phase, data)
+    // 循环检测
+    this.actionHashes = []   // 最近操作哈希记录
+    this.maxActionHashes = 10
+    this.loopWarningThreshold = 3  // 重复3次开始警告
+    this.loopHardThreshold = 5      // 重复5次强制警告
   }
 
   /**
@@ -140,6 +145,19 @@ class AgentLoop {
           continue
         }
 
+        // 循环检测：检查是否反复生成相同代码
+        const loopCheck = this._checkLoop(jsCode)
+        let loopGuidance = ''
+        if (loopCheck.isLoop) {
+          loopGuidance = loopCheck.message
+          sendEvent('agent:round', {
+            round: this.currentRound,
+            phase: 'loop_warning',
+            message: loopCheck.message,
+            repeatCount: loopCheck.repeatCount,
+          })
+        }
+
         // 阶段4: 执行JS代码
         sendEvent('agent:round', {
           round: this.currentRound,
@@ -185,9 +203,28 @@ class AgentLoop {
         }
 
         // 将执行结果反馈给AI，让AI决定下一步
+        let feedbackContent = `代码执行结果:\n${resultStr}${contextUpdate}`
+
+        // 附加 DOM 变更信息
+        if (result.domChanged) {
+          feedbackContent += `\n\n📝 页面DOM已发生变化（元素数量: ${result.domChanges?.elementCountBefore || '?'} → ${result.domChanges?.elementCountAfter || '?'}），请基于最新页面状态继续操作。`
+        }
+
+        // 附加循环检测警告
+        if (loopGuidance) {
+          feedbackContent += `\n\n${loopGuidance}`
+        }
+
+        // 附加操作验证建议
+        if (result.success && !result.navigated && !result.domChanged) {
+          feedbackContent += `\n\n💡 提示：代码已执行但页面无明显变化，请检查操作是否生效。可能需要换一种方式或检查元素状态。`
+        }
+
+        feedbackContent += `\n\n请根据执行结果判断任务进度。如果页面发生了导航，请基于新页面的DOM结构继续操作。如果任务已完成，请回复 [TASK_COMPLETE] 并给出总结。如果需要继续操作，请生成下一步的JavaScript代码。`
+
         this.messages.push({
           role: 'user',
-          content: `代码执行结果:\n${resultStr}${contextUpdate}\n\n请根据执行结果判断任务进度。如果页面发生了导航，请基于新页面的DOM结构继续操作。如果任务已完成，请回复 [TASK_COMPLETE] 并给出总结。如果需要继续操作，请生成下一步的JavaScript代码。`,
+          content: feedbackContent,
         })
 
         this._trimMessages()
@@ -255,14 +292,21 @@ class AgentLoop {
 当任务已经完成时，在回复中包含 [TASK_COMPLETE] 标记，并给出任务总结。
 例如: "[TASK_COMPLETE] 已成功提取页面所有商品数据，共获取25条记录。"
 
+## 系统能力
+1. 系统会在代码执行前后检测DOM变化和页面导航，将变化信息反馈给你
+2. 系统会检测你是否反复生成相同代码（循环检测），连续重复3次会警告，5次强制要求换方法
+3. 如果代码执行后页面无变化，系统会提示你检查操作是否生效
+
 ## 重要原则
 - 每轮只做一步操作，不要试图一次完成所有步骤
-- 如果上一步执行失败，分析原因并调整策略
+- 如果上一步执行失败，分析原因并调整策略，不要反复尝试相同代码
 - 如果页面需要等待加载，使用setTimeout或MutationObserver
 - 提取大量数据时，分批提取避免超时
 - 始终检查元素是否存在再操作
 - 如果代码导致页面导航（点击链接、提交表单等），系统会自动等待新页面加载并反馈新页面DOM结构，你可以基于新结构继续操作
-- 导航后页面JS环境会重置，之前注入的变量和函数都会丢失，需要重新注入`
+- 导航后页面JS环境会重置，之前注入的变量和函数都会丢失，需要重新注入
+- 如果收到DOM变化提示，说明你的操作已生效，请基于最新页面状态继续
+- 如果收到"页面无变化"提示，说明操作可能未生效，请换一种方式`
   }
 
   /**
@@ -364,6 +408,55 @@ ${JSON.stringify(pageContext?.domSummary || [], null, 2)}
     this.messages = []
     this.currentRound = 0
     this.taskDescription = ''
+    this.actionHashes = []  // 清空循环检测历史
+  }
+
+  /**
+   * 检测是否反复生成相同代码（循环检测）
+   * @param {string} code - AI 生成的 JS 代码
+   * @returns {object} - { isLoop, severity, repeatCount, message }
+   */
+  _checkLoop(code) {
+    const normalized = code.replace(/\s+/g, ' ').trim().substring(0, 200)
+    let hash = 0
+    for (let i = 0; i < normalized.length; i++) {
+      hash = ((hash << 5) - hash + normalized.charCodeAt(i)) | 0
+    }
+
+    this.actionHashes.push(hash)
+    if (this.actionHashes.length > this.maxActionHashes) {
+      this.actionHashes.shift()
+    }
+
+    // 统计最近连续相同操作次数
+    let repeatCount = 0
+    for (let i = this.actionHashes.length - 1; i >= 0; i--) {
+      if (this.actionHashes[i] === hash) {
+        repeatCount++
+      } else {
+        break
+      }
+    }
+
+    if (repeatCount >= this.loopHardThreshold) {
+      return {
+        isLoop: true,
+        severity: 'hard',
+        repeatCount,
+        message: `⚠️ 检测到代码已重复 ${repeatCount} 次！AI 可能陷入了循环。必须立即改变策略：\n1. 重新调用 collect_page_context 获取最新页面状态\n2. 分析之前的操作为何无效\n3. 尝试完全不同的方法\n4. 检查是否需要先等待页面加载或元素出现`,
+      }
+    }
+
+    if (repeatCount >= this.loopWarningThreshold) {
+      return {
+        isLoop: true,
+        severity: 'warning',
+        repeatCount,
+        message: `⚠️ 此代码已重复 ${repeatCount} 次，可能需要换一种方式。请重新分析页面状态，考虑是否有遗漏的步骤或前置条件。`,
+      }
+    }
+
+    return { isLoop: false, repeatCount, message: '' }
   }
 
   /**
