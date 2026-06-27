@@ -321,8 +321,26 @@ class LLMProvider {
 
       let buffer = ''
       const chunks = []
+      let timeoutId = null
+
+      // 设置超时（5分钟）
+      timeoutId = setTimeout(() => {
+        request.abort()
+        reject(new Error('请求超时（5分钟）'))
+      }, 300000)
 
       request.on('response', (response) => {
+        // 检查 HTTP 状态码
+        if (response.statusCode >= 400) {
+          clearTimeout(timeoutId)
+          let errorData = ''
+          response.on('data', (chunk) => { errorData += chunk.toString() })
+          response.on('end', () => {
+            reject(new Error(`HTTP ${response.statusCode}: ${errorData || '请求失败'}`))
+          })
+          return
+        }
+
         response.on('data', (chunk) => {
           buffer += chunk.toString()
           const lines = buffer.split('\n')
@@ -343,6 +361,7 @@ class LLMProvider {
           }
         })
         response.on('end', () => {
+          clearTimeout(timeoutId)
           if (buffer.trim()) {
             const trimmed = buffer.trim()
             if (trimmed.startsWith('data: ')) {
@@ -354,9 +373,17 @@ class LLMProvider {
           }
           resolve(chunks)
         })
+        response.on('error', (err) => {
+          clearTimeout(timeoutId)
+          reject(err)
+        })
       })
 
-      request.on('error', reject)
+      request.on('error', (err) => {
+        clearTimeout(timeoutId)
+        reject(err)
+      })
+
       for (const [k, v] of Object.entries(headers)) {
         request.setHeader(k, v)
       }

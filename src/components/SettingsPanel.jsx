@@ -113,6 +113,35 @@ export default function SettingsPanel({ config, setConfig }) {
         <div>API Key: {config.apiKey ? '已配置 (' + config.apiKey.slice(0, 6) + '...)' : '未配置'}</div>
         <div>流式输出: {config.streaming ? '已开启' : '已关闭'}</div>
         <div>最大工具调用轮次: {config.maxToolRounds || 20}</div>
+        <div>管理后台: {config.adminServerUrl || '未配置'}</div>
+        <div>后台Token: {config.adminToken ? '已配置 (' + config.adminToken.slice(0, 10) + '...)' : '未配置'}</div>
+      </div>
+
+      <div className="section-title" style={{ marginTop: 20 }}>管理后台配置</div>
+
+      <div className="form-group">
+        <label className="form-label">后台服务器地址</label>
+        <input
+          className="form-input"
+          type="text"
+          value={config.adminServerUrl || ''}
+          onChange={(e) => handleChange('adminServerUrl', e.target.value)}
+          placeholder="http://localhost:3001"
+        />
+      </div>
+
+      <div className="form-group">
+        <label className="form-label">后台 Token</label>
+        <input
+          className="form-input"
+          type="password"
+          value={config.adminToken || ''}
+          onChange={(e) => handleChange('adminToken', e.target.value)}
+          placeholder="登录后台后获取的 Token"
+        />
+        <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 4 }}>
+          在管理后台 http://localhost:3001 登录后获取 Token，填入此处即可上传脚本到脚本中心
+        </div>
       </div>
 
       <div style={{ marginTop: 16, fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.8 }}>

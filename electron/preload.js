@@ -16,6 +16,7 @@ contextBridge.exposeInMainWorld('api', {
     canGoBack: () => ipcRenderer.invoke('browser:can-go-back'),
     canGoForward: () => ipcRenderer.invoke('browser:can-go-forward'),
     openExternal: (url) => ipcRenderer.invoke('browser:open-external', url),
+    installTampermonkey: ({ name, description, code, urlPattern }) => ipcRenderer.invoke('browser:install-tampermonkey', { name, description, code, urlPattern }),
     resize: (ratio) => ipcRenderer.send('browser:resize', { browserRatio: ratio }),
     togglePanel: (visible) => ipcRenderer.invoke('panel:toggle', { visible }),
     onNavState: (callback) => {
@@ -86,6 +87,17 @@ contextBridge.exposeInMainWorld('api', {
     getContext: () => ipcRenderer.invoke('action:get-context'),
     clearSession: () => ipcRenderer.invoke('action:clear-session'),
     getSession: () => ipcRenderer.invoke('action:get-session'),
+    // 自动注入脚本管理
+    addAutoInject: (name, code, urlPattern) => ipcRenderer.invoke('action:add-auto-inject', { name, code, urlPattern }),
+    removeAutoInject: (scriptId) => ipcRenderer.invoke('action:remove-auto-inject', { scriptId }),
+    toggleAutoInject: (scriptId) => ipcRenderer.invoke('action:toggle-auto-inject', { scriptId }),
+    getAutoInjectScripts: () => ipcRenderer.invoke('action:get-auto-inject-scripts'),
+    runAutoInject: () => ipcRenderer.invoke('action:run-auto-inject'),
+    onAutoInjectExecuted: (callback) => {
+      const handler = (e, data) => callback(data)
+      ipcRenderer.on('auto-inject:executed', handler)
+      return () => ipcRenderer.removeListener('auto-inject:executed', handler)
+    },
   },
   // 统一AI工具调用（核心：AI决策，客户端执行）
   unified: {
@@ -127,6 +139,19 @@ contextBridge.exposeInMainWorld('api', {
       ipcRenderer.on('unified:done', handler)
       return () => ipcRenderer.removeListener('unified:done', handler)
     },
+  },
+  // 管理后台 API
+  admin: {
+    uploadScript: ({ serverUrl, token, name, code, description, categoryId }) =>
+      ipcRenderer.invoke('admin:upload-script', { serverUrl, token, name, code, description, categoryId }),
+    getScripts: ({ serverUrl, token, page, keyword, category }) =>
+      ipcRenderer.invoke('admin:get-scripts', { serverUrl, token, page, keyword, category }),
+    getScriptDetail: ({ serverUrl, token, id }) =>
+      ipcRenderer.invoke('admin:get-script-detail', { serverUrl, token, id }),
+    getCategories: ({ serverUrl, token }) =>
+      ipcRenderer.invoke('admin:get-categories', { serverUrl, token }),
+    login: ({ serverUrl, username, password }) =>
+      ipcRenderer.invoke('admin:login', { serverUrl, username, password }),
   },
   // 智能体
   agent: {

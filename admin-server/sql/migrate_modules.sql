@@ -1,0 +1,17 @@
+USE aibrowser;
+
+-- Add params columns to scripts table
+ALTER TABLE scripts ADD COLUMN IF NOT EXISTS params_schema JSON;
+ALTER TABLE scripts ADD COLUMN IF NOT EXISTS params_data JSON;
+
+-- Create script_modules table
+CREATE TABLE IF NOT EXISTS script_modules (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  script_id INT NOT NULL,
+  name VARCHAR(100) NOT NULL,
+  code LONGTEXT NOT NULL,
+  load_order INT DEFAULT 0,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  FOREIGN KEY (script_id) REFERENCES scripts(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

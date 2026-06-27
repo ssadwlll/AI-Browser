@@ -43,7 +43,7 @@ export default function App() {
   })
 
   function defaultConfig() {
-    return { provider: 'openai', apiKey: '', baseUrl: 'https://api.openai.com/v1', model: 'gpt-4o', streaming: false, maxToolRounds: 20 }
+    return { provider: 'openai', apiKey: '', baseUrl: 'https://api.openai.com/v1', model: 'gpt-4o', streaming: false, maxToolRounds: 20, adminServerUrl: 'http://localhost:3001', adminToken: '' }
   }
 
   useEffect(() => { localStorage.setItem(STORAGE_KEY, JSON.stringify(config)) }, [config])

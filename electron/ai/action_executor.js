@@ -8,6 +8,7 @@ class ActionExecutor {
     this.maxHistory = 50
     this.sessionMessages = []  // 会话上下文（system + 多轮对话）
     this.maxSessionMessages = 20  // 最多保留的上下文消息数
+    this.autoInjectScripts = []  // 自动注入脚本（页面加载后自动执行）
   }
 
   /**
@@ -367,6 +368,108 @@ ${JSON.stringify(pageContext?.domSummary || [], null, 2)}`
 
   clearHistory() {
     this.history = []
+  }
+
+  // ============ 自动注入脚本管理 ============
+
+  /**
+   * 添加自动注入脚本（页面加载后自动执行）
+   * @param {string} name - 脚本名称
+   * @param {string} code - JS 代码
+   * @param {string} urlPattern - URL 匹配模式（支持 * 通配符，空则匹配所有页面）
+   */
+  addAutoInjectScript(name, code, urlPattern = '*') {
+    const script = {
+      id: 'auto_' + Date.now(),
+      name: name || code.substring(0, 50).replace(/\n/g, ' '),
+      code,
+      urlPattern,
+      enabled: true,
+      createdAt: Date.now(),
+      injectCount: 0,
+    }
+    this.autoInjectScripts.push(script)
+    return script
+  }
+
+  /**
+   * 移除自动注入脚本
+   */
+  removeAutoInjectScript(scriptId) {
+    const idx = this.autoInjectScripts.findIndex(s => s.id === scriptId)
+    if (idx >= 0) {
+      const removed = this.autoInjectScripts.splice(idx, 1)[0]
+      return removed
+    }
+    return null
+  }
+
+  /**
+   * 切换自动注入脚本的启用/禁用状态
+   */
+  toggleAutoInjectScript(scriptId) {
+    const script = this.autoInjectScripts.find(s => s.id === scriptId)
+    if (script) {
+      script.enabled = !script.enabled
+      return script
+    }
+    return null
+  }
+
+  /**
+   * 获取所有自动注入脚本
+   */
+  getAutoInjectScripts() {
+    return this.autoInjectScripts
+  }
+
+  /**
+   * 匹配 URL 是否符合模式（支持 * 通配符）
+   */
+  _matchUrl(url, pattern) {
+    if (!pattern || pattern === '*') return true
+    // 将通配符模式转为正则
+    const regexStr = pattern
+      .replace(/[.+^${}()|[\]\\]/g, '\\$&')  // 转义特殊字符
+      .replace(/\*/g, '.*')                    // * → .*
+    const regex = new RegExp('^' + regexStr + '$')
+    return regex.test(url)
+  }
+
+  /**
+   * 执行所有匹配当前URL的自动注入脚本
+   * 在页面加载完成后调用
+   */
+  async runAutoInjectScripts(browserView) {
+    if (!browserView) return []
+
+    const url = browserView.webContents.getURL()
+    const results = []
+
+    for (const script of this.autoInjectScripts) {
+      if (!script.enabled) continue
+      if (!this._matchUrl(url, script.urlPattern)) continue
+
+      try {
+        const result = await this.executeInPage(browserView, script.code)
+        script.injectCount++
+        results.push({
+          id: script.id,
+          name: script.name,
+          success: result.success !== false,
+          result: result,
+        })
+      } catch (e) {
+        results.push({
+          id: script.id,
+          name: script.name,
+          success: false,
+          error: e.message,
+        })
+      }
+    }
+
+    return results
   }
 }
 

@@ -1,5 +1,9 @@
 const { app, BrowserWindow, BrowserView, ipcMain, session, shell, Tray, Menu, nativeImage } = require('electron')
 const path = require('path')
+const fs = require('fs')
+const os = require('os')
+const http = require('http')
+const https = require('https')
 const LLMProvider = require('./ai/llm_provider')
 const Analyzer = require('./ai/analyzer')
 const ActionExecutor = require('./ai/action_executor')
@@ -270,6 +274,48 @@ function registerIpcHandlers() {
     return { success: false }
   })
 
+  // 生成本地脚本的油猴格式临时文件并用系统浏览器打开
+  ipcMain.handle('browser:install-tampermonkey', async (event, { name, description, code, urlPattern }) => {
+    try {
+      const os = require('os')
+      const fs = require('fs')
+      const path = require('path')
+
+      // 如果代码已包含 ==UserScript== 块，直接用
+      let userjsCode = code
+      if (!code.includes('==UserScript==')) {
+        const pattern = urlPattern || '*'
+        const matchRules = pattern.split(',').map(p => p.trim()).filter(Boolean)
+        const matchLines = matchRules.map(r => `// @match        ${r}`).join('\n')
+        const header = `// ==UserScript==
+// @name         ${name || '未命名脚本'}
+// @namespace    ai-browser-scripts
+// @version      1.0.0
+// @description  ${description || ''}
+// @author       AI Browser
+${matchLines}
+// @grant        none
+// @run-at       document-idle
+// ==/UserScript==
+
+`
+        userjsCode = header + code
+      }
+
+      // 写入临时文件
+      const tmpDir = os.tmpdir()
+      const safeName = (name || 'script').replace(/[^a-zA-Z0-9\u4e00-\u9fa5_-]/g, '_')
+      const tmpFile = path.join(tmpDir, `${safeName}.user.js`)
+      fs.writeFileSync(tmpFile, userjsCode, 'utf-8')
+
+      // 用系统默认浏览器打开，油猴会自动识别 .user.js 并弹出安装提示
+      await shell.openExternal(`file:///${tmpFile.replace(/\\/g, '/')}`)
+      return { success: true, path: tmpFile }
+    } catch (e) {
+      return { success: false, error: e.message }
+    }
+  })
+
   ipcMain.on('browser:resize', (event, { browserRatio, position, ratio }) => {
     if (!isWindowValid()) return
     if (position) panelPosition = position
@@ -447,21 +493,41 @@ function registerIpcHandlers() {
         let toolCallsAccum = {}
         let hasToolCalls = false
 
-        const stream = llmProvider.chatStream(currentMessages, { tools: TOOL_DEFINITIONS })
         safeSend('unified:thinking', { round: round + 1 })
 
-        for await (const item of stream) {
-          if (item.type === 'content') {
-            fullContent += item.content
-            safeSend('unified:stream-chunk', { chunk: item.content })
-          } else if (item.type === 'tool_calls' || item.type === 'tool_call') {
-            hasToolCalls = true
-            const calls = item.tool_calls || [item.tool_call]
-            for (const tc of calls) {
-              const idx = tc.index ?? 0
-              toolCallsAccum[idx] = tc
+        // 添加超时保护
+        const streamPromise = (async () => {
+          const stream = llmProvider.chatStream(currentMessages, { tools: TOOL_DEFINITIONS })
+          for await (const item of stream) {
+            if (unifiedAbortFlag) break
+            if (item.type === 'content') {
+              fullContent += item.content
+              safeSend('unified:stream-chunk', { chunk: item.content })
+            } else if (item.type === 'tool_calls' || item.type === 'tool_call') {
+              hasToolCalls = true
+              const calls = item.tool_calls || [item.tool_call]
+              for (const tc of calls) {
+                const idx = tc.index ?? 0
+                toolCallsAccum[idx] = tc
+              }
             }
           }
+        })()
+
+        // 设置单轮超时（5分钟）
+        const timeoutPromise = new Promise((_, reject) => {
+          setTimeout(() => reject(new Error('AI响应超时（5分钟），请检查网络连接或API配置')), 300000)
+        })
+
+        try {
+          await Promise.race([streamPromise, timeoutPromise])
+        } catch (err) {
+          throw err
+        }
+
+        if (unifiedAbortFlag) {
+          safeSend('unified:done', { success: false, summary: '已中止' })
+          return { success: false, summary: '已中止' }
         }
 
         if (!hasToolCalls || Object.keys(toolCallsAccum).length === 0) {
@@ -517,6 +583,7 @@ function registerIpcHandlers() {
       safeSend('unified:done', { success: false, summary: `已达到最大工具调用轮次 (${maxRounds})` })
       return { success: false, summary: '达到最大轮次' }
     } catch (e) {
+      console.error('AI调用错误:', e)
       safeSend('unified:done', { success: false, summary: e.message, error: e.message })
       return { success: false, error: e.message }
     }
@@ -636,6 +703,31 @@ function registerIpcHandlers() {
   ipcMain.handle('action:clear-session', async () => { actionExecutor.clearSession(); return { success: true } })
   ipcMain.handle('action:get-session', async () => actionExecutor.getSession())
 
+  // ============ 自动注入脚本管理 ============
+  ipcMain.handle('action:add-auto-inject', async (event, { name, code, urlPattern }) => {
+    const script = actionExecutor.addAutoInjectScript(name, code, urlPattern || '*')
+    return { success: true, script }
+  })
+
+  ipcMain.handle('action:remove-auto-inject', async (event, { scriptId }) => {
+    const removed = actionExecutor.removeAutoInjectScript(scriptId)
+    return { success: !!removed, script: removed }
+  })
+
+  ipcMain.handle('action:toggle-auto-inject', async (event, { scriptId }) => {
+    const script = actionExecutor.toggleAutoInjectScript(scriptId)
+    return { success: !!script, script }
+  })
+
+  ipcMain.handle('action:get-auto-inject-scripts', async () => {
+    return { success: true, scripts: actionExecutor.getAutoInjectScripts() }
+  })
+
+  ipcMain.handle('action:run-auto-inject', async () => {
+    const results = await actionExecutor.runAutoInjectScripts(tabManager.getActiveBrowserView())
+    return { success: true, results }
+  })
+
   ipcMain.handle('action:run-stream', async (event, { instruction, config }) => {
     try {
       const pageContext = await actionExecutor.collectPageContext(tabManager.getActiveBrowserView())
@@ -712,6 +804,208 @@ function registerIpcHandlers() {
   ipcMain.handle('agent:clear-history', async () => { agentLoop.clearHistory(); return { success: true } })
   ipcMain.handle('agent:reset', async () => { agentLoop.reset(); return { success: true } })
   ipcMain.handle('agent:set-max-rounds', async (event, { maxRounds }) => { agentLoop.setMaxRounds(maxRounds); return { success: true } })
+
+  // ============ 管理后台 API ============
+
+  // 通用 HTTP 请求辅助函数
+  function adminRequest(method, apiPath, token, body = null) {
+    return new Promise((resolve, reject) => {
+      // 从 body 中提取 _serverUrl，其余作为请求体
+      const serverUrl = body && body._serverUrl ? body._serverUrl : ''
+      const reqBody = body ? { ...body } : null
+      delete reqBody?._serverUrl
+      // GET/HEAD 请求不发送 body
+      const hasBody = reqBody && Object.keys(reqBody).length > 0 && !['GET', 'HEAD'].includes(method.toUpperCase())
+      const fullUrl = serverUrl + apiPath
+      const parsedUrl = new URL(fullUrl)
+      const isHttps = parsedUrl.protocol === 'https:'
+      const client = isHttps ? https : http
+      const options = {
+        hostname: parsedUrl.hostname,
+        port: parsedUrl.port || (isHttps ? 443 : 80),
+        path: parsedUrl.pathname + parsedUrl.search,
+        method,
+        headers: {
+          ...(hasBody ? { 'Content-Type': 'application/json' } : {}),
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+      }
+      const req = client.request(options, (res) => {
+        let data = ''
+        res.on('data', chunk => data += chunk)
+        res.on('end', () => {
+          try {
+            resolve({ status: res.statusCode, data: JSON.parse(data) })
+          } catch {
+            resolve({ status: res.statusCode, data })
+          }
+        })
+      })
+      req.on('error', reject)
+      req.setTimeout(15000, () => { req.destroy(); reject(new Error('请求超时')) })
+      if (hasBody) {
+        req.write(JSON.stringify(reqBody))
+      }
+      req.end()
+    })
+  }
+
+  // 通用 HTTP 请求辅助函数（multipart/form-data 文件上传）
+  function multipartUpload(serverUrl, apiPath, token, filePath, fields = {}) {
+    return new Promise((resolve, reject) => {
+      const fullUrl = serverUrl + apiPath
+      const parsedUrl = new URL(fullUrl)
+      const isHttps = parsedUrl.protocol === 'https:'
+      const client = isHttps ? https : http
+
+      const boundary = '----AIBrowserUpload' + Math.random().toString(36).substring(2)
+      const fileName = path.basename(filePath)
+      const fileContent = fs.readFileSync(filePath)
+
+      // 构建 multipart body
+      const parts = []
+
+      // 添加文件字段
+      for (const [key, value] of Object.entries(fields)) {
+        parts.push(Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="${key}"\r\n\r\n${value}\r\n`, 'utf-8'))
+      }
+
+      // 添加脚本文件
+      parts.push(Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="script"; filename="${fileName}"\r\nContent-Type: application/javascript\r\n\r\n`, 'utf-8'))
+      parts.push(fileContent)
+      parts.push(Buffer.from(`\r\n--${boundary}--\r\n`, 'utf-8'))
+
+      const body = Buffer.concat(parts)
+
+      const options = {
+        hostname: parsedUrl.hostname,
+        port: parsedUrl.port || (isHttps ? 443 : 80),
+        path: parsedUrl.pathname + parsedUrl.search,
+        method: 'POST',
+        headers: {
+          'Content-Type': `multipart/form-data; boundary=${boundary}`,
+          'Content-Length': body.length,
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+      }
+
+      const req = client.request(options, (res) => {
+        let data = ''
+        res.on('data', chunk => data += chunk)
+        res.on('end', () => {
+          try {
+            resolve({ status: res.statusCode, data: JSON.parse(data) })
+          } catch {
+            resolve({ status: res.statusCode, data })
+          }
+        })
+      })
+      req.on('error', reject)
+      req.setTimeout(30000, () => { req.destroy(); reject(new Error('上传超时')) })
+      req.write(body)
+      req.end()
+    })
+  }
+
+  // 上传脚本到管理后台（multipart/form-data 文件上传）
+  ipcMain.handle('admin:upload-script', async (event, { serverUrl, token, name, code, description, categoryId }) => {
+    try {
+      if (!serverUrl || !token) {
+        return { success: false, error: '请先在设置中配置管理后台地址和 Token' }
+      }
+
+      // 将代码写入临时文件
+      const tmpDir = os.tmpdir()
+      const safeName = (name || 'script').replace(/[^a-zA-Z0-9\u4e00-\u9fa5_-]/g, '_')
+      const tmpFile = path.join(tmpDir, `ai-browser-script-${Date.now()}-${safeName}.js`)
+      fs.writeFileSync(tmpFile, code, 'utf-8')
+
+      try {
+        const result = await multipartUpload(serverUrl, '/api/scripts', token, tmpFile, {
+          name: name || safeName,
+          description: description || '',
+          category_id: String(categoryId || 1),
+          version: '1.0.0',
+          url_pattern: '*',
+        })
+        return { success: result.data?.success || false, data: result.data }
+      } finally {
+        // 清理临时文件
+        try { fs.unlinkSync(tmpFile) } catch {}
+      }
+    } catch (e) {
+      return { success: false, error: e.message }
+    }
+  })
+
+  // 获取脚本列表
+  ipcMain.handle('admin:get-scripts', async (event, { serverUrl, token, page, keyword, category }) => {
+    try {
+      if (!serverUrl || !token) {
+        return { success: false, error: '请先配置管理后台地址和 Token' }
+      }
+      const params = new URLSearchParams()
+      if (page) params.set('page', page)
+      if (keyword) params.set('keyword', keyword)
+      if (category) params.set('category', category)
+      const query = params.toString() ? '?' + params.toString() : ''
+      const result = await adminRequest('GET', '/api/scripts' + query, token, { _serverUrl: serverUrl })
+      if (result.data?.success) {
+        return { success: true, data: result.data.data || [], pagination: result.data.pagination }
+      } else {
+        return { success: false, error: result.data?.error || `HTTP ${result.status}` }
+      }
+    } catch (e) {
+      return { success: false, error: e.message }
+    }
+  })
+
+  // 获取分类列表
+  ipcMain.handle('admin:get-categories', async (event, { serverUrl, token }) => {
+    try {
+      if (!serverUrl || !token) {
+        return { success: false, error: '请先配置管理后台地址和 Token' }
+      }
+      const result = await adminRequest('GET', '/api/stats/categories', token, { _serverUrl: serverUrl })
+      if (result.data?.success) {
+        return { success: true, data: result.data.data || result.data }
+      } else {
+        return { success: false, error: result.data?.error || `HTTP ${result.status}` }
+      }
+    } catch (e) {
+      return { success: false, error: e.message }
+    }
+  })
+
+  // 获取脚本详情（含参数注入和多模块合并）
+  ipcMain.handle('admin:get-script-detail', async (event, { serverUrl, token, id }) => {
+    try {
+      if (!serverUrl || !token) {
+        return { success: false, error: '请先配置管理后台地址和 Token' }
+      }
+      const result = await adminRequest('GET', `/api/scripts/${id}/inject`, token, { _serverUrl: serverUrl })
+      if (!result.data?.success) {
+        return { success: false, error: result.data?.error || `HTTP ${result.status}` }
+      }
+      const detail = result.data.data || result.data
+      return { success: true, data: detail }
+    } catch (e) {
+      return { success: false, error: e.message }
+    }
+  })
+
+  // 登录管理后台
+  ipcMain.handle('admin:login', async (event, { serverUrl, username, password }) => {
+    try {
+      if (!serverUrl) {
+        return { success: false, error: '请先配置管理后台地址' }
+      }
+      const result = await adminRequest('POST', '/api/auth/login', null, { username, password, _serverUrl: serverUrl })
+      return { success: result.data?.success || false, data: result.data }
+    } catch (e) {
+      return { success: false, error: e.message }
+    }
+  })
 }
 
 // ============ 请求拦截 ============
@@ -735,8 +1029,31 @@ app.whenReady().then(() => {
   createMainWindow()
   createTray()
   tabManager = new TabManager(mainWindow)
+
+  // 注册页面加载完成回调 → 自动注入脚本
+  tabManager.onPageLoaded(async (browserView, url) => {
+    if (actionExecutor.getAutoInjectScripts().length > 0) {
+      // 延迟500ms确保DOM完全加载
+      await new Promise(r => setTimeout(r, 500))
+      const results = await actionExecutor.runAutoInjectScripts(browserView)
+      if (results.length > 0) {
+        // 通知前端面板
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('auto-inject:executed', { url, results })
+        }
+      }
+    }
+  })
+
+  // 注册标签切换回调 → 重新设置BrowserView bounds
+  tabManager.onTabSwitch(() => {
+    resizeBrowserView()
+  })
+
   registerIpcHandlers()
   tabManager.createTab('about:blank')
+  // 关键：创建标签后立即设置 BrowserView 的 bounds，否则页面空白
+  resizeBrowserView()
   setupRequestInterception()
   mainWindow.on('resize', resizeBrowserView)
 })

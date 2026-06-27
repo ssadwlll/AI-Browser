@@ -352,6 +352,176 @@ const TOOL_DEFINITIONS = [
       },
     },
   },
+  {
+    type: 'function',
+    function: {
+      name: 'hover_element',
+      description: '将鼠标悬停在指定元素上（不点击）。使用Electron原生mouseMove事件，触发hover效果、下拉菜单、tooltip等。当需要触发鼠标悬停交互时使用。',
+      parameters: {
+        type: 'object',
+        properties: {
+          selector: {
+            type: 'string',
+            description: 'CSS选择器，定位目标元素',
+          },
+          index: {
+            type: 'number',
+            description: '当选择器匹配多个元素时，指定第几个（从0开始），默认0',
+          },
+        },
+        required: ['selector'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'scroll_page',
+      description: '滚动页面。使用Electron原生mouseWheel事件，比JS scrollBy更可靠。用于向下或向上滚动页面查看更多内容。',
+      parameters: {
+        type: 'object',
+        properties: {
+          direction: {
+            type: 'number',
+            description: '滚动方向：1=向下，-1=向上',
+          },
+          amount: {
+            type: 'number',
+            description: '滚动量（像素），默认300',
+          },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'select_option',
+      description: '选择下拉框（select元素）的选项。自动触发change和input事件，比JS设置value更可靠。用于选择省份、类别等下拉选项。',
+      parameters: {
+        type: 'object',
+        properties: {
+          selector: {
+            type: 'string',
+            description: 'CSS选择器，定位select元素',
+          },
+          value: {
+            type: 'string',
+            description: '要选择的选项值或文本（会自动匹配value或text）',
+          },
+          index: {
+            type: 'number',
+            description: '当选择器匹配多个元素时，指定第几个（从0开始），默认0',
+          },
+        },
+        required: ['selector', 'value'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'upload_file',
+      description: '上传文件到页面的file input。使用Electron原生uploadFile API。用于上传图片、文档等文件。',
+      parameters: {
+        type: 'object',
+        properties: {
+          selector: {
+            type: 'string',
+            description: 'CSS选择器，定位input[type=file]元素',
+          },
+          file_path: {
+            type: 'string',
+            description: '本地文件的完整路径，如 "C:\\\\Users\\\\test\\\\image.png"',
+          },
+          index: {
+            type: 'number',
+            description: '当选择器匹配多个元素时，指定第几个（从0开始），默认0',
+          },
+        },
+        required: ['selector', 'file_path'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'get_element_text',
+      description: '获取指定元素的文本内容。用于读取页面文字、提取数据、验证内容等。比execute_js更简洁。',
+      parameters: {
+        type: 'object',
+        properties: {
+          selector: {
+            type: 'string',
+            description: 'CSS选择器，定位目标元素',
+          },
+          index: {
+            type: 'number',
+            description: '当选择器匹配多个元素时，指定第几个（从0开始），默认0',
+          },
+          max_length: {
+            type: 'number',
+            description: '最大返回文本长度，默认5000',
+          },
+        },
+        required: ['selector'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'get_element_attribute',
+      description: '获取指定元素的属性值。用于读取href、src、data-id等属性。比execute_js更简洁。',
+      parameters: {
+        type: 'object',
+        properties: {
+          selector: {
+            type: 'string',
+            description: 'CSS选择器，定位目标元素',
+          },
+          attribute: {
+            type: 'string',
+            description: '属性名，如 "href", "src", "data-id", "value" 等',
+          },
+          index: {
+            type: 'number',
+            description: '当选择器匹配多个元素时，指定第几个（从0开始），默认0',
+          },
+        },
+        required: ['selector', 'attribute'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'drag_and_drop',
+      description: '拖拽元素从起点到终点。使用Electron原生鼠标事件链（mouseMove+mouseDown+分步移动+mouseUp），模拟真实拖拽轨迹。用于拖拽排序、滑块验证等场景。',
+      parameters: {
+        type: 'object',
+        properties: {
+          from_x: {
+            type: 'number',
+            description: '起点X坐标',
+          },
+          from_y: {
+            type: 'number',
+            description: '起点Y坐标',
+          },
+          to_x: {
+            type: 'number',
+            description: '终点X坐标',
+          },
+          to_y: {
+            type: 'number',
+            description: '终点Y坐标',
+          },
+        },
+        required: ['from_x', 'from_y', 'to_x', 'to_y'],
+      },
+    },
+  },
 ]
 
 module.exports = TOOL_DEFINITIONS

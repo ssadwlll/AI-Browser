@@ -11,6 +11,24 @@ class TabManager {
     this.tabs = new Map()       // id -> { id, browserView, url, title, loading, favicon, _eventHandlers }
     this.activeTabId = null
     this.tabIdCounter = 0
+    this.onPageLoadCallback = null  // 页面加载完成回调（用于自动注入）
+    this.onTabSwitchCallback = null // 标签切换回调（用于重新设置bounds）
+  }
+
+  /**
+   * 注册页面加载完成回调
+   * @param {Function} callback - (browserView, url) => void
+   */
+  onPageLoaded(callback) {
+    this.onPageLoadCallback = callback
+  }
+
+  /**
+   * 注册标签切换回调
+   * @param {Function} callback - () => void
+   */
+  onTabSwitch(callback) {
+    this.onTabSwitchCallback = callback
   }
 
   // ============ 访问器 ============
@@ -162,6 +180,11 @@ class TabManager {
         tab.loading = false
         self._sendTabUpdated(tab)
         self._sendNavStateUpdated(tab)
+        // 触发页面加载完成回调（用于自动注入脚本）
+        if (self.onPageLoadCallback) {
+          const url = tab.browserView.webContents.getURL()
+          self.onPageLoadCallback(tab.browserView, url)
+        }
       },
       onFaviconUpdated: (event, favicons) => {
         if (favicons && favicons.length > 0) {
@@ -253,6 +276,11 @@ class TabManager {
     }
     this.activeTabId = id
 
+    // 通知主窗口重新设置BrowserView bounds（新建标签也需要）
+    if (this.onTabSwitchCallback) {
+      this.onTabSwitchCallback()
+    }
+
     if (url && url !== 'about:blank') {
       const navUrl = url.startsWith('http') ? url : 'https://' + url
       bv.webContents.loadURL(navUrl)
@@ -311,6 +339,11 @@ class TabManager {
     this.activeTabId = id
     if (this.mainWindow && !this.mainWindow.isDestroyed()) {
       this.mainWindow.addBrowserView(tab.browserView)
+    }
+
+    // 通知主窗口重新设置BrowserView bounds
+    if (this.onTabSwitchCallback) {
+      this.onTabSwitchCallback()
     }
 
     return this.getTabInfo(tab)

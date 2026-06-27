@@ -1,0 +1,1367 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI Browser 管理后台</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{--primary:#667eea;--primary-dark:#5a6fd6;--success:#10b981;--danger:#ef4444;--warning:#f59e0b;--bg:#f0f2f5;--bg-card:#fff;--text:#1f2937;--text2:#6b7280;--border:#e5e7eb;--radius:8px}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:var(--bg);color:var(--text);min-height:100vh}
+.login-page{display:flex;align-items:center;justify-content:center;min-height:100vh;background:linear-gradient(135deg,#667eea 0%,#764ba2 100%)}
+.login-card{background:var(--bg-card);border-radius:16px;padding:40px;width:400px;max-width:90vw;box-shadow:0 20px 60px rgba(0,0,0,0.15)}
+.login-card h1{font-size:24px;text-align:center;margin-bottom:4px;color:var(--primary)}
+.login-card .sub{text-align:center;color:var(--text2);font-size:13px;margin-bottom:28px}
+.form-group{margin-bottom:16px}
+.form-group label{display:block;font-size:13px;font-weight:600;margin-bottom:6px;color:var(--text)}
+.form-group input,.form-group select,.form-group textarea{width:100%;padding:10px 14px;border:1px solid var(--border);border-radius:var(--radius);font-size:14px;outline:none;font-family:inherit;transition:border-color .2s}
+.form-group input:focus,.form-group select:focus,.form-group textarea:focus{border-color:var(--primary)}
+.form-group textarea{resize:vertical;min-height:80px;font-family:monospace}
+.btn{display:inline-flex;align-items:center;gap:6px;padding:10px 20px;border:none;border-radius:var(--radius);font-size:14px;font-weight:600;cursor:pointer;transition:all .2s}
+.btn-primary{background:var(--primary);color:#fff}
+.btn-primary:hover{background:var(--primary-dark)}
+.btn-success{background:var(--success);color:#fff}
+.btn-danger{background:var(--danger);color:#fff}
+.btn-warning{background:var(--warning);color:#fff}
+.btn-sm{padding:6px 14px;font-size:12px}
+.btn-block{width:100%;justify-content:center}
+.btn-icon{background:none;border:none;cursor:pointer;color:var(--text2);padding:4px 8px;border-radius:4px;font-size:14px}
+.btn-icon:hover{background:var(--bg);color:var(--text)}
+.btn-icon.danger:hover{color:var(--danger)}
+.error-msg{background:#fef2f2;color:var(--danger);padding:10px 14px;border-radius:var(--radius);font-size:13px;margin-bottom:16px;display:none}
+.success-msg{background:#f0fdf4;color:var(--success);padding:10px 14px;border-radius:var(--radius);font-size:13px;margin-bottom:16px;display:none}
+.layout{display:flex;min-height:100vh}
+.sidebar{width:220px;background:#1e1e2e;color:#fff;padding:0;display:flex;flex-direction:column}
+.sidebar-brand{padding:20px;font-size:18px;font-weight:700;border-bottom:1px solid rgba(255,255,255,0.1);display:flex;align-items:center;gap:10px}
+.sidebar-brand span{background:var(--primary);width:32px;height:32px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:16px}
+.sidebar-nav{flex:1;padding:12px 0}
+.nav-item{display:flex;align-items:center;gap:10px;padding:12px 20px;color:rgba(255,255,255,0.65);cursor:pointer;font-size:14px;transition:all .15s;border-left:3px solid transparent}
+.nav-item:hover{background:rgba(255,255,255,0.05);color:#fff}
+.nav-item.active{background:rgba(255,255,255,0.1);color:#fff;border-left-color:var(--primary)}
+.nav-item .icon{font-size:16px;width:20px;text-align:center}
+.sidebar-footer{padding:16px 20px;border-top:1px solid rgba(255,255,255,0.1);font-size:12px}
+.sidebar-footer .user-info{color:rgba(255,255,255,0.7);margin-bottom:8px}
+.sidebar-footer .logout{cursor:pointer;color:var(--danger);font-size:12px}
+.main-content{flex:1;padding:24px;overflow-y:auto;max-height:100vh}
+.page-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:24px}
+.page-header h2{font-size:20px}
+.stats-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;margin-bottom:24px}
+.stat-card{background:var(--bg-card);border-radius:12px;padding:20px;box-shadow:0 1px 3px rgba(0,0,0,0.06)}
+.stat-card .stat-label{font-size:12px;color:var(--text2);margin-bottom:6px}
+.stat-card .stat-value{font-size:28px;font-weight:700;color:var(--primary)}
+.stat-card .stat-sub{font-size:12px;color:var(--text2);margin-top:4px}
+.card{background:var(--bg-card);border-radius:12px;padding:20px;box-shadow:0 1px 3px rgba(0,0,0,0.06);margin-bottom:20px}
+.card-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px}
+.card-header h3{font-size:16px}
+.table-wrap{overflow-x:auto}
+table{width:100%;border-collapse:collapse}
+th,td{padding:10px 14px;text-align:left;border-bottom:1px solid var(--border);font-size:13px}
+th{font-weight:600;color:var(--text2);font-size:12px;text-transform:uppercase;letter-spacing:.5px}
+tr:hover{background:var(--bg)}
+.badge{display:inline-block;padding:2px 10px;border-radius:12px;font-size:11px;font-weight:600}
+.badge-admin{background:#ede9fe;color:#7c3aed}
+.badge-developer{background:#dbeafe;color:#2563eb}
+.badge-editor{background:#f3f4f6;color:#6b7280}
+.badge-published{background:#d1fae5;color:#065f46}
+.badge-draft{background:#fef3c7;color:#92400e}
+.badge-active{background:#d1fae5;color:#065f46}
+.badge-disabled{background:#fee2e2;color:#991b1b}
+.modal-overlay{position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;z-index:1000;animation:fadeIn .15s}
+@keyframes fadeIn{from{opacity:0}to{opacity:1}}
+.modal-box{background:var(--bg-card);border-radius:12px;padding:24px;width:480px;max-width:90vw;max-height:80vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,0.2)}
+.modal-box h3{margin-bottom:20px;font-size:18px}
+.modal-actions{display:flex;gap:10px;justify-content:flex-end;margin-top:20px}
+.search-bar{display:flex;gap:10px;margin-bottom:16px}
+.search-bar input{flex:1;padding:8px 14px;border:1px solid var(--border);border-radius:var(--radius);font-size:13px;outline:none}
+.search-bar input:focus{border-color:var(--primary)}
+.pagination{display:flex;align-items:center;justify-content:center;gap:8px;margin-top:16px}
+.pagination button{padding:6px 14px;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg-card);cursor:pointer;font-size:13px}
+.pagination button:hover{background:var(--bg)}
+.pagination button:disabled{opacity:0.4;cursor:not-allowed}
+.pagination span{font-size:13px;color:var(--text2)}
+.token-display{background:#f8f9fc;border:1px solid var(--border);border-radius:var(--radius);padding:14px;font-family:monospace;font-size:12px;word-break:break-all;color:var(--text);margin-bottom:12px}
+.copy-btn{cursor:pointer;color:var(--primary);font-size:12px;margin-left:8px}
+.empty-state{text-align:center;padding:40px;color:var(--text2);font-size:14px}
+.hidden{display:none !important}
+.page{display:none}
+.page.active{display:block}
+.toast{position:fixed;top:20px;right:20px;padding:12px 20px;border-radius:var(--radius);color:#fff;font-size:14px;z-index:2000;animation:slideIn .3s;box-shadow:0 4px 12px rgba(0,0,0,0.15)}
+.toast.success{background:var(--success)}
+.toast.error{background:var(--danger)}
+@keyframes slideIn{from{transform:translateX(100%);opacity:0}to{transform:translateX(0);opacity:1}}
+
+/* 代码预览样式 */
+.code-view{background:#1e1e2e;color:#cdd6f4;border-radius:var(--radius);padding:16px;font-family:'Consolas','Monaco','Courier New',monospace;font-size:13px;line-height:1.6;overflow-x:auto;max-height:400px;overflow-y:auto;white-space:pre;tab-size:2}
+.code-edit{background:#1e1e2e;color:#cdd6f4;border:2px solid var(--primary);border-radius:var(--radius);padding:16px;font-family:'Consolas','Monaco','Courier New',monospace;font-size:13px;line-height:1.6;width:100%;min-height:300px;resize:vertical;outline:none;tab-size:2}
+
+/* 大号弹窗 */
+.modal-box.wide{width:800px;max-width:95vw}
+.modal-box.tall{max-height:90vh}
+
+/* 预览 iframe */
+.preview-iframe{width:100%;height:500px;border:1px solid var(--border);border-radius:var(--radius);background:#fff}
+</style>
+</head>
+<body>
+
+<!-- 登录页 -->
+<div id="loginPage" class="login-page">
+  <div class="login-card">
+    <h1>AI Browser</h1>
+    <div class="sub">管理后台</div>
+    <div id="loginError" class="error-msg"></div>
+    <div class="form-group">
+      <label>用户名</label>
+      <input type="text" id="loginUser" placeholder="请输入用户名" value="admin">
+    </div>
+    <div class="form-group">
+      <label>密码</label>
+      <input type="password" id="loginPass" placeholder="请输入密码" value="admin123" onkeydown="if(event.key==='Enter')login()">
+    </div>
+    <button class="btn btn-primary btn-block" onclick="login()">登 录</button>
+    <div style="text-align:center;margin-top:16px;font-size:12px;color:var(--text2)">
+      默认账号: admin / admin123
+    </div>
+  </div>
+</div>
+
+<!-- 主界面 -->
+<div id="mainPage" class="layout hidden">
+  <div class="sidebar">
+    <div class="sidebar-brand"><span>A</span> AI Browser</div>
+    <div class="sidebar-nav">
+      <div class="nav-item active" data-page="dashboard" onclick="switchPage('dashboard')">
+        <span class="icon">📊</span> 控制台
+      </div>
+      <div class="nav-item" data-page="scripts" onclick="switchPage('scripts')">
+        <span class="icon">📜</span> 脚本管理
+      </div>
+      <div class="nav-item" data-page="users" onclick="switchPage('users')">
+        <span class="icon">👥</span> 用户管理
+      </div>
+      <div class="nav-item" data-page="categories" onclick="switchPage('categories')">
+        <span class="icon">📁</span> 分类管理
+      </div>
+      <div class="nav-item" data-page="tokens" onclick="switchPage('tokens')">
+        <span class="icon">🔑</span> API Token
+      </div>
+    </div>
+    <div class="sidebar-footer">
+      <div class="user-info" id="sidebarUser">admin</div>
+      <div class="logout" onclick="logout()">退出登录</div>
+    </div>
+  </div>
+
+  <div class="main-content">
+    <!-- 控制台 -->
+    <div id="page-dashboard" class="page active">
+      <div class="page-header"><h2>控制台</h2></div>
+      <div class="stats-grid" id="statsGrid">
+        <div class="stat-card"><div class="stat-label">脚本总数</div><div class="stat-value">-</div></div>
+        <div class="stat-card"><div class="stat-label">用户总数</div><div class="stat-value">-</div></div>
+        <div class="stat-card"><div class="stat-label">总运行次数</div><div class="stat-value">-</div></div>
+        <div class="stat-card"><div class="stat-label">今日运行</div><div class="stat-value">-</div></div>
+      </div>
+      <div class="card">
+        <div class="card-header"><h3>热门脚本 Top 10</h3></div>
+        <div class="table-wrap">
+          <table><thead><tr><th>#</th><th>脚本名称</th><th>运行次数</th></tr></thead>
+          <tbody id="topScripts"><tr><td colspan="3" class="empty-state">加载中...</td></tr></tbody></table>
+        </div>
+      </div>
+    </div>
+
+    <!-- 脚本管理 -->
+    <div id="page-scripts" class="page">
+      <div class="page-header">
+        <h2>脚本管理</h2>
+        <button class="btn btn-primary" onclick="showUploadModal()">+ 上传脚本</button>
+      </div>
+      <div class="card">
+        <div class="search-bar">
+          <input type="text" id="scriptSearch" placeholder="搜索脚本名称..." onkeydown="if(event.key==='Enter')loadScripts(1)">
+          <select id="scriptCategory" onchange="loadScripts(1)" style="width:160px;padding:8px;border:1px solid var(--border);border-radius:var(--radius);font-size:13px;outline:none">
+            <option value="">全部分类</option>
+          </select>
+          <button class="btn btn-primary btn-sm" onclick="loadScripts(1)">搜索</button>
+        </div>
+        <div class="table-wrap">
+          <table><thead><tr><th>ID</th><th>名称</th><th>分类</th><th>版本</th><th>作者</th><th>下载</th><th>状态</th><th>更新时间</th><th>操作</th></tr></thead>
+          <tbody id="scriptTable"><tr><td colspan="9" class="empty-state">加载中...</td></tr></tbody></table>
+        </div>
+        <div class="pagination" id="scriptPagination"></div>
+      </div>
+    </div>
+
+    <!-- 用户管理 -->
+    <div id="page-users" class="page">
+      <div class="page-header">
+        <h2>用户管理</h2>
+        <button class="btn btn-primary" onclick="showUserModal()">+ 添加用户</button>
+      </div>
+      <div class="card">
+        <div class="search-bar">
+          <input type="text" id="userSearch" placeholder="搜索用户名..." onkeydown="if(event.key==='Enter')loadUsers(1)">
+          <button class="btn btn-primary btn-sm" onclick="loadUsers(1)">搜索</button>
+        </div>
+        <div class="table-wrap">
+          <table><thead><tr><th>ID</th><th>用户名</th><th>角色</th><th>状态</th><th>创建时间</th><th>操作</th></tr></thead>
+          <tbody id="userTable"><tr><td colspan="6" class="empty-state">加载中...</td></tr></tbody></table>
+        </div>
+        <div class="pagination" id="userPagination"></div>
+      </div>
+    </div>
+
+    <!-- 分类管理 -->
+    <div id="page-categories" class="page">
+      <div class="page-header">
+        <h2>分类管理</h2>
+        <button class="btn btn-primary" onclick="showCategoryModal()">+ 添加分类</button>
+      </div>
+      <div class="card">
+        <div class="table-wrap">
+          <table><thead><tr><th>ID</th><th>名称</th><th>Slug</th><th>描述</th><th>脚本数</th><th>排序</th><th>操作</th></tr></thead>
+          <tbody id="categoryTable"><tr><td colspan="7" class="empty-state">加载中...</td></tr></tbody></table>
+        </div>
+      </div>
+    </div>
+
+    <!-- API Token -->
+    <div id="page-tokens" class="page">
+      <div class="page-header"><h2>API Token</h2></div>
+      <div class="card">
+        <h3 style="margin-bottom:12px">当前 Token</h3>
+        <div class="token-display" id="tokenDisplay">-</div>
+        <button class="btn btn-primary btn-sm" onclick="copyToken()">复制 Token</button>
+        <button class="btn btn-warning btn-sm" style="margin-left:8px" onclick="refreshToken()">刷新 Token（重新登录）</button>
+      </div>
+      <div class="card">
+        <h3 style="margin-bottom:12px">使用说明</h3>
+        <div style="font-size:13px;color:var(--text2);line-height:1.8">
+          1. 将 Token 填入 AI Browser 客户端的「设置」→「管理后台配置」→「后台 Token」<br>
+          2. 或在 API 请求头中添加：<code style="background:#f0f0f0;padding:2px 6px;border-radius:4px">Authorization: Bearer {token}</code><br>
+          3. Token 有效期 7 天，过期后需重新登录获取
+        </div>
+      </div>
+      <div class="card">
+        <h3 style="margin-bottom:12px">API 接口列表</h3>
+        <div class="table-wrap">
+          <table><thead><tr><th>方法</th><th>路径</th><th>说明</th></tr></thead>
+          <tbody>
+            <tr><td><span class="badge badge-published">POST</span></td><td style="font-family:monospace">/api/auth/login</td><td>用户登录</td></tr>
+            <tr><td><span class="badge badge-published">GET</span></td><td style="font-family:monospace">/api/auth/me</td><td>获取当前用户信息</td></tr>
+            <tr><td><span class="badge badge-published">GET</span></td><td style="font-family:monospace">/api/scripts</td><td>脚本列表（分页搜索）</td></tr>
+            <tr><td><span class="badge badge-published">POST</span></td><td style="font-family:monospace">/api/scripts</td><td>上传脚本（multipart）</td></tr>
+            <tr><td><span class="badge badge-published">GET</span></td><td style="font-family:monospace">/api/scripts/:id</td><td>脚本详情（含代码）</td></tr>
+            <tr><td><span class="badge badge-published">PUT</span></td><td style="font-family:monospace">/api/scripts/:id</td><td>更新脚本</td></tr>
+            <tr><td><span class="badge badge-danger">DELETE</span></td><td style="font-family:monospace">/api/scripts/:id</td><td>删除脚本</td></tr>
+            <tr><td><span class="badge badge-published">GET</span></td><td style="font-family:monospace">/api/scripts/:id/download</td><td>下载脚本文件</td></tr>
+            <tr><td><span class="badge badge-published">GET</span></td><td style="font-family:monospace">/api/users</td><td>用户列表</td></tr>
+            <tr><td><span class="badge badge-published">POST</span></td><td style="font-family:monospace">/api/users</td><td>创建用户</td></tr>
+            <tr><td><span class="badge badge-published">PUT</span></td><td style="font-family:monospace">/api/users/:id</td><td>更新用户</td></tr>
+            <tr><td><span class="badge badge-danger">DELETE</span></td><td style="font-family:monospace">/api/users/:id</td><td>删除用户</td></tr>
+            <tr><td><span class="badge badge-published">GET</span></td><td style="font-family:monospace">/api/categories</td><td>分类列表</td></tr>
+            <tr><td><span class="badge badge-published">POST</span></td><td style="font-family:monospace">/api/categories</td><td>创建分类</td></tr>
+            <tr><td><span class="badge badge-published">PUT</span></td><td style="font-family:monospace">/api/categories/:id</td><td>更新分类</td></tr>
+            <tr><td><span class="badge badge-danger">DELETE</span></td><td style="font-family:monospace">/api/categories/:id</td><td>删除分类</td></tr>
+            <tr><td><span class="badge badge-published">GET</span></td><td style="font-family:monospace">/api/stats/overview</td><td>统计概览</td></tr>
+            <tr><td><span class="badge badge-published">GET</span></td><td style="font-family:monospace">/api/stats/categories</td><td>分类列表</td></tr>
+            <tr><td><span class="badge badge-published">GET</span></td><td style="font-family:monospace">/api/health</td><td>健康检查</td></tr>
+          </tbody>
+        </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 上传脚本弹窗 -->
+<div id="uploadModal" class="modal-overlay hidden" onclick="if(event.target===this)closeUploadModal()">
+  <div class="modal-box">
+    <h3>上传脚本</h3>
+    <div id="uploadError" class="error-msg"></div>
+    <div class="form-group"><label>脚本名称 *</label><input type="text" id="uploadName" placeholder="脚本名称"></div>
+    <div class="form-group"><label>描述</label><textarea id="uploadDesc" placeholder="脚本描述"></textarea></div>
+    <div class="form-group"><label>分类 *</label><select id="uploadCategory"></select></div>
+    <div class="form-group"><label>版本</label><input type="text" id="uploadVersion" value="1.0.0"></div>
+    <div class="form-group"><label>URL 匹配模式</label><input type="text" id="uploadUrlPattern" value="*" placeholder="* 匹配所有页面"></div>
+    <div class="form-group"><label>脚本文件 (.js) *<br><span style="font-weight:400;font-size:11px;color:var(--text2)">可选择多个文件，第一个文件作为主入口，其余作为模块（按文件名排序加载）</span></label><input type="file" id="uploadFile" accept=".js" multiple></div>
+    <div class="modal-actions">
+      <button class="btn btn-sm" onclick="closeUploadModal()" style="background:var(--bg);color:var(--text)">取消</button>
+      <button class="btn btn-primary btn-sm" onclick="uploadScript()">上传</button>
+    </div>
+  </div>
+</div>
+
+<!-- 用户编辑弹窗 -->
+<div id="userModal" class="modal-overlay hidden" onclick="if(event.target===this)closeUserModal()">
+  <div class="modal-box">
+    <h3 id="userModalTitle">添加用户</h3>
+    <div id="userModalError" class="error-msg"></div>
+    <div class="form-group"><label>用户名 *</label><input type="text" id="editUserName" placeholder="用户名"></div>
+    <div class="form-group"><label>密码 <span id="pwdHint" style="font-weight:400;font-size:11px;color:var(--text2)">*</span></label><input type="password" id="editUserPass" placeholder="密码"></div>
+    <div class="form-group"><label>角色</label><select id="editUserRole"><option value="admin">管理员</option><option value="developer">开发者</option><option value="editor" selected>编辑者</option></select></div>
+    <div class="form-group"><label>状态</label><select id="editUserStatus"><option value="1">启用</option><option value="0">禁用</option></select></div>
+    <input type="hidden" id="editUserId" value="">
+    <div class="modal-actions">
+      <button class="btn btn-sm" onclick="closeUserModal()" style="background:var(--bg);color:var(--text)">取消</button>
+      <button class="btn btn-primary btn-sm" onclick="saveUser()">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- 分类编辑弹窗 -->
+<div id="categoryModal" class="modal-overlay hidden" onclick="if(event.target===this)closeCategoryModal()">
+  <div class="modal-box">
+    <h3 id="categoryModalTitle">添加分类</h3>
+    <div id="categoryModalError" class="error-msg"></div>
+    <div class="form-group"><label>名称 *</label><input type="text" id="editCatName" placeholder="分类名称"></div>
+    <div class="form-group"><label>Slug *</label><input type="text" id="editCatSlug" placeholder="英文标识"></div>
+    <div class="form-group"><label>描述</label><input type="text" id="editCatDesc" placeholder="描述"></div>
+    <div class="form-group"><label>排序</label><input type="number" id="editCatSort" value="0"></div>
+    <input type="hidden" id="editCatId" value="">
+    <div class="modal-actions">
+      <button class="btn btn-sm" onclick="closeCategoryModal()" style="background:var(--bg);color:var(--text)">取消</button>
+      <button class="btn btn-primary btn-sm" onclick="saveCategory()">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- 查看代码 / 编辑代码弹窗 -->
+<div id="codeModal" class="modal-overlay hidden">
+  <div class="modal-box wide tall">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px">
+      <h3 id="codeModalTitle" style="margin:0">脚本代码</h3>
+      <div style="display:flex;gap:8px">
+        <button id="saveParamsBtn" class="btn btn-success btn-sm" onclick="saveParamsAndModules()">保存参数和模块</button>
+        <button id="codeEditBtn" class="btn btn-warning btn-sm" onclick="toggleCodeEdit()">编辑</button>
+        <button id="codeSaveBtn" class="btn btn-success btn-sm hidden" onclick="saveScriptCode()">保存代码</button>
+        <button id="codeCancelBtn" class="btn btn-sm hidden" onclick="cancelCodeEdit()" style="background:var(--bg);color:var(--text)">取消</button>
+        <button class="btn btn-sm" onclick="closeCodeModalWithConfirm()" style="background:var(--bg);color:var(--text)" title="关闭">&#10005;</button>
+      </div>
+    </div>
+    <div id="codeModalError" class="error-msg"></div>
+    <!-- 名称/描述编辑区域 -->
+    <div id="codeMetaFields" class="hidden">
+      <div class="form-group"><label>脚本名称</label><input type="text" id="codeEditName"></div>
+      <div class="form-group"><label>脚本描述</label><textarea id="codeEditDesc" style="min-height:60px"></textarea></div>
+      <div class="form-group"><label>URL 匹配模式 <span style="font-weight:400;font-size:11px;color:var(--text2)">（多个用逗号分隔，如 *://work.66wz.com:7001/pub/*, *://tech.66wz.com:7443/pub/*）</span></label><input type="text" id="codeEditUrlPattern" placeholder="*"></div>
+      <div class="form-group"><label>版本</label><input type="text" id="codeEditVersion"></div>
+    </div>
+    <!-- 代码展示区域 -->
+    <div id="codeViewWrap">
+      <pre class="code-view" id="codeView"></pre>
+    </div>
+    <!-- 代码编辑区域 -->
+    <div id="codeEditWrap" class="hidden">
+      <textarea class="code-edit" id="codeEditArea" spellcheck="false"></textarea>
+    </div>
+
+    <!-- 参数配置区域 -->
+    <div id="paramsSection" style="margin-top:20px;padding-top:16px;border-top:1px solid var(--border);display:none">
+    </div>
+
+    <!-- 模块管理区域 -->
+    <div id="modulesSection" style="margin-top:20px;padding-top:16px;border-top:1px solid var(--border);display:none">
+    </div>
+  </div>
+</div>
+
+<!-- JS 注入预览弹窗 -->
+<div id="previewModal" class="modal-overlay hidden" onclick="if(event.target===this)closePreviewModal()">
+  <div class="modal-box wide tall">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px">
+      <h3 style="margin:0">JS 注入预览</h3>
+      <div style="display:flex;gap:8px;align-items:center">
+        <input type="text" id="previewUrl" value="https://example.com" placeholder="输入预览 URL" style="padding:6px 12px;border:1px solid var(--border);border-radius:var(--radius);font-size:13px;width:280px;outline:none">
+        <button class="btn btn-primary btn-sm" onclick="executePreview()">执行预览</button>
+      </div>
+    </div>
+    <div style="margin-bottom:12px">
+      <div style="font-size:12px;color:var(--text2);margin-bottom:6px">注入的脚本代码：</div>
+      <pre class="code-view" id="previewCode" style="max-height:150px;min-height:60px"></pre>
+    </div>
+    <div id="previewFrameWrap">
+      <iframe id="previewFrame" class="preview-iframe" sandbox="allow-scripts allow-same-origin allow-forms allow-popups" src="about:blank"></iframe>
+    </div>
+  </div>
+</div>
+
+<script>
+// ============ 全局状态 ============
+let token = '';
+let currentUser = null;
+let currentPage = 'dashboard';
+let currentScriptPage = 1, currentUserPage = 1;
+// 当前查看代码的脚本数据缓存
+let currentCodeScript = null;
+let isCodeEditing = false;
+let currentParamsSchema = [];
+let currentParamsData = {};
+let currentModules = [];
+
+// ============ 工具函数 ============
+function toast(msg, type) {
+  const t = document.createElement('div');
+  t.className = 'toast ' + type;
+  t.textContent = msg;
+  document.body.appendChild(t);
+  setTimeout(() => t.remove(), 2500);
+}
+
+async function api(method, path, body, isFormData) {
+  const headers = {};
+  if (token) headers['Authorization'] = 'Bearer ' + token;
+  if (!isFormData) headers['Content-Type'] = 'application/json';
+  const opts = { method, headers };
+  if (body) opts.body = isFormData ? body : JSON.stringify(body);
+  const res = await fetch(path, opts);
+  const data = await res.json();
+  if (res.status === 401) { logout(); throw new Error('登录已过期'); }
+  return data;
+}
+
+// ============ 登录/登出 ============
+async function login() {
+  const username = document.getElementById('loginUser').value.trim();
+  const password = document.getElementById('loginPass').value.trim();
+  const errEl = document.getElementById('loginError');
+  if (!username || !password) { errEl.textContent = '请输入用户名和密码'; errEl.style.display = 'block'; return; }
+  errEl.style.display = 'none';
+  try {
+    const res = await fetch('/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password })
+    });
+    const data = await res.json();
+    if (!data.success) { errEl.textContent = data.message || data.error || '登录失败'; errEl.style.display = 'block'; return; }
+    token = data.data.token;
+    currentUser = data.data.user;
+    // 保存到 localStorage，刷新页面不需要重新登录
+    localStorage.setItem('admin_token', token);
+    localStorage.setItem('admin_user', JSON.stringify(currentUser));
+    document.getElementById('loginPage').classList.add('hidden');
+    document.getElementById('mainPage').classList.remove('hidden');
+    document.getElementById('sidebarUser').textContent = username + ' (' + currentUser.role + ')';
+    document.getElementById('tokenDisplay').textContent = token;
+    switchPage('dashboard');
+    toast('登录成功', 'success');
+  } catch(e) { errEl.textContent = '网络错误: ' + e.message; errEl.style.display = 'block'; }
+}
+
+function logout() {
+  token = ''; currentUser = null;
+  localStorage.removeItem('admin_token');
+  localStorage.removeItem('admin_user');
+  document.getElementById('loginPage').classList.remove('hidden');
+  document.getElementById('mainPage').classList.add('hidden');
+}
+
+function switchPage(page) {
+  currentPage = page;
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.getElementById('page-' + page).classList.add('active');
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  document.querySelector(`[data-page="${page}"]`).classList.add('active');
+  if (page === 'dashboard') loadDashboard();
+  if (page === 'scripts') loadScripts(1);
+  if (page === 'users') loadUsers(1);
+  if (page === 'categories') loadCategories();
+}
+
+// ============ 控制台 ============
+async function loadDashboard() {
+  try {
+    const res = await api('GET', '/api/stats/overview');
+    if (res.success) {
+      const d = res.data;
+      const grid = document.getElementById('statsGrid');
+      grid.innerHTML = `
+        <div class="stat-card"><div class="stat-label">脚本总数</div><div class="stat-value">${d.totalScripts||0}</div></div>
+        <div class="stat-card"><div class="stat-label">用户总数</div><div class="stat-value">${d.totalUsers||0}</div></div>
+        <div class="stat-card"><div class="stat-label">总运行次数</div><div class="stat-value">${d.totalRuns||0}</div></div>
+        <div class="stat-card"><div class="stat-label">今日运行</div><div class="stat-value">${d.todayRuns||0}</div><div class="stat-sub">${new Date().toLocaleDateString()}</div></div>`;
+      const tbody = document.getElementById('topScripts');
+      if (d.topScripts && d.topScripts.length > 0) {
+        tbody.innerHTML = d.topScripts.map((s, i) => `<tr><td>${i+1}</td><td>${esc(s.name)}</td><td>${s.run_count||0}</td></tr>`).join('');
+      } else {
+        tbody.innerHTML = '<tr><td colspan="3" class="empty-state">暂无数据</td></tr>';
+      }
+    }
+  } catch(e) { console.error(e); }
+}
+
+// ============ 脚本管理 ============
+async function loadScripts(page) {
+  currentScriptPage = page || 1;
+  const keyword = document.getElementById('scriptSearch').value.trim();
+  const category = document.getElementById('scriptCategory').value;
+  let params = `page=${currentScriptPage}&pageSize=15`;
+  if (keyword) params += '&keyword=' + encodeURIComponent(keyword);
+  if (category) params += '&category=' + encodeURIComponent(category);
+  try {
+    const res = await api('GET', '/api/scripts?' + params);
+    const tbody = document.getElementById('scriptTable');
+    if (res.success && res.data && res.data.length > 0) {
+      tbody.innerHTML = res.data.map(s => `
+        <tr>
+          <td>${s.id}</td>
+          <td>${esc(s.name)}</td>
+          <td>${esc(s.category_name||'-')}</td>
+          <td>${s.version}</td>
+          <td>${esc(s.author_name||'-')}</td>
+          <td>${s.download_count||0}</td>
+          <td><span class="badge badge-${s.status==='published'?'published':'draft'}">${s.status}</span></td>
+          <td>${fmtDate(s.updated_at)}</td>
+          <td>
+            <button class="btn-icon" onclick="viewScriptCode(${s.id})" title="查看代码">📄</button>
+            <button class="btn-icon" onclick="previewScript(${s.id})" title="预览">👁</button>
+            <button class="btn-icon" onclick="installToTampermonkey(${s.id})" title="安装到油猴" style="color:#76b900">🧩</button>
+            <button class="btn-icon" onclick="downloadScript(${s.id})" title="下载">⬇</button>
+            <button class="btn-icon danger" onclick="deleteScript(${s.id},'${esc(s.name)}')" title="删除">🗑</button>
+          </td>
+        </tr>`).join('');
+    } else {
+      tbody.innerHTML = '<tr><td colspan="9" class="empty-state">暂无脚本</td></tr>';
+    }
+    const pag = res.pagination || {};
+    document.getElementById('scriptPagination').innerHTML = `
+      <button ${pag.page<=1?'disabled':''} onclick="loadScripts(${pag.page-1})">上一页</button>
+      <span>第 ${pag.page||1} / ${pag.totalPages||1} 页 (共 ${pag.total||0} 条)</span>
+      <button ${pag.page>=pag.totalPages?'disabled':''} onclick="loadScripts(${pag.page+1})">下一页</button>`;
+  } catch(e) { console.error(e); }
+}
+
+async function loadCategoriesForSelect() {
+  try {
+    const res = await api('GET', '/api/stats/categories');
+    const sel = document.getElementById('scriptCategory');
+    const sel2 = document.getElementById('uploadCategory');
+    if (res.success) {
+      const opts = res.data.map(c => `<option value="${c.slug}">${c.name}</option>`).join('');
+      sel.innerHTML = '<option value="">全部分类</option>' + opts;
+      sel2.innerHTML = '<option value="">请选择</option>' + res.data.map(c => `<option value="${c.id}">${c.name}</option>`).join('');
+    }
+  } catch(e) { console.error(e); }
+}
+
+function showUploadModal() {
+  document.getElementById('uploadModal').classList.remove('hidden');
+  document.getElementById('uploadError').style.display = 'none';
+  document.getElementById('uploadName').value = '';
+  document.getElementById('uploadDesc').value = '';
+  document.getElementById('uploadVersion').value = '1.0.0';
+  document.getElementById('uploadUrlPattern').value = '*';
+  document.getElementById('uploadFile').value = '';
+}
+
+function closeUploadModal() { document.getElementById('uploadModal').classList.add('hidden'); }
+
+async function uploadScript() {
+  const name = document.getElementById('uploadName').value.trim();
+  const desc = document.getElementById('uploadDesc').value.trim();
+  const catId = document.getElementById('uploadCategory').value;
+  const version = document.getElementById('uploadVersion').value.trim();
+  const urlPattern = document.getElementById('uploadUrlPattern').value.trim();
+  const fileInput = document.getElementById('uploadFile');
+  const files = fileInput.files;
+  const errEl = document.getElementById('uploadError');
+
+  if (!name || !catId || files.length === 0) {
+    errEl.textContent = '请填写脚本名称、分类并选择脚本文件';
+    errEl.style.display = 'block';
+    return;
+  }
+  errEl.style.display = 'none';
+
+  try {
+    // Read all files
+    const fileContents = [];
+    for (let i = 0; i < files.length; i++) {
+      const content = await files[i].text();
+      fileContents.push({ name: files[i].name, code: content });
+    }
+    // Sort by filename
+    fileContents.sort((a, b) => a.name.localeCompare(b.name));
+
+    if (files.length === 1) {
+      // Single file - use the existing multipart upload
+      const formData = new FormData();
+      formData.append('name', name);
+      formData.append('description', desc);
+      formData.append('category_id', catId);
+      formData.append('version', version || '1.0.0');
+      formData.append('url_pattern', urlPattern || '*');
+      formData.append('script', files[0]);
+      const res = await api('POST', '/api/scripts', formData, true);
+      if (res.success) { closeUploadModal(); loadScripts(currentScriptPage); toast('脚本上传成功', 'success'); }
+      else { errEl.textContent = res.message || res.error || '上传失败'; errEl.style.display = 'block'; }
+    } else {
+      // Multiple files - first file as main, rest as modules
+      const modules = fileContents.map((f, i) => ({ name: f.name, code: f.code, load_order: i }));
+
+      const formData = new FormData();
+      formData.append('name', name);
+      formData.append('description', desc);
+      formData.append('category_id', catId);
+      formData.append('version', version || '1.0.0');
+      formData.append('url_pattern', urlPattern || '*');
+      formData.append('script', files[0]);
+      // Add modules as JSON
+      formData.append('modules', JSON.stringify(modules));
+
+      const res = await api('POST', '/api/scripts', formData, true);
+      if (res.success) { closeUploadModal(); loadScripts(currentScriptPage); toast('脚本上传成功（含 ' + modules.length + ' 个模块）', 'success'); }
+      else { errEl.textContent = res.message || res.error || '上传失败'; errEl.style.display = 'block'; }
+    }
+  } catch(e) { errEl.textContent = '错误: ' + e.message; errEl.style.display = 'block'; }
+}
+
+async function downloadScript(id) { window.open('/api/scripts/' + id + '/download?t=' + Date.now() + '&token=' + encodeURIComponent(token)); }
+
+function installToTampermonkey(id) {
+  // 打开 .user.js 链接，浏览器安装了油猴后会自动弹出安装提示
+  window.open('/api/scripts/' + id + '/userjs', '_blank');
+}
+
+async function deleteScript(id, name) {
+  if (!confirm('确定删除脚本 "' + name + '" 吗？')) return;
+  try {
+    const res = await api('DELETE', '/api/scripts/' + id);
+    if (res.success) { loadScripts(currentScriptPage); toast('删除成功', 'success'); }
+    else { toast('删除失败: ' + (res.message||res.error), 'error'); }
+  } catch(e) { toast('网络错误', 'error'); }
+}
+
+// ============ 查看脚本代码 ============
+async function viewScriptCode(id) {
+  try {
+    const res = await api('GET', '/api/scripts/' + id);
+    if (!res.success) { toast('获取脚本详情失败', 'error'); return; }
+    currentCodeScript = res.data;
+    isCodeEditing = false;
+
+    document.getElementById('codeModalTitle').textContent = '脚本代码 - ' + currentCodeScript.name;
+    document.getElementById('codeModalError').style.display = 'none';
+
+    // 显示代码内容
+    document.getElementById('codeView').textContent = currentCodeScript.code || '// 此脚本文件为空';
+    document.getElementById('codeViewWrap').classList.remove('hidden');
+    document.getElementById('codeEditWrap').classList.add('hidden');
+    document.getElementById('codeMetaFields').classList.add('hidden');
+    document.getElementById('codeEditBtn').classList.remove('hidden');
+    document.getElementById('codeSaveBtn').classList.add('hidden');
+    document.getElementById('codeCancelBtn').classList.add('hidden');
+    document.getElementById('saveParamsBtn').classList.remove('hidden');
+
+    document.getElementById('codeModal').classList.remove('hidden');
+
+    // 初始化参数和模块
+    currentParamsSchema = currentCodeScript.params_schema || [];
+    currentParamsData = currentCodeScript.params_data || {};
+    currentModules = currentCodeScript.modules || [];
+
+    // 显示参数和模块区域
+    document.getElementById('paramsSection').style.display = 'block';
+    document.getElementById('modulesSection').style.display = 'block';
+    renderParamsSection(currentParamsSchema, currentParamsData);
+    renderModulesSection(currentModules);
+  } catch(e) {
+    toast('网络错误: ' + e.message, 'error');
+  }
+}
+
+// ============ 切换代码编辑模式 ============
+function toggleCodeEdit() {
+  isCodeEditing = true;
+  // 填充编辑区域
+  document.getElementById('codeEditArea').value = currentCodeScript.code || '';
+  document.getElementById('codeEditName').value = currentCodeScript.name || '';
+  document.getElementById('codeEditDesc').value = currentCodeScript.description || '';
+  document.getElementById('codeEditUrlPattern').value = currentCodeScript.url_pattern || '*';
+  document.getElementById('codeEditVersion').value = currentCodeScript.version || '1.0.0';
+
+  // 切换显示
+  document.getElementById('codeViewWrap').classList.add('hidden');
+  document.getElementById('codeEditWrap').classList.remove('hidden');
+  document.getElementById('codeMetaFields').classList.remove('hidden');
+  document.getElementById('codeEditBtn').classList.add('hidden');
+  document.getElementById('codeSaveBtn').classList.remove('hidden');
+  document.getElementById('codeCancelBtn').classList.remove('hidden');
+  document.getElementById('saveParamsBtn').classList.add('hidden');
+}
+
+function cancelCodeEdit() {
+  isCodeEditing = false;
+  document.getElementById('codeViewWrap').classList.remove('hidden');
+  document.getElementById('codeEditWrap').classList.add('hidden');
+  document.getElementById('codeMetaFields').classList.add('hidden');
+  document.getElementById('codeEditBtn').classList.remove('hidden');
+  document.getElementById('codeSaveBtn').classList.add('hidden');
+  document.getElementById('codeCancelBtn').classList.add('hidden');
+  document.getElementById('saveParamsBtn').classList.remove('hidden');
+}
+
+// ============ 保存脚本代码 ============
+async function saveScriptCode() {
+  if (!currentCodeScript) return;
+  const errEl = document.getElementById('codeModalError');
+  const code = document.getElementById('codeEditArea').value;
+  const name = document.getElementById('codeEditName').value.trim();
+  const description = document.getElementById('codeEditDesc').value.trim();
+  const url_pattern = document.getElementById('codeEditUrlPattern').value.trim() || '*';
+  const version = document.getElementById('codeEditVersion').value.trim() || '1.0.0';
+
+  if (!name) { errEl.textContent = '脚本名称不能为空'; errEl.style.display = 'block'; return; }
+  errEl.style.display = 'none';
+
+  try {
+    const body = {
+      code,
+      name,
+      description,
+      url_pattern,
+      version,
+      params_schema: JSON.stringify(currentParamsSchema),
+      params_data: JSON.stringify(currentParamsData),
+      modules: currentModules.map(m => ({ name: m.name, code: m.code, load_order: m.load_order }))
+    };
+    const res = await api('PUT', '/api/scripts/' + currentCodeScript.id, body);
+    if (res.success) {
+      // 更新缓存
+      currentCodeScript.code = code;
+      currentCodeScript.name = name;
+      currentCodeScript.description = description;
+      currentCodeScript.url_pattern = url_pattern;
+      currentCodeScript.version = version;
+      // 切回查看模式
+      document.getElementById('codeView').textContent = code || '// 此脚本文件为空';
+      cancelCodeEdit();
+      document.getElementById('codeModalTitle').textContent = '脚本代码 - ' + name;
+      toast('脚本保存成功', 'success');
+      // 刷新脚本列表
+      loadScripts(currentScriptPage);
+    } else {
+      errEl.textContent = res.message || res.error || '保存失败';
+      errEl.style.display = 'block';
+    }
+  } catch(e) {
+    errEl.textContent = '网络错误: ' + e.message;
+    errEl.style.display = 'block';
+  }
+}
+
+function closeCodeModal() {
+  document.getElementById('codeModal').classList.add('hidden');
+  document.getElementById('paramsSection').style.display = 'none';
+  document.getElementById('modulesSection').style.display = 'none';
+  currentCodeScript = null;
+  isCodeEditing = false;
+}
+
+function closeCodeModalWithConfirm() {
+  // 如果正在编辑代码模式，提示确认
+  if (isCodeEditing) {
+    if (!confirm('有未保存的更改，确定关闭吗？')) return;
+  }
+  closeCodeModal();
+}
+
+// ============ 参数配置渲染 ============
+let addingParam = false;
+
+function renderParamsSection(schema, data) {
+  const container = document.getElementById('paramsSection');
+  if (!container) return;
+
+  let html = '<div style="margin-bottom:12px;display:flex;align-items:center;gap:8px"><strong>脚本参数</strong> <button class="btn btn-sm" onclick="showAddParamForm()" style="font-size:11px;padding:2px 8px">+ 添加参数</button></div>';
+
+  if (!schema || schema.length === 0) {
+    html += '<div style="color:var(--text2);font-size:13px;padding:8px 0">暂无参数配置</div>';
+  } else {
+    html += '<table style="width:100%;font-size:12px;border-collapse:collapse"><thead><tr style="background:var(--bg)"><th style="padding:6px 8px;text-align:left">参数键</th><th style="padding:6px 8px;text-align:left">标签</th><th style="padding:6px 8px;text-align:left">类型</th><th style="padding:6px 8px;text-align:left">选项值</th><th style="padding:6px 8px;text-align:left">默认值</th><th style="padding:6px 8px;text-align:left">当前值</th><th style="padding:6px 8px">操作</th></tr></thead><tbody>';
+    schema.forEach((p, i) => {
+      const currentVal = data[p.key] !== undefined ? data[p.key] : p.default || '';
+      html += '<tr style="border-bottom:1px solid var(--border)">' +
+        '<td style="padding:6px 8px"><code>' + esc(p.key) + '</code></td>' +
+        '<td style="padding:6px 8px">' + esc(p.label) + '</td>' +
+        '<td style="padding:6px 8px">' + esc(p.type) + '</td>' +
+        '<td style="padding:6px 8px">' + esc((p.options||[]).join(', ')) + '</td>' +
+        '<td style="padding:6px 8px">' + esc(String(p.default || '')) + '</td>' +
+        '<td style="padding:6px 8px">' + renderParamValueInput(p, currentVal, i) + '</td>' +
+        '<td style="padding:6px 8px"><button class="btn-icon danger" onclick="removeParam(' + i + ')" title="删除">🗑</button></td>' +
+        '</tr>';
+    });
+    html += '</tbody></table>';
+  }
+
+  // 内联添加参数表单
+  html += '<div id="addParamForm" style="display:none;margin-top:12px;padding:12px;background:var(--bg);border-radius:var(--radius);border:1px solid var(--border)">' +
+    '<div style="font-weight:600;margin-bottom:10px">添加新参数</div>' +
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">' +
+      '<div class="form-group" style="margin:0"><label style="font-size:12px">参数键名 *</label><input type="text" id="newParamKey" placeholder="如 providerMode" style="font-size:12px"></div>' +
+      '<div class="form-group" style="margin:0"><label style="font-size:12px">标签 *</label><input type="text" id="newParamLabel" placeholder="如 AI来源" style="font-size:12px"></div>' +
+      '<div class="form-group" style="margin:0"><label style="font-size:12px">类型</label><select id="newParamType" onchange="toggleParamOptions()" style="font-size:12px"><option value="text">文本(text)</option><option value="select">选择(select)</option><option value="number">数字(number)</option><option value="boolean">布尔(boolean)</option></select></div>' +
+      '<div class="form-group" style="margin:0"><label style="font-size:12px">默认值</label><input type="text" id="newParamDefault" placeholder="默认值" style="font-size:12px"></div>' +
+      '<div class="form-group" style="margin:0;grid-column:span 2" id="newParamOptionsGroup"><label style="font-size:12px">选项值 <span style="font-weight:400;color:var(--text2)">（逗号分隔，如 mock,coze,dmx）</span></label><input type="text" id="newParamOptions" placeholder="mock,coze,dmx" style="font-size:12px"></div>' +
+    '</div>' +
+    '<div style="display:flex;gap:8px;margin-top:10px;justify-content:flex-end">' +
+      '<button class="btn btn-sm" onclick="hideAddParamForm()" style="background:var(--bg-card);color:var(--text);border:1px solid var(--border)">取消</button>' +
+      '<button class="btn btn-primary btn-sm" onclick="confirmAddParam()">确认添加</button>' +
+    '</div>' +
+  '</div>';
+
+  container.innerHTML = html;
+  // 根据类型显示/隐藏选项值字段
+  toggleParamOptions();
+  // 如果正在添加，恢复显示
+  if (addingParam) {
+    document.getElementById('addParamForm').style.display = 'block';
+  }
+}
+
+function renderParamValueInput(param, value, index) {
+  const escVal = esc(String(value));
+  if (param.type === 'select' && param.options && param.options.length > 0) {
+    let html = '<select onchange="updateParamValue(' + index + ',this.value)" style="font-size:12px;padding:4px 6px;border:1px solid var(--border);border-radius:4px">';
+    param.options.forEach(opt => {
+      html += '<option value="' + esc(opt) + '"' + (opt === value ? ' selected' : '') + '>' + esc(opt) + '</option>';
+    });
+    html += '</select>';
+    return html;
+  } else if (param.type === 'boolean') {
+    return '<input type="checkbox"' + (value === true || value === 'true' ? ' checked' : '') + ' onchange="updateParamValue(' + index + ',this.checked)">';
+  } else if (param.type === 'number') {
+    return '<input type="number" value="' + escVal + '" onchange="updateParamValue(' + index + ',Number(this.value))" style="font-size:12px;padding:4px 6px;width:100px;border:1px solid var(--border);border-radius:4px">';
+  } else {
+    return '<input type="text" value="' + escVal + '" onchange="updateParamValue(' + index + ',this.value)" style="font-size:12px;padding:4px 6px;width:120px;border:1px solid var(--border);border-radius:4px">';
+  }
+}
+
+function toggleParamOptions() {
+  const typeEl = document.getElementById('newParamType');
+  const group = document.getElementById('newParamOptionsGroup');
+  if (!typeEl || !group) return;
+  group.style.display = typeEl.value === 'select' ? '' : 'none';
+}
+
+function showAddParamForm() {
+  addingParam = true;
+  const form = document.getElementById('addParamForm');
+  if (form) {
+    form.style.display = 'block';
+    document.getElementById('newParamKey').focus();
+  } else {
+    // 表单还没渲染，先触发渲染
+    renderParamsSection(currentParamsSchema, currentParamsData);
+  }
+}
+
+function hideAddParamForm() {
+  addingParam = false;
+  const form = document.getElementById('addParamForm');
+  if (form) form.style.display = 'none';
+}
+
+function confirmAddParam() {
+  const key = document.getElementById('newParamKey').value.trim();
+  const label = document.getElementById('newParamLabel').value.trim();
+  const type = document.getElementById('newParamType').value;
+  const defaultVal = document.getElementById('newParamDefault').value.trim();
+  let options = [];
+  if (type === 'select') {
+    const opts = document.getElementById('newParamOptions').value.trim();
+    if (opts) options = opts.split(',').map(o => o.trim()).filter(Boolean);
+  }
+
+  if (!key) {
+    toast('参数键名不能为空', 'error');
+    return;
+  }
+  // 检查重复
+  if (currentParamsSchema.some(p => p.key === key)) {
+    toast('参数键名 "' + key + '" 已存在', 'error');
+    return;
+  }
+
+  currentParamsSchema.push({ key, label: label || key, type, options, default: defaultVal });
+  // 如果有默认值，同时设置到 paramsData
+  if (defaultVal && currentParamsData[key] === undefined) {
+    currentParamsData[key] = type === 'number' ? Number(defaultVal) : defaultVal;
+  }
+  addingParam = false;
+  renderParamsSection(currentParamsSchema, currentParamsData);
+  toast('参数 "' + key + '" 已添加', 'success');
+  // 添加参数后自动保存
+  saveParamsOnly();
+}
+
+function removeParam(index) {
+  const removedKey = currentParamsSchema[index].key;
+  currentParamsSchema.splice(index, 1);
+  delete currentParamsData[removedKey];
+  renderParamsSection(currentParamsSchema, currentParamsData);
+  toast('参数已删除', 'success');
+  // 删除参数后自动保存
+  saveParamsOnly();
+}
+
+function updateParamValue(index, value) {
+  const key = currentParamsSchema[index].key;
+  currentParamsData[key] = value;
+  // 值变更后自动保存（防抖）
+  clearTimeout(updateParamValue._timer);
+  updateParamValue._timer = setTimeout(() => saveParamsOnly(), 1000);
+}
+
+// 仅保存参数（轻量，不含模块代码）
+async function saveParamsOnly() {
+  if (!currentCodeScript) return;
+  try {
+    const body = {
+      params_schema: JSON.stringify(currentParamsSchema),
+      params_data: JSON.stringify(currentParamsData)
+    };
+    const res = await api('PUT', '/api/scripts/' + currentCodeScript.id, body);
+    if (!res.success) {
+      toast('参数保存失败: ' + (res.message || res.error), 'error');
+    }
+  } catch(e) {
+    toast('参数保存异常: ' + e.message, 'error');
+  }
+}
+
+// 保存参数和模块（重量级，含模块代码）
+async function saveParamsAndModules() {
+  if (!currentCodeScript) return;
+  try {
+    const body = {
+      params_schema: JSON.stringify(currentParamsSchema),
+      params_data: JSON.stringify(currentParamsData),
+      modules: currentModules.map(m => ({ name: m.name, code: m.code, load_order: m.load_order }))
+    };
+    const res = await api('PUT', '/api/scripts/' + currentCodeScript.id, body);
+    if (res.success) {
+      toast('参数和模块保存成功', 'success');
+    } else {
+      toast('保存失败: ' + (res.message || res.error), 'error');
+    }
+  } catch(e) {
+    toast('网络错误: ' + e.message, 'error');
+  }
+}
+
+// ============ 模块管理渲染 ============
+function renderModulesSection(modules) {
+  const container = document.getElementById('modulesSection');
+  if (!container) return;
+
+  let html = '<div style="margin-bottom:12px"><strong>脚本模块</strong> <button class="btn btn-sm" onclick="addModule()" style="font-size:11px;padding:2px 8px;margin-left:8px">+ 添加模块</button></div>';
+
+  if (!modules || modules.length === 0) {
+    html += '<div style="color:var(--text2);font-size:13px;padding:8px 0">暂无模块（脚本代码作为主文件）</div>';
+  } else {
+    html += '<div style="display:flex;flex-direction:column;gap:8px">';
+    modules.forEach((mod, i) => {
+      html += '<div style="border:1px solid var(--border);border-radius:6px;padding:10px;display:flex;align-items:center;gap:12px">' +
+        '<span style="font-size:12px;color:var(--text2);min-width:30px">#' + mod.load_order + '</span>' +
+        '<span style="font-size:13px;font-weight:500;flex:1">' + esc(mod.name) + '</span>' +
+        '<span style="font-size:11px;color:var(--text2)">' + (mod.code ? mod.code.length + ' 字符' : '') + '</span>' +
+        '<button class="btn-icon" onclick="viewModuleCode(' + i + ')" title="查看代码">📄</button>' +
+        '<button class="btn-icon" onclick="editModuleCode(' + i + ')" title="编辑">✏</button>' +
+        '<button class="btn-icon danger" onclick="removeModule(' + i + ')" title="删除">🗑</button>' +
+        '</div>';
+    });
+    html += '</div>';
+  }
+  container.innerHTML = html;
+}
+
+function addModule() {
+  // 直接添加一个空模块并打开编辑器
+  const newModule = { name: 'new-module.js', code: '', load_order: currentModules.length, isNew: true };
+  currentModules.push(newModule);
+  renderModulesSection(currentModules);
+  // 打开编辑器
+  editModuleCode(currentModules.length - 1);
+}
+
+function removeModule(index) {
+  if (!confirm('确定删除模块 "' + currentModules[index].name + '"？')) return;
+  currentModules.splice(index, 1);
+  renderModulesSection(currentModules);
+}
+
+function viewModuleCode(index) {
+  const mod = currentModules[index];
+  const win = window.open('', '_blank', 'width=800,height=600');
+  win.document.write('<pre style="font-family:monospace;font-size:13px;padding:16px;white-space:pre-wrap">' + esc(mod.code) + '</pre>');
+  win.document.title = mod.name;
+}
+
+function editModuleCode(index) {
+  const mod = currentModules[index];
+  document.getElementById('moduleEditIndex').value = index;
+  document.getElementById('moduleEditName').value = mod.name;
+  document.getElementById('moduleEditOrder').value = mod.load_order;
+  document.getElementById('moduleEditArea').value = mod.code || '';
+  document.getElementById('moduleEditModal').classList.remove('hidden');
+}
+
+function closeModuleEditModal() {
+  document.getElementById('moduleEditModal').classList.add('hidden');
+}
+
+function saveModuleEdit() {
+  const index = parseInt(document.getElementById('moduleEditIndex').value);
+  const name = document.getElementById('moduleEditName').value.trim();
+  const loadOrder = parseInt(document.getElementById('moduleEditOrder').value) || 0;
+  const code = document.getElementById('moduleEditArea').value;
+
+  if (index >= 0 && index < currentModules.length) {
+    currentModules[index].name = name;
+    currentModules[index].load_order = loadOrder;
+    currentModules[index].code = code;
+  }
+  closeModuleEditModal();
+  renderModulesSection(currentModules);
+}
+
+// ============ JS 注入预览 ============
+async function previewScript(id) {
+  try {
+    const res = await api('GET', '/api/scripts/' + id);
+    if (!res.success) { toast('获取脚本详情失败', 'error'); return; }
+    const script = res.data;
+    document.getElementById('previewCode').textContent = script.code || '// 此脚本文件为空';
+    document.getElementById('previewUrl').value = 'https://example.com';
+    // 重置 iframe
+    document.getElementById('previewFrame').src = 'about:blank';
+    document.getElementById('previewModal').classList.remove('hidden');
+  } catch(e) {
+    toast('网络错误: ' + e.message, 'error');
+  }
+}
+
+async function executePreview() {
+  const url = document.getElementById('previewUrl').value.trim();
+  const code = document.getElementById('previewCode').textContent;
+  if (!url) { toast('请输入预览 URL', 'error'); return; }
+
+  // 复制脚本代码到剪贴板
+  try {
+    await navigator.clipboard.writeText(code);
+  } catch { /* 剪贴板失败不影响主流程 */ }
+
+  // 新标签页打开目标网址
+  window.open(url, '_blank');
+
+  // 在预览区域显示操作提示
+  const wrap = document.getElementById('previewFrameWrap');
+  wrap.innerHTML = '<div style="padding:32px;text-align:center">' +
+    '<div style="font-size:48px;margin-bottom:16px">&#10003;</div>' +
+    '<div style="font-size:16px;font-weight:600;margin-bottom:12px">脚本代码已复制到剪贴板</div>' +
+    '<div style="font-size:14px;color:var(--text2);line-height:2">' +
+    '1. 在刚打开的目标页面中按 <kbd style="background:#f0f0f0;padding:2px 8px;border-radius:4px;border:1px solid #ddd;font-family:monospace">F12</kbd> 打开开发者工具<br>' +
+    '2. 切换到 <kbd style="background:#f0f0f0;padding:2px 8px;border-radius:4px;border:1px solid #ddd;font-family:monospace">Console</kbd> 面板<br>' +
+    '3. 按 <kbd style="background:#f0f0f0;padding:2px 8px;border-radius:4px;border:1px solid #ddd;font-family:monospace">Ctrl+V</kbd> 粘贴脚本代码，按回车执行</div>' +
+    '<div style="margin-top:20px">' +
+    '<button class="btn btn-primary btn-sm" onclick="copyScriptCode()" style="margin-right:8px">重新复制代码</button>' +
+    '<button class="btn btn-sm" onclick="retryIframePreview()" style="background:var(--bg);color:var(--text)">尝试 iframe 预览</button>' +
+    '</div></div>';
+  toast('脚本已复制，目标页面已在新标签打开', 'success');
+}
+
+function copyScriptCode() {
+  const code = document.getElementById('previewCode').textContent;
+  navigator.clipboard.writeText(code).then(() => toast('代码已复制到剪贴板', 'success'));
+}
+
+function retryIframePreview() {
+  // 恢复 iframe 并用 srcdoc 方式尝试（部分网站可用）
+  const wrap = document.getElementById('previewFrameWrap');
+  wrap.innerHTML = '<iframe id="previewFrame" class="preview-iframe" sandbox="allow-scripts allow-same-origin allow-forms allow-popups" src="about:blank"></iframe>';
+  const url = document.getElementById('previewUrl').value.trim();
+  const code = document.getElementById('previewCode').textContent;
+  if (!url) return;
+  toast('正在获取页面...', 'success');
+  fetch('/api/proxy-preview?url=' + encodeURIComponent(url))
+    .then(r => r.json())
+    .then(data => {
+      if (!data.success) { toast('获取页面失败: ' + (data.error || '未知错误'), 'error'); return; }
+      let html = data.html;
+      const baseTag = '<base href="' + esc(url) + '">';
+      if (html.includes('<head>')) html = html.replace('<head>', '<head>' + baseTag);
+      else if (html.includes('<html>')) html = html.replace('<html>', '<html><head>' + baseTag + '</head>');
+      else html = baseTag + html;
+      const inject = '\n<script>\ntry {\n' + code + '\n} catch(e) { console.error("脚本注入错误:", e); }\n<\/script>\n';
+      if (html.includes('</body>')) html = html.replace('</body>', inject + '</body>');
+      else html += inject;
+      document.getElementById('previewFrame').srcdoc = html;
+    })
+    .catch(e => toast('预览失败: ' + e.message, 'error'));
+}
+
+function closePreviewModal() {
+  document.getElementById('previewFrame').src = 'about:blank';
+  document.getElementById('previewModal').classList.add('hidden');
+}
+
+// ============ 用户管理 ============
+async function loadUsers(page) {
+  currentUserPage = page || 1;
+  const keyword = document.getElementById('userSearch').value.trim();
+  let params = `page=${currentUserPage}&pageSize=15`;
+  if (keyword) params += '&keyword=' + encodeURIComponent(keyword);
+  try {
+    const res = await api('GET', '/api/users?' + params);
+    const tbody = document.getElementById('userTable');
+    if (res.success && res.data && res.data.length > 0) {
+      tbody.innerHTML = res.data.map(u => `
+        <tr>
+          <td>${u.id}</td>
+          <td>${esc(u.username)}</td>
+          <td><span class="badge badge-${u.role}">${u.role}</span></td>
+          <td><span class="badge badge-${u.status===1?'active':'disabled'}">${u.status===1?'启用':'禁用'}</span></td>
+          <td>${fmtDate(u.created_at)}</td>
+          <td>
+            <button class="btn-icon" onclick="editUser(${u.id},'${esc(u.username)}','${u.role}',${u.status})" title="编辑">✏</button>
+            ${u.id!==1 ? `<button class="btn-icon danger" onclick="deleteUser(${u.id},'${esc(u.username)}')" title="删除">🗑</button>` : ''}
+          </td>
+        </tr>`).join('');
+    } else {
+      tbody.innerHTML = '<tr><td colspan="6" class="empty-state">暂无用户</td></tr>';
+    }
+    const pag = res.pagination || {};
+    document.getElementById('userPagination').innerHTML = `
+      <button ${pag.page<=1?'disabled':''} onclick="loadUsers(${pag.page-1})">上一页</button>
+      <span>第 ${pag.page||1} / ${pag.totalPages||1} 页 (共 ${pag.total||0} 条)</span>
+      <button ${pag.page>=pag.totalPages?'disabled':''} onclick="loadUsers(${pag.page+1})">下一页</button>`;
+  } catch(e) { console.error(e); }
+}
+
+function showUserModal(user) {
+  document.getElementById('userModal').classList.remove('hidden');
+  document.getElementById('userModalError').style.display = 'none';
+  if (user) {
+    document.getElementById('userModalTitle').textContent = '编辑用户';
+    document.getElementById('editUserId').value = user.id;
+    document.getElementById('editUserName').value = user.username;
+    document.getElementById('editUserPass').value = '';
+    document.getElementById('pwdHint').textContent = '(留空不修改)';
+    document.getElementById('editUserRole').value = user.role;
+    document.getElementById('editUserStatus').value = user.status;
+  } else {
+    document.getElementById('userModalTitle').textContent = '添加用户';
+    document.getElementById('editUserId').value = '';
+    document.getElementById('editUserName').value = '';
+    document.getElementById('editUserPass').value = '';
+    document.getElementById('pwdHint').textContent = '*';
+    document.getElementById('editUserRole').value = 'editor';
+    document.getElementById('editUserStatus').value = '1';
+  }
+}
+
+function closeUserModal() { document.getElementById('userModal').classList.add('hidden'); }
+
+async function editUser(id, username, role, status) {
+  showUserModal({ id, username, role, status });
+}
+
+async function saveUser() {
+  const id = document.getElementById('editUserId').value;
+  const username = document.getElementById('editUserName').value.trim();
+  const password = document.getElementById('editUserPass').value;
+  const role = document.getElementById('editUserRole').value;
+  const status = parseInt(document.getElementById('editUserStatus').value);
+  const errEl = document.getElementById('userModalError');
+  if (!username) { errEl.textContent = '用户名不能为空'; errEl.style.display = 'block'; return; }
+  if (!id && !password) { errEl.textContent = '密码不能为空'; errEl.style.display = 'block'; return; }
+  errEl.style.display = 'none';
+  const body = { username, role, status };
+  if (password) body.password = password;
+  try {
+    const res = await api(id ? 'PUT' : 'POST', id ? '/api/users/' + id : '/api/users', body);
+    if (res.success) { closeUserModal(); loadUsers(currentUserPage); toast(id ? '更新成功' : '创建成功', 'success'); }
+    else { errEl.textContent = res.message || res.error || '操作失败'; errEl.style.display = 'block'; }
+  } catch(e) { errEl.textContent = '网络错误'; errEl.style.display = 'block'; }
+}
+
+async function deleteUser(id, name) {
+  if (!confirm('确定删除用户 "' + name + '" 吗？\n该用户的所有脚本和统计数据将被清空。')) return;
+  try {
+    const res = await api('DELETE', '/api/users/' + id);
+    if (res.success) { loadUsers(currentUserPage); toast('删除成功', 'success'); }
+    else { toast('删除失败: ' + (res.message||res.error), 'error'); }
+  } catch(e) { toast('网络错误', 'error'); }
+}
+
+// ============ 分类管理 ============
+async function loadCategories() {
+  try {
+    const res = await api('GET', '/api/categories');
+    const tbody = document.getElementById('categoryTable');
+    if (res.success && res.data && res.data.length > 0) {
+      tbody.innerHTML = res.data.map(c => `
+        <tr>
+          <td>${c.id}</td>
+          <td>${esc(c.name)}</td>
+          <td>${esc(c.slug)}</td>
+          <td>${esc(c.description||'-')}</td>
+          <td>${c.script_count||0}</td>
+          <td>${c.sort_order||0}</td>
+          <td>
+            <button class="btn-icon" onclick="editCategory(${c.id},'${esc(c.name)}','${esc(c.slug)}','${esc(c.description||'')}',${c.sort_order||0})" title="编辑">✏</button>
+            <button class="btn-icon danger" onclick="deleteCategory(${c.id},'${esc(c.name)}')" title="删除">🗑</button>
+          </td>
+        </tr>`).join('');
+    } else {
+      tbody.innerHTML = '<tr><td colspan="7" class="empty-state">暂无分类</td></tr>';
+    }
+  } catch(e) { console.error(e); }
+}
+
+function showCategoryModal(cat) {
+  document.getElementById('categoryModal').classList.remove('hidden');
+  document.getElementById('categoryModalError').style.display = 'none';
+  if (cat) {
+    document.getElementById('categoryModalTitle').textContent = '编辑分类';
+    document.getElementById('editCatId').value = cat.id;
+    document.getElementById('editCatName').value = cat.name;
+    document.getElementById('editCatSlug').value = cat.slug;
+    document.getElementById('editCatDesc').value = cat.description || '';
+    document.getElementById('editCatSort').value = cat.sortOrder;
+  } else {
+    document.getElementById('categoryModalTitle').textContent = '添加分类';
+    document.getElementById('editCatId').value = '';
+    document.getElementById('editCatName').value = '';
+    document.getElementById('editCatSlug').value = '';
+    document.getElementById('editCatDesc').value = '';
+    document.getElementById('editCatSort').value = '0';
+  }
+}
+
+function closeCategoryModal() { document.getElementById('categoryModal').classList.remove('hidden'); document.getElementById('categoryModal').classList.add('hidden'); }
+
+function editCategory(id, name, slug, desc, sort) {
+  showCategoryModal({ id, name, slug, description: desc, sortOrder: sort });
+}
+
+async function saveCategory() {
+  const id = document.getElementById('editCatId').value;
+  const name = document.getElementById('editCatName').value.trim();
+  const slug = document.getElementById('editCatSlug').value.trim();
+  const description = document.getElementById('editCatDesc').value.trim();
+  const sortOrder = parseInt(document.getElementById('editCatSort').value) || 0;
+  const errEl = document.getElementById('categoryModalError');
+  if (!name || !slug) { errEl.textContent = '名称和Slug不能为空'; errEl.style.display = 'block'; return; }
+  errEl.style.display = 'none';
+
+  try {
+    const body = { name, slug, description, sort_order: sortOrder };
+    const res = await api(id ? 'PUT' : 'POST', id ? '/api/categories/' + id : '/api/categories', body);
+    if (res.success) {
+      closeCategoryModal();
+      loadCategories();
+      loadCategoriesForSelect();
+      toast(id ? '分类更新成功' : '分类创建成功', 'success');
+    } else {
+      errEl.textContent = res.message || res.error || '操作失败';
+      errEl.style.display = 'block';
+    }
+  } catch(e) {
+    errEl.textContent = '网络错误: ' + e.message;
+    errEl.style.display = 'block';
+  }
+}
+
+async function deleteCategory(id, name) {
+  if (!confirm('确定删除分类 "' + name + '" 吗？\n该分类下的脚本将被移至未分类。')) return;
+  try {
+    const res = await api('DELETE', '/api/categories/' + id);
+    if (res.success) {
+      loadCategories();
+      loadCategoriesForSelect();
+      toast('分类删除成功', 'success');
+    } else {
+      toast('删除失败: ' + (res.message||res.error), 'error');
+    }
+  } catch(e) {
+    toast('网络错误', 'error');
+  }
+}
+
+// ============ Token 管理 ============
+function copyToken() {
+  if (token) {
+    navigator.clipboard.writeText(token).then(() => toast('Token 已复制到剪贴板', 'success'));
+  }
+}
+
+function refreshToken() {
+  document.getElementById('loginPage').classList.remove('hidden');
+  document.getElementById('mainPage').classList.add('hidden');
+  token = '';
+  document.getElementById('loginUser').value = 'admin';
+  document.getElementById('loginPass').value = 'admin123';
+  toast('请重新登录获取新 Token', 'success');
+}
+
+// ============ 辅助函数 ============
+function esc(str) { return (str||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
+function fmtDate(d) { if(!d) return '-'; return new Date(d).toLocaleString('zh-CN'); }
+
+// ============ 初始化 ============
+document.addEventListener('DOMContentLoaded', () => {
+  // 优先从 localStorage 恢复登录状态
+  const savedToken = localStorage.getItem('admin_token');
+  const savedUser = localStorage.getItem('admin_user');
+  if (savedToken) {
+    token = savedToken;
+    try { currentUser = JSON.parse(savedUser); } catch { currentUser = null; }
+    document.getElementById('loginPage').classList.add('hidden');
+    document.getElementById('mainPage').classList.remove('hidden');
+    if (currentUser) document.getElementById('sidebarUser').textContent = currentUser.username + ' (' + currentUser.role + ')';
+    document.getElementById('tokenDisplay').textContent = token;
+    switchPage('dashboard');
+    loadCategoriesForSelect();
+  } else {
+    // 检查 URL hash 中的 token
+    const hash = window.location.hash;
+    if (hash.startsWith('#token=')) {
+      token = hash.substring(7);
+      localStorage.setItem('admin_token', token);
+      document.getElementById('loginPage').classList.add('hidden');
+      document.getElementById('mainPage').classList.remove('hidden');
+      document.getElementById('tokenDisplay').textContent = token;
+      switchPage('dashboard');
+      loadCategoriesForSelect();
+    }
+  }
+  // 回车键自动登录
+  document.getElementById('loginPass').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') login();
+  });
+});
+</script>
+
+<!-- 模块代码编辑弹窗 -->
+<div id="moduleEditModal" class="modal-overlay hidden" onclick="if(event.target===this)closeModuleEditModal()">
+  <div class="modal-box wide tall">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+      <h3 style="margin:0">编辑模块</h3>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-success btn-sm" onclick="saveModuleEdit()">保存</button>
+        <button class="btn btn-sm" onclick="closeModuleEditModal()" style="background:var(--bg);color:var(--text)">取消</button>
+      </div>
+    </div>
+    <div class="form-group"><label>模块名称</label><input type="text" id="moduleEditName"></div>
+    <div class="form-group"><label>加载顺序</label><input type="number" id="moduleEditOrder" value="0"></div>
+    <input type="hidden" id="moduleEditIndex">
+    <textarea class="code-edit" id="moduleEditArea" spellcheck="false" style="height:400px"></textarea>
+  </div>
+</div>
+
+</body>
+</html>

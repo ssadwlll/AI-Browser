@@ -3,3 +3,5 @@ dist/
 *.log
 .DS_Store
 browser-use-main/
+.env
+package-lock.json

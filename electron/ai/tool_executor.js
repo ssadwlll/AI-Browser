@@ -75,6 +75,34 @@ class ToolExecutor {
         case 'scroll_to_element':
           return await this._scrollToElement(browserView, args)
 
+        case 'hover_element':
+          // 引擎1: Electron API（sendInputEvent mouseMove）
+          return await this._hoverElement(webContents, args)
+
+        case 'scroll_page':
+          // 引擎1: Electron API（sendInputEvent mouseWheel）
+          return await this._scrollPage(webContents, args)
+
+        case 'select_option':
+          // 引擎1: Electron API（select 元素操作 + change 事件）
+          return await this._selectOption(webContents, args)
+
+        case 'upload_file':
+          // 引擎1: Electron API（webContents.uploadFile）
+          return await this._uploadFile(webContents, args)
+
+        case 'get_element_text':
+          // 引擎1: 专用工具（比 execute_js 更简洁）
+          return await this._getElementText(webContents, args)
+
+        case 'get_element_attribute':
+          // 引擎1: 专用工具（比 execute_js 更简洁）
+          return await this._getElementAttribute(webContents, args)
+
+        case 'drag_and_drop':
+          // 引擎1: Electron API（sendInputEvent 鼠标拖拽轨迹）
+          return await this._dragAndDrop(webContents, args)
+
         default:
           return { success: false, error: `未知工具: ${toolName}` }
       }
@@ -769,6 +797,67 @@ class ToolExecutor {
     } catch (e) {
       return { success: false, error: e.message }
     }
+  }
+
+  // ============ 引擎1 新增工具 ============
+
+  async _hoverElement(webContents, args) {
+    if (!webContents) return { success: false, error: '没有打开的页面' }
+    if (!args.selector) return { success: false, error: '缺少selector参数' }
+
+    const result = await this.electronEngine.hoverElement(webContents, args.selector, args.index || 0)
+    return { success: result.success, result, description: result.success ? `已悬停在元素: ${args.selector}` : undefined }
+  }
+
+  async _scrollPage(webContents, args) {
+    if (!webContents) return { success: false, error: '没有打开的页面' }
+
+    const direction = args.direction || 1
+    const amount = args.amount || 300
+    const result = await this.electronEngine.scrollPage(webContents, direction, amount)
+    return { success: true, result, description: `已向${direction > 0 ? '下' : '上'}滚动${amount}像素` }
+  }
+
+  async _selectOption(webContents, args) {
+    if (!webContents) return { success: false, error: '没有打开的页面' }
+    if (!args.selector) return { success: false, error: '缺少selector参数' }
+    if (!args.value) return { success: false, error: '缺少value参数' }
+
+    const result = await this.electronEngine.selectOption(webContents, args.selector, args.value, args.index || 0)
+    return { success: result.success, result, description: result.success ? `已选择选项: ${result.selectedText}` : undefined }
+  }
+
+  async _uploadFile(webContents, args) {
+    if (!webContents) return { success: false, error: '没有打开的页面' }
+    if (!args.selector) return { success: false, error: '缺少selector参数' }
+    if (!args.file_path) return { success: false, error: '缺少file_path参数' }
+
+    const result = await this.electronEngine.uploadFile(webContents, args.selector, args.file_path, args.index || 0)
+    return { success: result.success, result, description: result.success ? `已上传文件: ${args.file_path}` : undefined }
+  }
+
+  async _getElementText(webContents, args) {
+    if (!webContents) return { success: false, error: '没有打开的页面' }
+    if (!args.selector) return { success: false, error: '缺少selector参数' }
+
+    const result = await this.electronEngine.getElementText(webContents, args.selector, args.index || 0, args.max_length || 5000)
+    return { success: result.success, result, description: result.success ? `已获取元素文本` : undefined }
+  }
+
+  async _getElementAttribute(webContents, args) {
+    if (!webContents) return { success: false, error: '没有打开的页面' }
+    if (!args.selector) return { success: false, error: '缺少selector参数' }
+    if (!args.attribute) return { success: false, error: '缺少attribute参数' }
+
+    const result = await this.electronEngine.getElementAttribute(webContents, args.selector, args.attribute, args.index || 0)
+    return { success: result.success, result, description: result.success ? `已获取属性 ${args.attribute}=${result.value}` : undefined }
+  }
+
+  async _dragAndDrop(webContents, args) {
+    if (!webContents) return { success: false, error: '没有打开的页面' }
+
+    const result = await this.electronEngine.dragAndDrop(webContents, args.from_x, args.from_y, args.to_x, args.to_y)
+    return { success: result.success, result, description: result.success ? `已从(${args.from_x},${args.from_y})拖拽到(${args.to_x},${args.to_y})` : undefined }
   }
 }
 
