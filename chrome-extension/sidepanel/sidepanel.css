@@ -131,6 +131,20 @@ body{font-family:var(--font-sans);background:var(--bg-white);color:var(--text-pr
 .user-msg .msg-bubble code{background:rgba(255,255,255,0.18)}
 .msg-bubble pre{background:#1a1b26;color:#cdd6f4;padding:14px;border-radius:var(--radius-lg);overflow-x:auto;margin:8px 0;font-size:var(--fs-xs);font-family:var(--font-mono);line-height:1.5;border:1px solid rgba(255,255,255,0.05)}
 .msg-bubble pre code{background:none;padding:0;color:inherit;font-size:var(--fs-xs)}
+.msg-markdown{white-space:normal;line-height:1.7}
+.msg-markdown p{margin:0 0 8px}
+.msg-markdown p:last-child{margin-bottom:0}
+.msg-markdown h1,.msg-markdown h2,.msg-markdown h3,.msg-markdown h4{margin:12px 0 6px;font-weight:600;line-height:1.3}
+.msg-markdown h1{font-size:18px;color:var(--text-primary)}
+.msg-markdown h2{font-size:16px;color:var(--text-primary)}
+.msg-markdown h3{font-size:14px;color:var(--text-primary)}
+.msg-markdown h4{font-size:13px;color:var(--text-secondary)}
+.msg-markdown ul,.msg-markdown ol{margin:4px 0;padding-left:20px}
+.msg-markdown li{margin:2px 0}
+.msg-markdown a{color:var(--brand);text-decoration:none}
+.msg-markdown a:hover{text-decoration:underline}
+.msg-markdown hr{border:none;border-top:1px solid var(--border-light);margin:12px 0}
+.msg-markdown strong{font-weight:600;color:var(--text-primary)}
 
 /* 输入中动画 */
 .typing-indicator{display:inline-flex;gap:5px;padding:6px 0}

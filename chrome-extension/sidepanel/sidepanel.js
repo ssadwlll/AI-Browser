@@ -184,6 +184,59 @@ const chatMessages = document.getElementById('chatMessages')
 const chatInput = document.getElementById('chatInput')
 const sendBtn = document.getElementById('sendBtn')
 
+function renderMarkdown(text) {
+  if (!text) return ''
+
+  // 转义 HTML，防止 XSS
+  let html = text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+
+  // 代码块 ```lang\ncode\n```
+  html = html.replace(/```(\w*)\n([\s\S]*?)```/g, (_, lang, code) =>
+    `<pre><code class="lang-${lang || 'plaintext'}">${code.trim()}</code></pre>`
+  )
+
+  // 行内代码 `code`
+  html = html.replace(/`([^`]+)`/g, '<code>$1</code>')
+
+  // 粗体 **text**
+  html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+
+  // 标题
+  html = html.replace(/^#### (.+)$/gm, '<h4>$1</h4>')
+  html = html.replace(/^### (.+)$/gm, '<h3>$1</h3>')
+  html = html.replace(/^## (.+)$/gm, '<h2>$1</h2>')
+  html = html.replace(/^# (.+)$/gm, '<h1>$1</h1>')
+
+  // 链接 [text](url)
+  html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g,
+    '<a href="$2" target="_blank" rel="noopener">$1</a>')
+
+  // 无序列表（合并连续的 <li>）
+  html = html.replace(/^[-*] (.+)$/gm, '<li>$1</li>')
+  html = html.replace(/((?:<li>.*?<\/li>\s*)+)/g, '<ul>$1</ul>')
+
+  // 有序列表
+  html = html.replace(/^\d+\. (.+)$/gm, '<li>$1</li>')
+
+  // 水平线
+  html = html.replace(/^---$/gm, '<hr>')
+
+  // 段落：双换行分隔
+  const paras = html.split(/\n\n+/)
+  html = paras.map(p => {
+    p = p.trim()
+    if (!p) return ''
+    // 已经是块级元素的不再包 <p>
+    if (/^<(h[1-4]|pre|ul|ol|hr|li|blockquote)/.test(p)) return p
+    return `<p>${p.replace(/\n/g, '<br>')}</p>`
+  }).join('\n')
+
+  return html
+}
+
 function addMessage(role, content) {
   const welcome = chatMessages.querySelector('.welcome')
   if (welcome) welcome.remove()
@@ -199,7 +252,7 @@ function addMessage(role, content) {
     <div class="msg-avatar">${isUser ? userAvatarSVG : aiAvatarSVG}</div>
     <div class="msg-body">
       <div class="msg-name">${isUser ? '你' : 'AI Assistant'}</div>
-      <div class="msg-bubble">${escapeHtml(content)}</div>
+      <div class="msg-bubble${isUser ? '' : ' msg-markdown'}">${isUser ? escapeHtml(content) : renderMarkdown(content)}</div>
     </div>
   `
   chatMessages.appendChild(div)
@@ -219,7 +272,7 @@ function addStreamingMessage() {
     <div class="msg-avatar">${aiAvatarSVG}</div>
     <div class="msg-body">
       <div class="msg-name">AI Assistant</div>
-      <div class="msg-bubble"><span class="typing-indicator"><span></span><span></span><span></span></span></div>
+      <div class="msg-bubble msg-markdown"><span class="typing-indicator"><span></span><span></span><span></span></span></div>
     </div>
   `
   chatMessages.appendChild(div)
@@ -229,7 +282,7 @@ function addStreamingMessage() {
 
 function updateStreamingMessage(div, content) {
   const bubble = div.querySelector('.msg-bubble')
-  bubble.textContent = content
+  bubble.innerHTML = renderMarkdown(content)
   chatMessages.scrollTop = chatMessages.scrollHeight
 }
 
