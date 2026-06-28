@@ -46,15 +46,28 @@
 
     document.addEventListener('mouseup', (e) => {
       setTimeout(() => {
-        const selection = window.getSelection()
-        const text = selection?.toString().trim()
-        if (!text || text.length < 3) {
+        try {
+          const selection = window.getSelection()
+          const text = selection?.toString().trim()
+          if (!text || text.length < 3) {
+            removeToolbar()
+            return
+          }
+          if (selection.rangeCount === 0) {
+            removeToolbar()
+            return
+          }
+          const range = selection.getRangeAt(0)
+          const rect = range.getBoundingClientRect()
+          if (!rect || rect.width === 0) {
+            removeToolbar()
+            return
+          }
+          showToolbar(rect, text)
+        } catch (err) {
+          console.warn('[划词工具栏] 创建失败:', err.message)
           removeToolbar()
-          return
         }
-        const range = selection.getRangeAt(0)
-        const rect = range.getBoundingClientRect()
-        showToolbar(rect, text)
       }, 100)
     })
 
@@ -110,35 +123,64 @@
     }
   }
 
-  // ---- 页面助手浮动按钮 ----
+  // ---- 页面助手浮动按钮组 ----
   function initPageAssistant() {
     const host = document.createElement('div')
     host.id = 'ai-browser-assistant-host'
     const shadow = host.attachShadow({ mode: 'closed' })
 
+    const btns = [
+      { id: 'toolbox', label: '工具箱', pill: true, svg: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3.77-3.77a6 6 0 01-7.94 7.94l-6.91 6.91a2.12 2.12 0 01-3-3l6.91-6.91a6 6 0 017.94-7.94l-3.76 3.76z"/></svg>' },
+      { id: 'tools', label: '工具', svg: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>' },
+      { id: 'agent', label: 'Agent', svg: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 2a3 3 0 00-3 3v1a3 3 0 003 3 3 3 0 003-3V5a3 3 0 00-3-3z"/><path d="M12 9v3"/><path d="M7 14a5 5 0 0010 0"/><path d="M12 19v3"/><circle cx="9" cy="14.5" r="1"/><circle cx="15" cy="14.5" r="1"/></svg>' },
+      { id: 'settings', label: '设置', svg: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.32 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>' },
+      { id: 'ai', label: 'AI', pill: true, brand: true, svg: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>' },
+    ]
+
+    const btnsHTML = btns.map(b => {
+      const cls = b.pill ? 'fab-pill' : 'fab-icon'
+      const brandCls = b.brand ? ' fab-brand' : ''
+      const label = b.label ? `<span class="label">${b.label}</span>` : ''
+      return `<div class="${cls}${brandCls}" data-action="${b.id}" title="${b.label || b.id}">
+        <span class="icon">${b.svg}</span>
+        ${label}
+      </div>`
+    }).join('')
+
     shadow.innerHTML = `
       <style>
-        .fab-wrapper{position:fixed;bottom:100px;right:0;z-index:2147483599;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif}
-        .fab{display:flex;flex-direction:row;justify-content:flex-start;align-items:center;cursor:pointer;gap:6px;height:36px;padding:0 8px;border:1px solid rgba(255,255,255,0.1);background:#fff;border-radius:32px 0 0 32px;box-shadow:0 3.2px 12px 0 rgba(0,0,0,0.08),0 5px 25px 0 rgba(0,0,0,0.04);transition:right .3s ease,background-color .2s ease-in-out;right:-26px}
-        .fab:hover{right:0;background:rgba(104,65,234,0.08)}
-        .fab:active{background:rgba(104,65,234,0.12)}
-        .fab .icon{width:20px;height:20px;display:flex;align-items:center;justify-content:center;flex-shrink:0}
-        .fab .label{font-size:13px;font-weight:500;color:#262626;white-space:nowrap}
-        .fab:hover .label{color:#6841ea}
+        .fab-group{position:fixed;bottom:60px;right:0;z-index:2147483599;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;display:flex;flex-direction:column;gap:6px;align-items:flex-end}
+        .fab-pill,.fab-icon{display:flex;flex-direction:row;align-items:center;cursor:pointer;gap:6px;height:36px;background:#fff;border:1px solid rgba(79,89,102,0.12);box-shadow:0 2px 12px rgba(0,0,0,0.08);border-radius:18px 0 0 18px;border-right:none;transition:background-color .2s,width .3s ease,padding .3s ease}
+        .fab-pill{padding:0 12px 0 8px}
+        .fab-icon{width:36px;padding:0 0 0 8px;justify-content:flex-start;overflow:hidden;white-space:nowrap}
+        .fab-icon:hover{width:auto;padding:0 12px 0 8px}
+        .fab-pill:hover,.fab-icon:hover{background:rgba(104,65,234,0.06)}
+        .fab-pill:active,.fab-icon:active{background:rgba(104,65,234,0.12)}
+        .fab-brand{background:linear-gradient(135deg,#b059f8,#6841ea);border:none;box-shadow:0 2px 16px rgba(104,65,234,0.3)}
+        .fab-brand:hover{background:linear-gradient(135deg,#c070ff,#7b52f0)}
+        .fab-brand .label{color:#fff}
+        .fab-brand .icon{color:#fff}
+        .icon{width:20px;height:20px;display:flex;align-items:center;justify-content:center;flex-shrink:0;color:#6841ea}
+        .label{font-size:13px;font-weight:500;color:#262626;white-space:nowrap}
+        .fab-pill:hover .label{color:#6841ea}
+        .fab-icon .label{opacity:0;transition:opacity .2s}
+        .fab-icon:hover .label{opacity:1;color:#6841ea}
       </style>
-      <div class="fab-wrapper">
-        <div class="fab" title="AI Browser 助手">
-          <span class="icon">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#6841ea" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
-          </span>
-          <span class="label">AI</span>
-        </div>
+      <div class="fab-group">
+        ${btnsHTML}
       </div>
     `
 
-    shadow.querySelector('.fab').addEventListener('click', () => {
-      // 打开 Chrome 原生 sidePanel
-      chrome.runtime.sendMessage({ type: 'openSidebar' })
+    shadow.querySelectorAll('[data-action]').forEach(el => {
+      el.addEventListener('click', () => {
+        const action = el.dataset.action
+        if (action === 'ai') {
+          chrome.runtime.sendMessage({ type: 'openSidebar' })
+        } else {
+          chrome.storage.local.set({ floatingToolAction: action })
+          chrome.runtime.sendMessage({ type: 'openSidebar' })
+        }
+      })
     })
 
     document.body.appendChild(host)

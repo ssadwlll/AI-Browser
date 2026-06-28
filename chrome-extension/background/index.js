@@ -444,6 +444,70 @@ class PageService {
       return null
     }
   }
+
+  async executeScript(code) {
+    try {
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
+      if (!tab?.id) throw new Error('No active tab')
+
+      const results = await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        func: (scriptCode) => {
+          try {
+            // 用 new Function 执行，绕过页面CSP（因为 func 本身不受CSP限制）
+            new Function(scriptCode)()
+            return undefined
+          } catch (e) {
+            return { __error: e.message }
+          }
+        },
+        args: [code],
+        world: 'MAIN',
+      })
+      const result = results[0]?.result
+      if (result?.__error) {
+        return { ok: false, error: result.__error }
+      }
+      return { ok: true, result }
+    } catch (e) {
+      console.warn('[PageService] executeScript error:', e.message)
+      return { ok: false, error: e.message }
+    }
+  }
+
+  // 一站式注入：从服务器拉代码 + 注入到页面
+  async injectToolboxScript(scriptId) {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
+    if (!tab?.id) return { ok: false, error: 'No active tab' }
+
+    // 从服务器获取脚本代码
+    const injectData = await scriptService.fetchInjectData(scriptId)
+    if (!injectData?.code) return { ok: false, error: '无法获取脚本代码' }
+
+    try {
+      const results = await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        func: (scriptCode) => {
+          try {
+            new Function(scriptCode)()
+            return undefined
+          } catch (e) {
+            return { __error: e.message }
+          }
+        },
+        args: [injectData.code],
+        world: 'MAIN',
+      })
+      const result = results[0]?.result
+      if (result?.__error) {
+        return { ok: false, error: result.__error }
+      }
+      return { ok: true }
+    } catch (e) {
+      console.warn('[PageService] injectToolboxScript error:', e.message)
+      return { ok: false, error: e.message }
+    }
+  }
 }
 
 // ============ 服务实例 ============
@@ -507,13 +571,6 @@ chrome.runtime.onConnect.addListener((port) => {
 })
 
 // ============ 事件监听 ============
-
-// 页面加载完成时注入脚本
-chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
-  if (changeInfo.status === 'complete' && tab.url) {
-    scriptService.injectScriptsForTab(tabId, tab.url)
-  }
-})
 
 // 扩展安装/启动时同步脚本
 chrome.runtime.onInstalled.addListener(() => {

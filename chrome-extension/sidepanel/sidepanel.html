@@ -108,6 +108,26 @@
           </div>
           <div class="toolbox-content" id="toolboxScripts"></div>
         </div>
+
+        <!-- JS注入面板 -->
+        <div class="js-injector-panel" id="jsInjectorPanel">
+          <div class="js-injector-header">
+            <span>JS 代码注入 <span class="hint">— 注入到当前页面执行</span></span>
+            <button class="js-injector-close" id="jsInjectorCloseBtn">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
+            </button>
+          </div>
+          <div class="js-injector-body">
+            <textarea id="jsCodeInput" placeholder="输入要注入的 JavaScript 代码...&#10;&#10;例如：&#10;document.title = 'Hello World';&#10;alert('注入成功！');" spellcheck="false"></textarea>
+            <div class="js-injector-actions">
+              <button class="btn btn-primary btn-run" id="jsInjectRunBtn">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                注入执行
+              </button>
+            </div>
+            <div class="js-injector-result" id="jsInjectorResult"></div>
+          </div>
+        </div>
       </div>
 
       <!-- 画图视图 -->

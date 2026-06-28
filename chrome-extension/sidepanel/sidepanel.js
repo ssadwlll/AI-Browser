@@ -120,13 +120,63 @@ async function loadToolboxScripts() {
     </div>
   `).join('')
 
-  container.querySelectorAll('.toolbox-script').forEach(el => {
-    el.addEventListener('click', async () => {
-      const scriptName = el.dataset.name
-      sendMessage(`执行脚本：${scriptName}`)
+  // 点击直接注入
+  container.querySelectorAll('.toolbox-script').forEach(row => {
+    row.addEventListener('click', () => {
+      const scriptId = parseInt(row.dataset.id)
       document.getElementById('toolboxPanel').classList.remove('show')
+      callService('pageService', 'injectToolboxScript', scriptId).catch(e => {
+        console.warn('[工具箱] 注入异常:', e.message)
+      })
     })
   })
+}
+
+// ============ JS注入功能 ============
+
+// 关闭JS注入面板
+document.getElementById('jsInjectorCloseBtn').addEventListener('click', () => {
+  document.getElementById('jsInjectorPanel').classList.remove('show')
+})
+
+// 快捷键 Ctrl+Enter 执行注入
+document.getElementById('jsCodeInput').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+    e.preventDefault()
+    executeJSInjection()
+  }
+})
+
+// 注入执行按钮
+document.getElementById('jsInjectRunBtn').addEventListener('click', executeJSInjection)
+
+async function executeJSInjection() {
+  const code = document.getElementById('jsCodeInput').value.trim()
+  const resultEl = document.getElementById('jsInjectorResult')
+  
+  if (!code) {
+    resultEl.textContent = '请输入 JavaScript 代码'
+    resultEl.className = 'js-injector-result error show'
+    return
+  }
+
+  resultEl.textContent = '正在注入...'
+  resultEl.className = 'js-injector-result show'
+
+  try {
+    const res = await callService('pageService', 'executeScript', code)
+    if (res && res.ok) {
+      const output = res.result !== undefined ? JSON.stringify(res.result, null, 2) : '执行成功（无返回值）'
+      resultEl.textContent = '✅ ' + output
+      resultEl.className = 'js-injector-result show'
+    } else {
+      resultEl.textContent = '❌ ' + (res?.error || '执行失败')
+      resultEl.className = 'js-injector-result error show'
+    }
+  } catch (e) {
+    resultEl.textContent = '❌ ' + e.message
+    resultEl.className = 'js-injector-result error show'
+  }
 }
 
 // ============ 聊天功能 ============
@@ -383,6 +433,9 @@ async function loadScripts() {
     <div class="script-card" data-id="${s.id}">
       <div class="script-card-header">
         <span class="script-card-name">${escapeHtml(s.name)}</span>
+        <button class="script-inject-btn" data-script-id="${s.id}" title="注入到页面">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+        </button>
         <div class="toggle ${s.enabled ? 'on' : ''}" data-script-id="${s.id}"></div>
       </div>
       ${s.description ? `<div class="script-card-desc">${escapeHtml(s.description)}</div>` : ''}
@@ -393,6 +446,18 @@ async function loadScripts() {
     </div>
   `).join('')
 
+  // 点击注入按钮
+  container.querySelectorAll('.script-inject-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation()
+      const scriptId = parseInt(btn.dataset.scriptId)
+      callService('pageService', 'injectToolboxScript', scriptId).catch(e => {
+        console.warn('[脚本管理] 注入异常:', e.message)
+      })
+    })
+  })
+
+  // 开关切换
   container.querySelectorAll('.toggle[data-script-id]').forEach(el => {
     el.addEventListener('click', async () => {
       const id = parseInt(el.dataset.scriptId)
@@ -446,9 +511,38 @@ checkPendingMessage()
 
 // 监听 storage 变化（sidepanel 已打开时，新的划词操作会触发）
 chrome.storage.onChanged.addListener((changes, area) => {
-  if (area === 'local' && changes.pendingMessage?.newValue) {
-    chrome.storage.local.remove('pendingMessage')
-    showView('chatView')
-    sendMessage(changes.pendingMessage.newValue)
+  if (area === 'local') {
+    if (changes.pendingMessage?.newValue) {
+      chrome.storage.local.remove('pendingMessage')
+      showView('chatView')
+      sendMessage(changes.pendingMessage.newValue)
+    }
+    if (changes.floatingToolAction?.newValue) {
+      const action = changes.floatingToolAction.newValue
+      chrome.storage.local.remove('floatingToolAction')
+      handleFloatingAction(action)
+    }
   }
 })
+
+// 响应页面浮动按钮点击
+async function handleFloatingAction(action) {
+  switch (action) {
+    case 'toolbox':
+      showView('chatView')
+      const panel = document.getElementById('toolboxPanel')
+      panel.classList.add('show')
+      await loadToolboxScripts()
+      break
+    case 'tools':
+      showView('scriptsView')
+      loadScripts()
+      break
+    case 'agent':
+      showView('drawView')
+      break
+    case 'settings':
+      showView('settingsView')
+      break
+  }
+}
