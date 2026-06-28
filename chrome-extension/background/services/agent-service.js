@@ -222,7 +222,39 @@ export class AgentService {
         for (let i = 0; i < max; i++) {
           results.push(els[i].textContent.trim().slice(0, 500))
         }
-        return multiple !== false ? results : (results[0] || '')
+        const content = multiple !== false ? results : (results[0] || '')
+
+        // 检测页面阻塞元素（登录弹窗、遮罩层等）
+        const blockerSelectors = [
+          '[class*="login"]', '[class*="Login"]',
+          '[class*="modal"]', '[class*="dialog"]', '[class*="overlay"]',
+          '[class*="mask"]', '[class*="popup"]',
+          '[id*="login"]', '[id*="modal"]', '[id*="dialog"]',
+        ]
+        const foundBlockers = []
+        for (const bs of blockerSelectors) {
+          try {
+            const bEls = document.querySelectorAll(bs)
+            for (const el of bEls) {
+              const style = getComputedStyle(el)
+              if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') continue
+              const rect = el.getBoundingClientRect()
+              if (rect.width === 0 || rect.height === 0) continue
+              foundBlockers.push({ selector: bs, text: el.textContent.trim().slice(0, 60) })
+              if (foundBlockers.length >= 3) break
+            }
+          } catch {}
+          if (foundBlockers.length >= 3) break
+        }
+
+        if (foundBlockers.length > 0) {
+          return {
+            content,
+            blocker: '页面检测到弹窗/遮罩层，可能阻碍操作: ' + JSON.stringify(foundBlockers),
+            hint: '如果弹窗是你的操作目标，继续操作；如果是登录/验证弹窗阻碍了你，尝试 press_key(Escape) 或 click_element 关闭按钮。若多次尝试无效，用 finish_task 报告用户：页面需要登录才能操作',
+          }
+        }
+        return content
       },
 
       click_element: (selector, index) => {
@@ -326,10 +358,11 @@ export class AgentService {
 
     try {
       console.log('[Agent] executeDOMTool:', toolName, 'args:', JSON.stringify(args).slice(0, 80))
+      const serializedArgs = (argMap[toolName] || []).map(v => v === undefined ? null : v)
       const [result] = await chrome.scripting.executeScript({
         target: { tabId },
         func,
-        args: argMap[toolName] || [],
+        args: serializedArgs,
       })
       console.log('[Agent] executeDOMTool result:', JSON.stringify(result?.result).slice(0, 200))
       return { ok: true, result: result?.result }
@@ -346,6 +379,8 @@ export class AgentService {
     const executedTools = []
     const toolCallCount = {}
     let injectFailCount = 0  // 连续注入失败计数（跨不同 inject_script_N）
+    let stuckCount = 0       // 连续 DOM 无变化计数（提取到相同页面内容）
+    let lastPageContent = null // 上一次 extract_content 的内容哈希
 
     // 清理 chatHistory 中的自定义字段，避免 API 拒绝
     const cleanHistory = (chatHistory || []).map(m => {
@@ -382,7 +417,8 @@ export class AgentService {
 - 再调用合适的 inject_script_* 执行工具
 - **重要**：工具执行完成后，查看结果。如果结果已满足用户需求（即使有截断标注），立即用 finish_task 汇报，不要反复调用
 - 每次只调用一个函数
-- 最多调用3-4个工具就应该 finish_task，不要在工具之间反复横跳`,
+- 最多调用3-4个工具就应该 finish_task，不要在工具之间反复横跳
+- **弹窗/登录框处理**：提取页面内容时会自动检测弹窗。如果结果中包含 blocker 字段，先尝试 press_key(Escape) 关闭。失败则尝试 click_element 关闭按钮。如果两次尝试后弹窗仍然存在，说明页面必须登录，用 finish_task 告知用户，不要反复尝试`,
     }
 
     const messages = [systemMsg, ...cleanHistory, { role: 'user', content: userMessage }]
@@ -618,6 +654,31 @@ export class AgentService {
               const domResult = await this.executeDOMTool(tab.id, funcName, funcArgs)
               toolResult = JSON.stringify(domResult)
               executedTools.push({ name: funcName, result: domResult })
+
+              // 检测页面无变化（被弹窗阻塞等场景）
+              if (funcName === 'extract_content' || funcName === 'get_element_info' || funcName === 'read_page_content') {
+                const contentHash = toolResult.slice(0, 500)
+                if (lastPageContent && contentHash === lastPageContent) {
+                  stuckCount++
+                  console.warn('[Agent] 页面无变化 #' + stuckCount + '（可能被弹窗阻塞）')
+                } else {
+                  stuckCount = 0
+                  lastPageContent = contentHash
+                }
+                if (stuckCount >= 3) {
+                  console.warn('[Agent] 页面连续3次无变化，强制结束（可能被登录弹窗阻塞）')
+                  const stopMsg = '操作无法继续：连续多次提取页面内容无变化，页面可能被登录弹窗或验证机制阻塞。请先手动处理弹窗后再试。'
+                  for (const char of stopMsg) {
+                    try { port.postMessage({ type: 'streamChunk', content: char }) } catch {}
+                    await new Promise(r => setTimeout(r, 10))
+                  }
+                  try { port.postMessage({ type: 'streamDone' }) } catch {}
+                  return
+                }
+              } else {
+                // 非提取类 DOM 操作，重置 stuck 计数（说明 AI 在尝试改变页面）
+                stuckCount = 0
+              }
             }
           } else {
             toolResult = JSON.stringify({ ok: false, error: `未知工具: ${funcName}` })
