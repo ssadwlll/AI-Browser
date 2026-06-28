@@ -10,6 +10,8 @@ const MSG_TYPES = {
 let chatHistory = []
 let isStreaming = false
 let currentPort = null
+let agentMode = false      // Agent 自主决策模式
+let agentStepCards = []    // Agent 步骤卡片
 
 // ============ RPC 调用 ============
 async function callService(service, method, ...args) {
@@ -31,23 +33,25 @@ function showView(viewId) {
     n.classList.toggle('active', n.dataset.view === viewId)
   })
 
-  document.getElementById('toolboxPanel')?.classList.remove('show')
+  const tp = document.getElementById('toolboxPanel')
+  if (tp) { tp.classList.remove('show'); tp.style.display = 'none' }
 }
 
 // 导航栏点击
 document.querySelectorAll('.nav-item').forEach(btn => {
+  if (btn.id === 'agentNavBtn') return  // Agent 按钮单独处理
   btn.addEventListener('click', () => showView(btn.dataset.view))
 })
 
-// 设置按钮
-document.getElementById('settingsBtn').addEventListener('click', () => showView('settingsView'))
+// Agent 导航栏按钮
+document.getElementById('agentNavBtn').addEventListener('click', toggleAgentMode)
+
+// 返回按钮
 document.getElementById('backToChatBtn').addEventListener('click', () => showView('chatView'))
 document.getElementById('backFromScriptsBtn').addEventListener('click', () => showView('chatView'))
 
-// ============ 工具栏按钮 ============
-
-// 新建对话（header按钮）
-document.getElementById('newChatHeaderBtn').addEventListener('click', startNewChat)
+// 新建对话（输入区按钮）
+document.getElementById('newChatBtn').addEventListener('click', startNewChat)
 
 // 总结页面
 document.getElementById('summarizeFloatBtn').addEventListener('click', () => {
@@ -55,25 +59,44 @@ document.getElementById('summarizeFloatBtn').addEventListener('click', () => {
 })
 
 // 智能工具箱
-document.getElementById('toolboxFloatBtn').addEventListener('click', async () => {
+function openToolbox() {
   const panel = document.getElementById('toolboxPanel')
-  panel.classList.toggle('show')
+  panel.style.display = ''  // 清除内联样式，交给CSS类控制
+  panel.classList.add('show')
+}
+function closeToolbox() {
+  const panel = document.getElementById('toolboxPanel')
+  panel.classList.remove('show')
+  panel.style.display = 'none'
+}
+function toggleToolbox() {
+  const panel = document.getElementById('toolboxPanel')
   if (panel.classList.contains('show')) {
+    closeToolbox()
+  } else {
+    openToolbox()
+  }
+}
+
+document.getElementById('toolboxFloatBtn').addEventListener('click', async () => {
+  toggleToolbox()
+  if (document.getElementById('toolboxPanel').classList.contains('show')) {
     await loadToolboxScripts()
   }
 })
 
-document.getElementById('toolboxCloseBtn').addEventListener('click', () => {
-  document.getElementById('toolboxPanel').classList.remove('show')
+document.getElementById('toolboxCloseBtn').addEventListener('click', (e) => {
+  e.preventDefault()
+  e.stopPropagation()
+  closeToolbox()
 })
 
 // ============ 左侧浮动工具按钮 ============
 
 // 浮动工具箱按钮 - 切换工具箱面板
 document.getElementById('floatToolboxBtn').addEventListener('click', async () => {
-  const panel = document.getElementById('toolboxPanel')
-  panel.classList.toggle('show')
-  if (panel.classList.contains('show')) {
+  toggleToolbox()
+  if (document.getElementById('toolboxPanel').classList.contains('show')) {
     await loadToolboxScripts()
   }
 })
@@ -124,7 +147,7 @@ async function loadToolboxScripts() {
   container.querySelectorAll('.toolbox-script').forEach(row => {
     row.addEventListener('click', () => {
       const scriptId = parseInt(row.dataset.id)
-      document.getElementById('toolboxPanel').classList.remove('show')
+      closeToolbox()
       callService('pageService', 'injectToolboxScript', scriptId).catch(e => {
         console.warn('[工具箱] 注入异常:', e.message)
       })
@@ -311,8 +334,8 @@ async function sendMessage(text) {
     }
   }
 
-  const userContent = pageContext ? text + pageContext : text
-  chatHistory.push({ role: 'user', content: userContent })
+  // 历史记录只存干净文本，页面内容不入库避免膨胀
+  chatHistory.push({ role: 'user', content: text })
   addMessage('user', text)
   chatInput.value = ''
   chatInput.style.height = 'auto'
@@ -321,14 +344,24 @@ async function sendMessage(text) {
   isStreaming = true
   sendBtn.disabled = true
 
+  if (agentMode) {
+    await runAgent(text, pageContext)
+    return
+  }
+
+  // 普通流式模式 — 发送时把页面内容拼到末条消息
   const streamDiv = addStreamingMessage()
   let fullContent = ''
 
   try {
+    const messagesForAI = pageContext
+      ? [...chatHistory.slice(0, -1), { role: 'user', content: text + pageContext }]
+      : chatHistory
+
     currentPort = chrome.runtime.connect({ name: 'ai-stream' })
     currentPort.postMessage({
       type: 'streamStart',
-      messages: chatHistory,
+      messages: messagesForAI,
       options: {},
     })
 
@@ -337,6 +370,16 @@ async function sendMessage(text) {
         fullContent += msg.content
         updateStreamingMessage(streamDiv, fullContent)
       } else if (msg.type === 'streamDone') {
+        // 检测拒绝类回复：如果是拒绝语，不存入历史，提示用户
+        const isRefusal = /无法给到|无法提供|不能提供|无法回答|无法帮助|cannot provide/i.test(fullContent)
+        if (isRefusal && chatHistory.filter(m => m.role === 'assistant').length === 0) {
+          // 首次对话就拒绝，提示配置问题
+          updateStreamingMessage(streamDiv, fullContent + '\n\n---\n> 收到拒绝回复，请检查 AI 配置（服务商/API地址/模型）是否正确。随后点击「新建对话」重试。')
+          isStreaming = false
+          sendBtn.disabled = false
+          currentPort = null
+          return
+        }
         chatHistory.push({ role: 'assistant', content: fullContent })
         callService('storageService', 'saveChatHistory', chatHistory)
         isStreaming = false
@@ -351,6 +394,142 @@ async function sendMessage(text) {
     })
   } catch (e) {
     updateStreamingMessage(streamDiv, '❌ ' + e.message)
+    isStreaming = false
+    sendBtn.disabled = false
+  }
+}
+
+// ============ Agent 自主决策模式 ============
+
+function toggleAgentMode() {
+  agentMode = !agentMode
+  const btn = document.getElementById('agentNavBtn')
+  if (btn) btn.classList.toggle('active', agentMode)
+  chrome.storage.local.set({ agentMode })
+}
+
+async function loadAgentMode() {
+  const data = await chrome.storage.local.get('agentMode')
+  agentMode = data.agentMode || false
+  const btn = document.getElementById('agentNavBtn')
+  if (btn) btn.classList.toggle('active', agentMode)
+}
+
+function addAgentStepCard() {
+  const card = document.createElement('div')
+  card.className = 'agent-step-card'
+  card.innerHTML = `
+    <div class="agent-step-header">
+      <span class="agent-step-icon">&#x2699;</span>
+      <span class="agent-step-title">Agent 工作中...</span>
+    </div>
+    <div class="agent-step-body"></div>
+  `
+  chatMessages.appendChild(card)
+  chatMessages.scrollTop = chatMessages.scrollHeight
+  return card
+}
+
+function updateAgentStepCard(card, step, toolName, toolArgs, status) {
+  const nameMap = {
+    search_tools: '搜索工具',
+    read_page_content: '读取页面',
+    finish_task: '任务完成',
+  }
+
+  let icon = '\u26A1'
+  let displayName = nameMap[toolName] || '执行工具'
+  if (toolName.startsWith('inject_script_')) {
+    icon = '\uD83D\uDE80'
+    displayName = toolArgs?.scriptName || '注入脚本'
+  }
+
+  const statusIcon = status === 'running' ? '\u23F3' : status === 'searching' ? '\uD83D\uDD0D' : ''
+
+  card.querySelector('.agent-step-icon').textContent = icon
+  card.querySelector('.agent-step-title').innerHTML = statusIcon + ' 步骤' + step + ': ' + displayName
+  card.querySelector('.agent-step-body').textContent = JSON.stringify(toolArgs || {}, null, 2)
+  chatMessages.scrollTop = chatMessages.scrollHeight
+}
+
+async function runAgent(userText, pageContext) {
+  agentStepCards = []
+  const card = addAgentStepCard()
+
+  const streamDiv = addStreamingMessage()
+  let fullContent = ''
+  const toolResults = [] // 收集工具执行结果，streamDone时一并存入历史
+
+  try {
+    currentPort = chrome.runtime.connect({ name: 'agent-stream' })
+    currentPort.postMessage({
+      type: 'agentStart',
+      userMessage: pageContext ? userText + pageContext : userText,
+      chatHistory,
+    })
+
+    currentPort.onMessage.addListener((msg) => {
+      if (msg.type === 'agentStart') {
+        card.querySelector('.agent-step-title').textContent = 'Agent 已启动，分析需求中...'
+      } else if (msg.type === 'agentStep') {
+        updateAgentStepCard(card, msg.step, msg.toolName, msg.toolArgs, msg.status || 'running')
+      } else if (msg.type === 'agentSearchResult') {
+        const results = msg.results || []
+        const body = card.querySelector('.agent-step-body')
+        body.innerHTML = results.length > 0
+          ? '找到 ' + results.length + ' 个工具：<br>' + results.map(r => '  - ' + r.name + ': ' + (r.description || '')).join('<br>')
+          : '未找到匹配的工具'
+        chatMessages.scrollTop = chatMessages.scrollHeight
+      } else if (msg.type === 'agentStepResult') {
+        const body = card.querySelector('.agent-step-body')
+        let displayResult = msg.result || ''
+        try {
+          const parsed = JSON.parse(displayResult)
+          if (parsed.ok && parsed.result) {
+            displayResult = typeof parsed.result === 'string' ? parsed.result : JSON.stringify(parsed.result, null, 2)
+          } else if (parsed.error) {
+            displayResult = '错误: ' + parsed.error
+          }
+        } catch {}
+        body.textContent = displayResult
+        const title = card.querySelector('.agent-step-title')
+        if (title) title.innerHTML = title.innerHTML.replace('\u23F3', '\u2705')
+        chatMessages.scrollTop = chatMessages.scrollHeight
+
+        // 收集工具执行记录
+        if (msg.toolName && msg.toolName !== 'finish_task') {
+          toolResults.push({ name: msg.toolName, result: displayResult })
+        }
+
+        if (msg.done) {
+          card.querySelector('.agent-step-icon').textContent = '\u2705'
+          card.querySelector('.agent-step-title').textContent = '任务完成'
+        }
+      } else if (msg.type === 'streamChunk') {
+        fullContent += msg.content
+        updateStreamingMessage(streamDiv, fullContent)
+      } else if (msg.type === 'streamDone') {
+        // 保存 AI 回复 + 工具调用摘要到历史
+        const agentRecord = { role: 'assistant', content: fullContent }
+        if (toolResults.length > 0) {
+          agentRecord.toolCalls = toolResults.map(t => ({ name: t.name, summary: String(t.result).slice(0, 200) }))
+        }
+        chatHistory.push(agentRecord)
+        callService('storageService', 'saveChatHistory', chatHistory)
+        isStreaming = false
+        sendBtn.disabled = false
+        currentPort = null
+      } else if (msg.type === 'agentError') {
+        updateStreamingMessage(streamDiv, '\u274C ' + msg.error)
+        card.querySelector('.agent-step-icon').textContent = '\u274C'
+        card.querySelector('.agent-step-title').textContent = 'Agent 异常: ' + msg.error
+        isStreaming = false
+        sendBtn.disabled = false
+        currentPort = null
+      }
+    })
+  } catch (e) {
+    updateStreamingMessage(streamDiv, '\u274C ' + e.message)
     isStreaming = false
     sendBtn.disabled = false
   }
@@ -424,6 +603,9 @@ async function loadSettings() {
   document.getElementById('aiApiKey').value = aiConfig.apiKey || ''
   document.getElementById('aiModel').value = aiConfig.model || ''
   document.getElementById('aiSystemPrompt').value = aiConfig.systemPrompt || ''
+  document.getElementById('aiTemperature').value = aiConfig.temperature ?? 0.7
+  document.getElementById('tempValue').textContent = aiConfig.temperature ?? 0.7
+  document.getElementById('aiMaxTokens').value = aiConfig.maxTokens || 16384
   document.getElementById('syncServerUrl').value = syncConfig.serverUrl || ''
   document.getElementById('syncToken').value = syncConfig.token || ''
   document.getElementById('syncInterval').value = syncConfig.syncInterval || 30
@@ -431,6 +613,11 @@ async function loadSettings() {
   const toggle = document.getElementById('selectionToolsToggle')
   toggle.classList.toggle('on', selectionEnabled !== false)
 }
+
+// temperature 滑条实时显示值
+document.getElementById('aiTemperature').addEventListener('input', function() {
+  document.getElementById('tempValue').textContent = this.value
+})
 
 document.getElementById('selectionToolsToggle').addEventListener('click', function() {
   this.classList.toggle('on')
@@ -456,6 +643,8 @@ document.getElementById('saveSettingsBtn').addEventListener('click', async () =>
       apiKey: document.getElementById('aiApiKey').value.trim(),
       model: document.getElementById('aiModel').value.trim(),
       systemPrompt: document.getElementById('aiSystemPrompt').value.trim(),
+      temperature: parseFloat(document.getElementById('aiTemperature').value) || 0.7,
+      maxTokens: parseInt(document.getElementById('aiMaxTokens').value) || 16384,
     })
     await callService('configService', 'saveSyncConfig', {
       serverUrl: document.getElementById('syncServerUrl').value.trim(),
@@ -533,7 +722,21 @@ document.getElementById('syncScriptsBtn').addEventListener('click', async () => 
 // ============ 加载历史记录 ============
 async function loadChatHistory() {
   try {
-    chatHistory = await callService('storageService', 'getChatHistory') || []
+    const raw = await callService('storageService', 'getChatHistory') || []
+    // 检测"拒绝循环"：如果最近N条assistant回复都是相同的拒绝语，自动清理
+    const refusalPatterns = ['无法给到', '无法提供', '不能提供', '无法回答', 'cannot provide', '无法帮助']
+    const assistantMsgs = raw.filter(m => m.role === 'assistant')
+    const recentAssistant = assistantMsgs.slice(-3)
+    if (recentAssistant.length >= 2) {
+      const allSame = recentAssistant.every(m => m.content === recentAssistant[0].content)
+      const isRefusal = refusalPatterns.some(p => recentAssistant[0].content?.includes(p))
+      if (allSame && isRefusal) {
+        console.warn('[SidePanel] 检测到拒绝循环，自动清除聊天历史')
+        await callService('storageService', 'clearChatHistory')
+        return // chatHistory 保持空数组
+      }
+    }
+    chatHistory = raw
     for (const msg of chatHistory) {
       addMessage(msg.role, msg.content)
     }
@@ -545,6 +748,7 @@ async function loadChatHistory() {
 // ============ 初始化 ============
 loadChatHistory()
 loadSettings()
+loadAgentMode()
 
 // 检测来自划词操作的待发送消息
 async function checkPendingMessage() {
@@ -583,8 +787,7 @@ async function handleFloatingAction(action) {
   switch (action) {
     case 'toolbox':
       showView('chatView')
-      const panel = document.getElementById('toolboxPanel')
-      panel.classList.add('show')
+      openToolbox()
       await loadToolboxScripts()
       break
     case 'tools':

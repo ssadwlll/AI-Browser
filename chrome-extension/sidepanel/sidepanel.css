@@ -62,14 +62,10 @@ body{font-family:var(--font-sans);background:var(--bg-white);color:var(--text-pr
 .nav-item.active::before{content:'';position:absolute;left:-12px;top:50%;transform:translateY(-50%);width:3px;height:20px;background:var(--brand);border-radius:0 2px 2px 0}
 .nav-divider{width:20px;height:1px;background:var(--border-primary);margin:4px 0}
 
-/* ============ Header ============ */
-.header{padding:10px 12px;display:flex;align-items:center;justify-content:space-between;flex-shrink:0;border-bottom:1px solid var(--border-light);background:var(--bg-white)}
-.header-left{display:flex;align-items:center;gap:8px}
-.logo-gradient{width:28px;height:28px;background:var(--gradient);border-radius:8px;display:flex;align-items:center;justify-content:center;flex-shrink:0;box-shadow:0 2px 8px rgba(104,65,234,0.2)}
-.header-title{font-weight:700;font-size:15px;color:var(--text-primary);letter-spacing:-.01em}
-.header-actions{display:flex;gap:2px}
+/* ============ 通用按钮 ============ */
 .icon-btn{background:none;border:none;color:var(--text-quaternary);width:28px;height:28px;border-radius:var(--radius);cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all .2s}
 .icon-btn:hover{background:var(--fill-tsp-secondary);color:var(--text-primary)}
+.icon-btn.active{background:var(--brand-light);color:var(--brand)}
 
 /* ============ 视图 ============ */
 .view{display:none;flex:1;flex-direction:column;overflow:hidden;min-height:0;position:relative}
@@ -164,8 +160,7 @@ body{font-family:var(--font-sans);background:var(--bg-white);color:var(--text-pr
 
 /* 底部发送栏 */
 .input-box .sender-bar{display:flex;padding:0 8px 6px;height:32px;align-items:center;justify-content:space-between;gap:4px;flex-shrink:0}
-
-/* 输入工具栏 - 对齐Monica: 28x28px + 8px圆角 */
+.new-chat-btn{width:28px;height:28px;flex-shrink:0;margin-right:2px}
 .input-toolbar{display:flex;gap:2px;flex-shrink:0;align-items:center;height:32px}
 .toolbar-btn{width:28px;height:28px;border-radius:var(--radius);border:none;background:none;color:var(--text-tertiary);cursor:pointer;display:flex;align-items:center;justify-content:center;transition:background-color .2s}
 .toolbar-btn:hover{background:var(--fill-tsp-secondary);color:var(--text-primary)}
@@ -210,6 +205,13 @@ body{font-family:var(--font-sans);background:var(--bg-white);color:var(--text-pr
 .js-injector-result.show{display:block}
 .js-injector-result.error{color:var(--danger)}
 
+/* ============ Agent 步骤卡片 ============ */
+.agent-step-card{margin:8px 16px;padding:10px 14px;background:var(--bg-gray2);border:1px solid var(--border-light);border-radius:var(--radius-lg);font-size:var(--fs-xs)}
+.agent-step-header{display:flex;align-items:center;gap:8px;margin-bottom:6px}
+.agent-step-icon{font-size:16px}
+.agent-step-title{font-weight:600;color:var(--text-primary);font-size:var(--fs-xs)}
+.agent-step-body{font-family:var(--font-mono);font-size:var(--fs-xxs);color:var(--text-quaternary);white-space:pre-wrap;word-break:break-all;max-height:120px;overflow-y:auto;line-height:1.5;padding:6px 8px;background:var(--bg-white);border-radius:var(--radius)}
+
 /* ============ 占位视图 ============ */
 .placeholder-view{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:32px;text-align:center;animation:fadeIn .3s ease-in}
 .placeholder-icon-wrap{width:64px;height:64px;background:var(--brand-light);border-radius:var(--radius-xl);display:flex;align-items:center;justify-content:center;margin-bottom:16px}
@@ -230,6 +232,8 @@ body{font-family:var(--font-sans);background:var(--bg-white);color:var(--text-pr
 .form-group input,.form-group select,.form-group textarea{width:100%;padding:9px 12px;border:1.5px solid var(--border-primary);border-radius:var(--radius-lg);font-size:var(--fs-body);outline:none;background:var(--bg-gray2);color:var(--text-primary);font-family:var(--font-sans);transition:border-color .2s}
 .form-group input:focus,.form-group select:focus,.form-group textarea:focus{border-color:var(--border-active)}
 .form-group textarea{resize:vertical;min-height:60px}
+.form-group .hint{font-size:var(--fs-xxs);color:var(--text-quaternary);margin-left:6px}
+.form-group input[type=range]{padding:0;height:6px;background:var(--border-primary);border:none;border-radius:3px;cursor:pointer;accent-color:var(--brand-primary)}
 .toggle-row{display:flex;align-items:center;justify-content:space-between;padding:8px 0}
 .toggle{position:relative;width:36px;height:20px;background:var(--text-quaternary);border-radius:10px;cursor:pointer;transition:background .2s}
 .toggle.on{background:var(--brand)}

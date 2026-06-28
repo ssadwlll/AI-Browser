@@ -4,6 +4,7 @@ const auth = require('../middleware/auth')
 const upload = require('../middleware/upload')
 
 router.get('/', auth, ctrl.list)
+router.get('/search', ctrl.search)  // AI 工具搜索（公开）
 router.post('/generate-userjs', ctrl.generateUserjs)  // 生成本地脚本的油猴格式
 router.get('/inject-list', ctrl.injectList)  // 公开：列出已发布脚本及其 url_pattern
 router.get('/:id/userjs', ctrl.userjs)   // 油猴脚本格式（无需登录，方便油猴识别）

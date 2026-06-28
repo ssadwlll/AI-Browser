@@ -8,6 +8,16 @@
   if (window.__aiBrowserContentLoaded) return
   window.__aiBrowserContentLoaded = true
 
+  // 安全的 chrome.runtime.sendMessage 封装，防止扩展重载后报错
+  function safeSendMessage(msg) {
+    if (!chrome.runtime?.id) return // 扩展已被卸载/重载
+    try {
+      chrome.runtime.sendMessage(msg).catch(() => {})
+    } catch (e) {
+      // 忽略 "Extension context invalidated" 等错误
+    }
+  }
+
   const config = await chrome.storage.local.get([
     'aiConfig', 'syncConfig', 'selectionToolsEnabled'
   ])
@@ -175,10 +185,10 @@
       el.addEventListener('click', () => {
         const action = el.dataset.action
         if (action === 'ai') {
-          chrome.runtime.sendMessage({ type: 'openSidebar' })
+          safeSendMessage({ type: 'openSidebar' })
         } else {
-          chrome.storage.local.set({ floatingToolAction: action })
-          chrome.runtime.sendMessage({ type: 'openSidebar' })
+          chrome.storage.local.set({ floatingToolAction: action }).catch(() => {})
+          safeSendMessage({ type: 'openSidebar' })
         }
       })
     })
@@ -240,9 +250,9 @@
     const prompt = prompts[action] || '请分析以下内容：\n\n'
     const fullMessage = prompt + text
     // 保存待发送消息到 storage，sidepanel 会自动检测并发送
-    chrome.storage.local.set({ pendingMessage: fullMessage })
+    chrome.storage.local.set({ pendingMessage: fullMessage }).catch(() => {})
     // 通过 background 打开 Chrome 原生 sidePanel
-    chrome.runtime.sendMessage({ type: 'openSidebar' })
+    safeSendMessage({ type: 'openSidebar' })
   }
 
   // ---- 页面内容提取 ----

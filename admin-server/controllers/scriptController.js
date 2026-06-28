@@ -3,10 +3,15 @@ const fs = require('fs')
 const path = require('path')
 const { success, error, paginated } = require('../utils/response')
 
+const safeParse = v => {
+  if (!v) return v === 0 || v === false ? v : undefined
+  return typeof v === 'string' ? JSON.parse(v) : v
+}
+
 // 获取脚本列表
 exports.list = async (req, res) => {
   try {
-    const { page = 1, pageSize = 20, category, keyword, status } = req.query
+    const { page = 1, pageSize = 20, category, keyword, status, toolType } = req.query
     const offset = (parseInt(page) - 1) * parseInt(pageSize)
 
     let where = "WHERE s.status = 'published'"
@@ -20,6 +25,10 @@ exports.list = async (req, res) => {
       where += ' AND (s.name LIKE ? OR s.description LIKE ?)'
       params.push(`%${keyword}%`, `%${keyword}%`)
     }
+    if (toolType) {
+      where += ' AND s.tool_type = ?'
+      params.push(toolType)
+    }
     // 管理员可查看所有状态
     if (req.user.role === 'admin' && status) {
       where = where.replace("s.status = 'published'", 's.status = ?')
@@ -28,6 +37,7 @@ exports.list = async (req, res) => {
 
     const [rows] = await pool.query(
       `SELECT s.id, s.name, s.description, s.version, s.icon, s.url_pattern,
+              s.tool_type, s.tool_config,
               s.download_count, s.status, s.updated_at,
               c.name as category_name, c.slug as category_slug,
               u.username as author_name
@@ -45,7 +55,98 @@ exports.list = async (req, res) => {
       params,
     )
 
+    // Parse tool_config JSON
+    for (const row of rows) {
+      row.tool_config = safeParse(row.tool_config)
+    }
+
     res.json(paginated(rows, parseInt(page), parseInt(pageSize), total))
+  } catch (err) {
+    res.status(500).json(error(err.message))
+  }
+}
+
+// ============ AI 工具搜索接口 ============
+exports.search = async (req, res) => {
+  try {
+    const { q, limit = 10 } = req.query
+    if (!q) {
+      return res.json(success([]))
+    }
+
+    // 分词：空格/逗号分隔 + 中文二元组（解决语序差异）
+    const raw = q.trim()
+    const spaceWords = raw.split(/[\s,，、]+/).filter(w => w.length > 0)
+    // 对中文词拆二元组：如"新闻热点" → "新闻"、"热点"（让"热点新闻"也能匹配）
+    const bigrams = []
+    for (const w of spaceWords) {
+      if (/^[\u4e00-\u9fff]+$/.test(w) && w.length >= 2) {
+        for (let i = 0; i < w.length - 1; i++) {
+          bigrams.push(w.slice(i, i + 2))
+        }
+      }
+    }
+    const words = [...new Set([...spaceWords, ...bigrams])]
+    const params = []
+
+    // 词之间用 OR：任意关键词命中即可
+    let conditions = words.map(() => '(s.name LIKE ? OR s.description LIKE ? OR s.tool_config LIKE ?)').join(' OR ')
+    for (const w of words) {
+      params.push(`%${w}%`, `%${w}%`, `%${w}%`)
+    }
+
+    let [rows] = await pool.query(
+      `SELECT s.id, s.name, s.description, s.tool_type, s.tool_config,
+              s.url_pattern, s.category_id,
+              c.name as category_name
+       FROM scripts s
+       LEFT JOIN categories c ON s.category_id = c.id
+       WHERE s.status = 'published'
+         AND (${conditions})
+       ORDER BY
+         CASE WHEN s.tool_type IS NOT NULL AND s.tool_type != 'js' THEN 0 ELSE 1 END,
+         s.download_count DESC
+       LIMIT ?`,
+      [...params, parseInt(limit)]
+    )
+
+    // 降级策略：如果二元组 OR 搜索无结果，尝试单字级 OR（对中文逐字搜索）
+    if (rows.length === 0 && words.length > 0) {
+      const chars = [...new Set(raw.replace(/[^\u4e00-\u9fff]/g, '').split(''))]
+      if (chars.length > 0) {
+        const charConditions = chars.map(() => '(s.name LIKE ? OR s.description LIKE ? OR s.tool_config LIKE ?)').join(' OR ')
+        const charParams = []
+        for (const ch of chars) charParams.push(`%${ch}%`, `%${ch}%`, `%${ch}%`)
+        const [fallbackRows] = await pool.query(
+          `SELECT s.id, s.name, s.description, s.tool_type, s.tool_config,
+                  s.url_pattern, s.category_id,
+                  c.name as category_name
+           FROM scripts s
+           LEFT JOIN categories c ON s.category_id = c.id
+           WHERE s.status = 'published'
+             AND (${charConditions})
+           ORDER BY
+             CASE WHEN s.tool_type IS NOT NULL AND s.tool_type != 'js' THEN 0 ELSE 1 END,
+             s.download_count DESC
+           LIMIT ?`,
+          [...charParams, parseInt(limit)]
+        )
+        rows = fallbackRows
+      }
+    }
+
+    // Parse tool_config and build tool definitions for AI
+    const tools = rows.map(r => ({
+      id: r.id,
+      name: r.name,
+      description: r.description || '',
+      toolType: r.tool_type || 'js',
+      toolConfig: safeParse(r.tool_config),
+      urlPattern: r.url_pattern,
+      category: r.category_name || '',
+    }))
+
+    res.json(success(tools))
   } catch (err) {
     res.status(500).json(error(err.message))
   }
@@ -90,10 +191,6 @@ exports.detail = async (req, res) => {
     }
     // Parse params_schema and params_data
     // mysql2 对 JSON 列自动解析，需判断是否已是对象
-    const safeParse = v => {
-      if (!v) return v === 0 || v === false ? v : undefined
-      return typeof v === 'string' ? JSON.parse(v) : v
-    }
     try {
       script.params_schema = safeParse(script.params_schema) || []
       script.params_data = safeParse(script.params_data) || {}
@@ -114,7 +211,7 @@ exports.create = async (req, res) => {
       return res.status(400).json(error('请上传脚本文件', 400))
     }
 
-    const { name, description, category_id, version, url_pattern, icon, params_schema, params_data, modules } = req.body
+    const { name, description, category_id, version, url_pattern, icon, params_schema, params_data, modules, tool_type, tool_config } = req.body
     if (!name || !category_id) {
       // 删除已上传的文件
       fs.unlinkSync(req.file.path)
@@ -127,8 +224,8 @@ exports.create = async (req, res) => {
     const scriptName = name || meta.name || req.file.originalname.replace('.js', '')
 
     const [result] = await pool.query(
-      `INSERT INTO scripts (name, description, category_id, version, author_id, file_path, file_size, icon, url_pattern, params_schema, params_data, status)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'published')`,
+      `INSERT INTO scripts (name, description, category_id, version, author_id, file_path, file_size, icon, url_pattern, params_schema, params_data, tool_type, tool_config, status)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'published')`,
       [
         scriptName,
         description || meta.description || '',
@@ -141,6 +238,8 @@ exports.create = async (req, res) => {
         url_pattern || meta.urlPattern || '*',
         params_schema ? JSON.stringify(typeof params_schema === 'string' ? JSON.parse(params_schema) : params_schema) : null,
         params_data ? JSON.stringify(typeof params_data === 'string' ? JSON.parse(params_data) : params_data) : null,
+        tool_type || 'js',
+        tool_config ? JSON.stringify(typeof tool_config === 'string' ? JSON.parse(tool_config) : tool_config) : null,
       ],
     )
 
@@ -179,7 +278,7 @@ exports.create = async (req, res) => {
 // 更新脚本
 exports.update = async (req, res) => {
   try {
-    const { name, description, category_id, version, url_pattern, icon, status, code, params_schema, params_data, modules } = req.body
+    const { name, description, category_id, version, url_pattern, icon, status, code, params_schema, params_data, modules, tool_type, tool_config } = req.body
     const fields = []
     const params = []
 
@@ -190,6 +289,8 @@ exports.update = async (req, res) => {
     if (url_pattern) { fields.push('url_pattern = ?'); params.push(url_pattern) }
     if (icon) { fields.push('icon = ?'); params.push(icon) }
     if (status) { fields.push('status = ?'); params.push(status) }
+    if (tool_type) { fields.push('tool_type = ?'); params.push(tool_type) }
+    if (tool_config !== undefined) { fields.push('tool_config = ?'); params.push(JSON.stringify(typeof tool_config === 'string' ? JSON.parse(tool_config) : tool_config)) }
     if (params_schema !== undefined) { fields.push('params_schema = ?'); params.push(JSON.stringify(typeof params_schema === 'string' ? JSON.parse(params_schema) : params_schema)) }
     if (params_data !== undefined) { fields.push('params_data = ?'); params.push(JSON.stringify(typeof params_data === 'string' ? JSON.parse(params_data) : params_data)) }
 
@@ -410,14 +511,10 @@ exports.reportStats = async (req, res) => {
 exports.injectData = async (req, res) => {
   try {
     // Try with new columns first, fall back to basic query
-    const safeParse = v => {
-      if (!v) return v === 0 || v === false ? v : undefined
-      return typeof v === 'string' ? JSON.parse(v) : v
-    }
     let script, paramsSchema, paramsData;
     try {
       const [rows] = await pool.query(
-        'SELECT id, name, url_pattern, params_schema, params_data FROM scripts WHERE id = ? AND status = ?',
+        'SELECT id, name, url_pattern, tool_type, tool_config, params_schema, params_data FROM scripts WHERE id = ? AND status = ?',
         [req.params.id, 'published']
       );
       if (rows.length === 0) return res.status(404).json(error('脚本不存在', 404));
@@ -475,6 +572,8 @@ exports.injectData = async (req, res) => {
       id: script.id,
       name: script.name,
       url_pattern: script.url_pattern,
+      tool_type: script.tool_type || 'js',
+      tool_config: safeParse(script.tool_config),
       params: finalParams,
       params_schema: paramsSchema,
       code: paramsCode + code
