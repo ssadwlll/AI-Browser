@@ -1,15 +1,22 @@
 {
   "manifest_version": 3,
-  "name": "AI Browser 脚本中心",
-  "version": "1.0.0",
-  "description": "从 AI Browser 管理后台同步脚本并自动注入到匹配页面",
-  "permissions": ["storage", "activeTab", "scripting", "alarms"],
+  "name": "AI Browser",
+  "version": "2.0.0",
+  "description": "AI 驱动的浏览器助手 - 智能对话、划词工具、脚本管理",
+  "permissions": [
+    "storage",
+    "activeTab",
+    "scripting",
+    "alarms",
+    "sidePanel",
+    "contextMenus"
+  ],
   "host_permissions": ["<all_urls>"],
   "background": {
-    "service_worker": "background.js"
+    "service_worker": "background/index.js"
   },
   "action": {
-    "default_popup": "popup.html",
+    "default_popup": "popup/popup.html",
     "default_icon": {
       "16": "icons/icon16.png",
       "48": "icons/icon48.png",
@@ -21,11 +28,29 @@
     "48": "icons/icon48.png",
     "128": "icons/icon128.png"
   },
+  "side_panel": {
+    "default_path": "sidepanel/sidepanel.html"
+  },
   "content_scripts": [
     {
+      "js": ["content/index.js"],
+      "css": ["content/content.css"],
       "matches": ["<all_urls>"],
-      "js": ["content.js"],
       "run_at": "document_idle"
     }
-  ]
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["sidepanel/sidepanel.html", "content/*", "shared/*"],
+      "matches": ["<all_urls>"]
+    }
+  ],
+  "commands": {
+    "_execute_action": {
+      "suggested_key": { "default": "Ctrl+Shift+A" }
+    },
+    "open-sidebar": {
+      "description": "打开侧边栏"
+    }
+  }
 }
