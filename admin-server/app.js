@@ -109,7 +109,12 @@ app.get('/', (req, res) => {
 // 全局错误处理
 app.use(errorHandler)
 
-app.listen(PORT, () => {
+// 初始化 Embedding 语义搜索服务（首次启动下载 ~80MB 模型）
+const embeddingService = require('./services/embeddingService')
+
+app.listen(PORT, async () => {
   console.log(`[Admin Server] 运行在 http://localhost:${PORT}`)
   console.log(`[Admin Server] 健康检查: http://localhost:${PORT}/api/health`)
+  // 异步初始化 embedding，不阻塞服务器启动
+  embeddingService.init().catch(e => console.warn('[Admin Server] Embedding 初始化跳过:', e.message))
 })

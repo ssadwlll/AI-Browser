@@ -2,6 +2,7 @@ const pool = require('../config/db')
 const fs = require('fs')
 const path = require('path')
 const { success, error, paginated } = require('../utils/response')
+const embeddingService = require('../services/embeddingService')
 
 const PROJECT_ROOT = path.join(__dirname, '..')
 const UPLOADS_DIR = path.join(PROJECT_ROOT, 'uploads')
@@ -85,72 +86,39 @@ exports.list = async (req, res) => {
 exports.search = async (req, res) => {
   try {
     const { q, limit = 10 } = req.query
-    if (!q) {
+    const query = q?.trim()
+    if (!query) {
       return res.json(success([]))
     }
 
-    // 分词：空格/逗号分隔 + 中文二元组（解决语序差异）
-    const raw = q.trim()
-    const spaceWords = raw.split(/[\s,，、]+/).filter(w => w.length > 0)
-    // 对中文词拆二元组：如"新闻热点" → "新闻"、"热点"（让"热点新闻"也能匹配）
-    const bigrams = []
-    for (const w of spaceWords) {
-      if (/^[\u4e00-\u9fff]+$/.test(w) && w.length >= 2) {
-        for (let i = 0; i < w.length - 1; i++) {
-          bigrams.push(w.slice(i, i + 2))
-        }
-      }
-    }
-    const words = [...new Set([...spaceWords, ...bigrams])]
-    const params = []
+    let rows
 
-    // 词之间用 OR：任意关键词命中即可
-    let conditions = words.map(() => '(s.name LIKE ? OR s.description LIKE ? OR s.tool_config LIKE ?)').join(' OR ')
-    for (const w of words) {
-      params.push(`%${w}%`, `%${w}%`, `%${w}%`)
-    }
-
-    let [rows] = await pool.query(
-      `SELECT s.id, s.name, s.description, s.tool_type, s.tool_config,
-              s.url_pattern, s.category_id,
-              c.name as category_name
-       FROM scripts s
-       LEFT JOIN categories c ON s.category_id = c.id
-       WHERE s.status = 'published'
-         AND (${conditions})
-       ORDER BY
-         CASE WHEN s.tool_type IS NOT NULL AND s.tool_type != 'js' THEN 0 ELSE 1 END,
-         s.download_count DESC
-       LIMIT ?`,
-      [...params, parseInt(limit)]
-    )
-
-    // 降级策略：如果二元组 OR 搜索无结果，尝试单字级 OR（对中文逐字搜索）
-    if (rows.length === 0 && words.length > 0) {
-      const chars = [...new Set(raw.replace(/[^\u4e00-\u9fff]/g, '').split(''))]
-      if (chars.length > 0) {
-        const charConditions = chars.map(() => '(s.name LIKE ? OR s.description LIKE ? OR s.tool_config LIKE ?)').join(' OR ')
-        const charParams = []
-        for (const ch of chars) charParams.push(`%${ch}%`, `%${ch}%`, `%${ch}%`)
-        const [fallbackRows] = await pool.query(
-          `SELECT s.id, s.name, s.description, s.tool_type, s.tool_config,
-                  s.url_pattern, s.category_id,
-                  c.name as category_name
-           FROM scripts s
-           LEFT JOIN categories c ON s.category_id = c.id
-           WHERE s.status = 'published'
-             AND (${charConditions})
-           ORDER BY
-             CASE WHEN s.tool_type IS NOT NULL AND s.tool_type != 'js' THEN 0 ELSE 1 END,
-             s.download_count DESC
-           LIMIT ?`,
-          [...charParams, parseInt(limit)]
-        )
-        rows = fallbackRows
-      }
+    // 主搜索：embedding 语义搜索
+    const embedResults = await embeddingService.search(query, parseInt(limit))
+    if (embedResults && embedResults.length > 0) {
+      // 按 embedding 返回的顺序从数据库获取完整信息
+      const ids = embedResults.map(r => r.id)
+      const placeholders = ids.map(() => '?').join(',')
+      const [dbRows] = await pool.query(
+        `SELECT s.id, s.name, s.description, s.tool_type, s.tool_config,
+                s.url_pattern, s.category_id,
+                c.name as category_name
+         FROM scripts s
+         LEFT JOIN categories c ON s.category_id = c.id
+         WHERE s.id IN (${placeholders})`,
+        ids
+      )
+      // 按相似度排序
+      const dbMap = new Map(dbRows.map(r => [r.id, r]))
+      rows = ids.map(id => dbMap.get(id)).filter(Boolean)
     }
 
-    // Parse tool_config and build tool definitions for AI
+    // 降级策略：embedding 不可用或无结果时，回退到 LIKE 搜索
+    if (!rows || rows.length === 0) {
+      console.log('[Search] embedding 无结果，回退 LIKE 搜索:', query)
+      rows = await likeSearch(query, parseInt(limit))
+    }
+
     const tools = rows.map(r => ({
       id: r.id,
       name: r.name,
@@ -165,6 +133,67 @@ exports.search = async (req, res) => {
   } catch (err) {
     res.status(500).json(error(err.message))
   }
+}
+
+// LIKE 降级搜索（保留原有逻辑）
+async function likeSearch(raw, limit) {
+  const spaceWords = raw.split(/[\s,，、]+/).filter(w => w.length > 0)
+  const bigrams = []
+  for (const w of spaceWords) {
+    if (/^[\u4e00-\u9fff]+$/.test(w) && w.length >= 2) {
+      for (let i = 0; i < w.length - 1; i++) {
+        bigrams.push(w.slice(i, i + 2))
+      }
+    }
+  }
+  const words = [...new Set([...spaceWords, ...bigrams])]
+  const params = []
+
+  let conditions = words.map(() => '(s.name LIKE ? OR s.description LIKE ? OR s.tool_config LIKE ?)').join(' OR ')
+  for (const w of words) {
+    params.push(`%${w}%`, `%${w}%`, `%${w}%`)
+  }
+
+  let [rows] = await pool.query(
+    `SELECT s.id, s.name, s.description, s.tool_type, s.tool_config,
+            s.url_pattern, s.category_id,
+            c.name as category_name
+     FROM scripts s
+     LEFT JOIN categories c ON s.category_id = c.id
+     WHERE s.status = 'published'
+       AND (${conditions})
+     ORDER BY
+       CASE WHEN s.tool_type IS NOT NULL AND s.tool_type != 'js' THEN 0 ELSE 1 END,
+       s.download_count DESC
+     LIMIT ?`,
+    [...params, limit]
+  )
+
+  if (rows.length === 0 && words.length > 0) {
+    const chars = [...new Set(raw.replace(/[^\u4e00-\u9fff]/g, '').split(''))]
+    if (chars.length > 0) {
+      const charConditions = chars.map(() => '(s.name LIKE ? OR s.description LIKE ? OR s.tool_config LIKE ?)').join(' OR ')
+      const charParams = []
+      for (const ch of chars) charParams.push(`%${ch}%`, `%${ch}%`, `%${ch}%`)
+      const [fallbackRows] = await pool.query(
+        `SELECT s.id, s.name, s.description, s.tool_type, s.tool_config,
+                s.url_pattern, s.category_id,
+                c.name as category_name
+         FROM scripts s
+         LEFT JOIN categories c ON s.category_id = c.id
+         WHERE s.status = 'published'
+           AND (${charConditions})
+         ORDER BY
+           CASE WHEN s.tool_type IS NOT NULL AND s.tool_type != 'js' THEN 0 ELSE 1 END,
+           s.download_count DESC
+         LIMIT ?`,
+        [...charParams, limit]
+      )
+      rows = fallbackRows
+    }
+  }
+
+  return rows
 }
 
 // 获取脚本详情
