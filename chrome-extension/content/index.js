@@ -4,23 +4,46 @@
 ;(async function() {
   'use strict'
 
+  // 避免在扩展自身页面（sidepanel/popup/options等）注入浮动按钮
+  if (location.protocol === 'chrome-extension:') return
+
   // 避免重复注入
   if (window.__aiBrowserContentLoaded) return
   window.__aiBrowserContentLoaded = true
 
-  // 安全的 chrome.runtime.sendMessage 封装，防止扩展重载后报错
-  function safeSendMessage(msg) {
-    if (!chrome.runtime?.id) return // 扩展已被卸载/重载
-    try {
-      chrome.runtime.sendMessage(msg).catch(() => {})
-    } catch (e) {
-      // 忽略 "Extension context invalidated" 等错误
+  console.log('[AI Browser] content script v4 已加载, URL:', location.href)
+
+  // 安全通信：在扩展上下文有效时缓存 sidepanel URL
+  let CACHED_SIDEPANEL_URL = null
+  let ICON_URL = null
+  try {
+    if (chrome.runtime?.id) {
+      CACHED_SIDEPANEL_URL = chrome.runtime.getURL('sidepanel/sidepanel.html')
+      ICON_URL = chrome.runtime.getURL('icons/icon.png')
     }
+  } catch (e) {
+    CACHED_SIDEPANEL_URL = null
+    ICON_URL = null
   }
 
-  const config = await chrome.storage.local.get([
-    'aiConfig', 'syncConfig', 'selectionToolsEnabled'
-  ])
+  // 安全的 chrome.runtime.sendMessage 封装
+  function safeSendMessage(msg) {
+    if (!chrome.runtime?.id) return
+    try {
+      chrome.runtime.sendMessage(msg).catch(() => {})
+    } catch (e) {}
+  }
+
+  let config = { selectionToolsEnabled: true }
+  let fabHost = null
+  let fabShadow = null
+  try {
+    config = await chrome.storage.local.get([
+      'aiConfig', 'syncConfig', 'selectionToolsEnabled'
+    ])
+  } catch (e) {
+    console.warn('[AI Browser] 读取 storage 配置失败:', e.message)
+  }
 
   // 初始化划词工具栏
   if (config.selectionToolsEnabled !== false) {
@@ -29,6 +52,9 @@
 
   // 初始化页面助手浮动按钮
   initPageAssistant()
+
+  // 初始化智能表单填充
+  initFormFill()
 
   // 监听来自 background 的消息
   chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
@@ -171,7 +197,7 @@
 
     shadow.innerHTML = `
       <style>
-        .fab-group{position:fixed;bottom:60px;right:0;z-index:2147483599;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;display:flex;flex-direction:column;gap:6px;align-items:flex-end}
+        .fab-group{position:fixed;bottom:60px;right:0;z-index:2147483601;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;display:flex;flex-direction:column;gap:6px;align-items:flex-end}
         .fab-pill,.fab-icon{display:flex;flex-direction:row;align-items:center;cursor:pointer;gap:6px;height:36px;background:#fff;border:1px solid rgba(79,89,102,0.12);box-shadow:0 2px 12px rgba(0,0,0,0.08);border-radius:18px 0 0 18px;border-right:none;transition:background-color .2s,width .3s ease,padding .3s ease}
         .fab-pill{padding:0 12px 0 8px}
         .fab-icon{width:36px;padding:0 0 0 8px;justify-content:flex-start;overflow:hidden;white-space:nowrap}
@@ -194,27 +220,83 @@
     `
 
     shadow.querySelectorAll('[data-action]').forEach(el => {
-      el.addEventListener('click', () => {
-        const action = el.dataset.action
-        if (action === 'ai') {
-          safeSendMessage({ type: 'openSidebar' })
-        } else {
-          chrome.storage.local.set({ floatingToolAction: action }).catch(() => {})
-          safeSendMessage({ type: 'openSidebar' })
+      el.addEventListener('click', async () => {
+        try {
+          const action = el.dataset.action
+          if (action === 'ai') {
+            // AI 按钮：优先尝试原生 sidePanel，成功则隐藏 iframe，失败则 iframe toggle
+            const nativeOpened = await tryNativeSidePanel()
+            if (nativeOpened) {
+              // 原生侧边栏已打开，隐藏 iframe 避免双窗口
+              closeFloatingSidebar()
+            } else {
+              if (isSidebarVisible()) {
+                closeFloatingSidebar()
+              } else {
+                openFloatingSidebar()
+              }
+            }
+          } else {
+            // 其它按钮：设定 action
+            chrome.storage.local.set({ floatingToolAction: action }).catch(() => {})
+            const nativeOpened = await tryNativeSidePanel()
+            if (nativeOpened) {
+              closeFloatingSidebar()
+            } else {
+              openFloatingSidebar()
+            }
+          }
+        } catch (e) {
+          console.warn('[AI Browser] 浮动按钮点击异常:', e.message)
         }
       })
     })
 
     document.body.appendChild(host)
+    // 保存引用，方便打开侧边栏时调整浮动按钮位置
+    // closed shadow root 无法通过 host.shadowRoot 访问，必须直接保存引用
+    fabHost = host
+    fabShadow = shadow
   }
 
-  // ---- 浮动侧边栏 ----
+  // ---- 尝试原生 sidePanel.open()（内容脚本中有用户手势，可能成功） ----
+  async function tryNativeSidePanel() {
+    try {
+      // chrome.sidePanel 可能在内容脚本中不可用
+      if (!chrome?.sidePanel?.open) return false
+      // 直接调用，不传参数则默认当前窗口
+      await chrome.sidePanel.open()
+      return true
+    } catch (e) {
+      console.warn('[AI Browser] 原生 sidePanel.open 失败:', e.message, '→ 回退到 iframe')
+      return false
+    }
+  }
+
+  // ---- 浮动侧边栏（iframe 叠层，回退方案） ----
   let floatingSidebar = null
 
-  function toggleFloatingSidebar() {
-    if (floatingSidebar) {
-      floatingSidebar.remove()
-      floatingSidebar = null
+  function isSidebarVisible() {
+    return !!(floatingSidebar
+      && document.body.contains(floatingSidebar)
+      && floatingSidebar.style.display !== 'none')
+  }
+
+  const SIDEBAR_MIN_WIDTH = 360
+  const SIDEBAR_MAX_WIDTH = 800
+  let sidebarWidth = 500
+
+  function openFloatingSidebar() {
+    // 已存在：直接显示
+    if (floatingSidebar && document.body.contains(floatingSidebar)) {
+      floatingSidebar.style.display = ''
+      shiftFabGroup(sidebarWidth)
+      return
+    }
+    if (floatingSidebar) floatingSidebar = null
+
+    if (!CACHED_SIDEPANEL_URL) {
+      console.warn('[AI Browser] 无法打开侧边栏：扩展上下文已失效，请刷新页面')
       return
     }
 
@@ -224,31 +306,78 @@
 
     shadow.innerHTML = `
       <style>
-        .sidebar{position:fixed;top:0;right:0;width:380px;height:100vh;z-index:2147483599;background:#fff;border-left:1px solid #e2e8f0;box-shadow:-4px 0 12px rgba(0,0,0,0.1);display:flex;flex-direction:column;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif}
-        .sidebar-header{background:linear-gradient(135deg,#6366f1,#8b5cf6);color:#fff;padding:12px 16px;display:flex;align-items:center;justify-content:space-between}
-        .sidebar-header h3{font-size:14px;font-weight:700}
-        .close-btn{background:rgba(255,255,255,0.2);border:none;color:#fff;width:28px;height:28px;border-radius:6px;cursor:pointer;font-size:16px}
-        .sidebar-body{flex:1;overflow-y:auto}
-        .sidebar-body iframe{width:100%;height:100%;border:none}
+        .sidebar{position:fixed;top:0;right:0;width:${sidebarWidth}px;height:100vh;z-index:2147483599;background:#fff;border-left:1px solid #e2e8f0;box-shadow:-4px 0 12px rgba(0,0,0,0.1);display:flex;flex-direction:column;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif}
+        .sidebar-resize-handle{position:absolute;top:0;left:-3px;width:6px;height:100%;cursor:col-resize;z-index:10;transition:background-color .15s}
+        .sidebar-resize-handle:hover,.sidebar-resize-handle:active{background:rgba(104,65,234,0.3)}
+        .sidebar-header{display:flex;align-items:center;gap:8px;height:44px;padding:0 16px;background:linear-gradient(135deg,#b059f8,#6841ea);flex-shrink:0}
+        .sidebar-header-icon{width:24px;height:24px;flex-shrink:0}
+        .sidebar-header-icon img{width:24px;height:24px;display:block}
+        .sidebar-header-title{font-size:14px;font-weight:600;color:#fff}
+        .sidebar iframe{flex:1;width:100%;border:none}
       </style>
-      <div class="sidebar">
+      <div class="sidebar" id="sidebarRoot">
+        <div class="sidebar-resize-handle" id="resizeHandle"></div>
         <div class="sidebar-header">
-          <h3>🤖 AI Browser</h3>
-          <button class="close-btn" id="closeSidebar">✕</button>
+          <span class="sidebar-header-icon">
+            <img src="${ICON_URL}" alt="AI Browser" />
+          </span>
+          <span class="sidebar-header-title">AI Browser</span>
         </div>
-        <div class="sidebar-body">
-          <iframe src="${chrome.runtime.getURL('sidepanel/sidepanel.html')}" allow="clipboard-write"></iframe>
-        </div>
+        <iframe src="${CACHED_SIDEPANEL_URL}" allow="clipboard-write"></iframe>
       </div>
     `
 
-    shadow.querySelector('#closeSidebar').addEventListener('click', () => {
-      host.remove()
-      floatingSidebar = null
+    // 拖拽调整侧边栏宽度
+    const sidebarEl = shadow.getElementById('sidebarRoot')
+    const handleEl = shadow.getElementById('resizeHandle')
+    let isResizing = false
+    let startX = 0
+    let startWidth = 0
+
+    handleEl.addEventListener('mousedown', (e) => {
+      isResizing = true
+      startX = e.clientX
+      startWidth = sidebarEl.offsetWidth
+      document.body.style.cursor = 'col-resize'
+      document.body.style.userSelect = 'none'
+      e.preventDefault()
+    })
+
+    document.addEventListener('mousemove', (e) => {
+      if (!isResizing) return
+      const diff = startX - e.clientX
+      const newWidth = Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, startWidth + diff))
+      sidebarEl.style.width = newWidth + 'px'
+      sidebarWidth = newWidth
+      shiftFabGroup(newWidth)
+    })
+
+    document.addEventListener('mouseup', () => {
+      if (!isResizing) return
+      isResizing = false
+      document.body.style.cursor = ''
+      document.body.style.userSelect = ''
     })
 
     document.body.appendChild(host)
     floatingSidebar = host
+    shiftFabGroup(sidebarWidth)
+  }
+
+  function closeFloatingSidebar() {
+    if (floatingSidebar) {
+      floatingSidebar.style.display = 'none'
+    }
+    // 恢复浮动按钮到右侧边缘
+    shiftFabGroup(0)
+  }
+
+  function shiftFabGroup(offsetRight) {
+    if (!fabShadow) return
+    const group = fabShadow.querySelector('.fab-group')
+    if (group) {
+      group.style.right = offsetRight + 'px'
+    }
   }
 
   // ---- 划词动作处理 ----
@@ -261,10 +390,10 @@
     }
     const prompt = prompts[action] || '请分析以下内容：\n\n'
     const fullMessage = prompt + text
-    // 保存待发送消息到 storage，sidepanel 会自动检测并发送
     chrome.storage.local.set({ pendingMessage: fullMessage }).catch(() => {})
-    // 通过 background 打开 Chrome 原生 sidePanel
-    safeSendMessage({ type: 'openSidebar' })
+    tryNativeSidePanel().then(opened => {
+      if (!opened) openFloatingSidebar()
+    })
   }
 
   // ---- 页面内容提取 ----
@@ -351,5 +480,233 @@
       .replace(/\n{3,}/g, '\n\n')
       .replace(/  +/g, ' ')
       .trim()
+  }
+
+  // ============ 智能表单填充 ============
+
+  function initFormFill() {
+    // 定时扫描表单（处理 SPA / 动态加载的表单）
+    const formButtons = new WeakMap()
+
+    function scanForms() {
+      const forms = document.querySelectorAll('form')
+      forms.forEach(form => {
+        // 已经注入过按钮则跳过
+        if (formButtons.has(form)) return
+        // 跳过太小的表单、搜索栏
+        const inputs = form.querySelectorAll('input:not([type="hidden"]):not([type="submit"]):not([type="button"]):not([type="image"]), select, textarea')
+        if (inputs.length < 2) return
+        // 跳过纯搜索框
+        const searchTypes = ['search', 'q', 'query', 'keyword']
+        if (inputs.length <= 2 &&
+            [...inputs].every(el => searchTypes.includes(el.name?.toLowerCase()) || searchTypes.includes(el.id?.toLowerCase()))) {
+          return
+        }
+        injectFormButton(form)
+      })
+    }
+
+    function injectFormButton(form) {
+      // 创建按钮宿主
+      const host = document.createElement('div')
+      host.style.cssText = 'display:inline-block;margin-left:10px;vertical-align:middle'
+
+      const shadow = host.attachShadow({ mode: 'closed' })
+      shadow.innerHTML = `
+        <style>
+          .fill-btn{display:inline-flex;align-items:center;gap:4px;padding:5px 12px;font-size:12px;font-weight:500;color:#6841ea;background:rgba(104,65,234,0.06);border:1px solid rgba(104,65,234,0.2);border-radius:6px;cursor:pointer;transition:all .15s;white-space:nowrap;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif}
+          .fill-btn:hover{background:rgba(104,65,234,0.12);border-color:rgba(104,65,234,0.35)}
+          .fill-btn:active{background:rgba(104,65,234,0.2);transform:scale(.96)}
+          .fill-btn:disabled{opacity:0.5;cursor:not-allowed;transform:none}
+          .fill-btn .spinner{width:14px;height:14px;border:2px solid rgba(104,65,234,0.2);border-top-color:#6841ea;border-radius:50%;animation:spin .6s linear infinite;display:none}
+          @keyframes spin{to{transform:rotate(360deg)}}
+        </style>
+        <button class="fill-btn"><span class="spinner"></span>🤖 智能填充</button>
+      `
+
+      const btn = shadow.querySelector('.fill-btn')
+      const spinner = shadow.querySelector('.spinner')
+
+      btn.addEventListener('click', async () => {
+        if (btn.disabled) return
+        btn.disabled = true
+        spinner.style.display = 'inline-block'
+
+        try {
+          const fields = analyzeFormFields(form)
+
+          // 发送到 background 让 AI 生成填充数据
+          const response = await new Promise((resolve) => {
+            chrome.runtime.sendMessage({
+              type: 'formFillRequest',
+              fields,
+              pageTitle: document.title,
+              pageUrl: location.href
+            }, resolve)
+          })
+
+          if (response?.ok && response.mapping) {
+            fillFormFields(form, fields, response.mapping)
+            // 成功反馈
+            highlightForm(form)
+          } else {
+            const errMsg = response?.error || 'AI 填充失败'
+            console.warn('[AI Browser] 表单填充失败:', errMsg)
+            showFillTooltip(form, '❌ 填充失败: ' + errMsg)
+          }
+        } catch (e) {
+          console.warn('[AI Browser] 表单填充异常:', e.message)
+          showFillTooltip(form, '❌ 网络错误')
+        } finally {
+          btn.disabled = false
+          spinner.style.display = 'none'
+        }
+      })
+
+      // 把按钮插入 form 的 submit 按钮前（或表单末尾）
+      const submitBtn = form.querySelector('button[type="submit"], input[type="submit"]')
+      if (submitBtn) {
+        submitBtn.insertAdjacentElement('beforebegin', host)
+      } else {
+        form.appendChild(host)
+      }
+
+      formButtons.set(form, true)
+    }
+
+    // 初始扫描
+    scanForms()
+
+    // 使用 MutationObserver 检测新增表单
+    const observer = new MutationObserver(() => {
+      scanForms()
+    })
+    try {
+      observer.observe(document.body || document.documentElement, {
+        childList: true,
+        subtree: true
+      })
+    } catch (e) {
+      console.warn('[AI Browser] 无法监听 DOM 变化:', e.message)
+    }
+  }
+
+  function analyzeFormFields(form) {
+    const fields = []
+    // 收集所有输入元素
+    const inputs = form.querySelectorAll('input:not([type="submit"]):not([type="button"]):not([type="image"]):not([type="hidden"]), select, textarea')
+    inputs.forEach((el, idx) => {
+      const field = {
+        index: idx,
+        name: el.name || '',
+        type: el.type || el.tagName.toLowerCase(),
+        placeholder: el.placeholder || '',
+        required: el.required || false,
+      }
+      // 尝试寻找 label
+      if (el.id) {
+        const label = document.querySelector(`label[for="${el.id}"]`)
+        if (label) field.label = label.textContent.trim()
+      }
+      if (!field.label) {
+        // 查找最近的临近文本
+        const prevText = findAdjacentLabel(el)
+        if (prevText) field.label = prevText
+      }
+      // 提取 select 的选项
+      if (el.tagName === 'SELECT') {
+        field.options = [...el.options].map(o => o.textContent.trim()).filter(o => o)
+      }
+      // 对于 radio/checkbox，收集同组 value
+      if (el.type === 'radio' || el.type === 'checkbox') {
+        if (el.name) {
+          const groupValues = [...form.querySelectorAll(`input[name="${el.name}"], input[name="$${el.name}"]`)].map(r => r.value).filter(v => v)
+          if (groupValues.length) field.options = groupValues
+        }
+      }
+      fields.push(field)
+    })
+    return fields
+  }
+
+  function findAdjacentLabel(el) {
+    // 查找前一个兄弟的文本
+    let prev = el.previousElementSibling
+    if (prev) {
+      const text = prev.textContent?.trim()
+      if (text && text.length <= 50) return text
+    }
+    // 查找父元素内的 label
+    const parent = el.closest('label, .form-group, .form-item, .field, .input-group, td, .ant-form-item, .el-form-item')
+    if (parent) {
+      const labelEl = parent.querySelector('label, .label, .title, .field-label')
+      if (labelEl) {
+        const text = labelEl.textContent?.trim()
+        if (text && text.length <= 50) return text.replace(/[*:：\s]+$/, '')
+      }
+    }
+    return null
+  }
+
+  function fillFormFields(form, fields, mapping) {
+    const inputs = form.querySelectorAll('input:not([type="submit"]):not([type="button"]):not([type="image"]):not([type="hidden"]), select, textarea')
+    const inputArr = [...inputs]
+
+    for (const [idx, value] of Object.entries(mapping)) {
+      const i = parseInt(idx)
+      const el = inputArr[i]
+      if (!el) continue
+
+      try {
+        if (el.tagName === 'SELECT') {
+          // 尝试精确匹配或部分匹配
+          const options = [...el.options]
+          const match = options.find(o => o.textContent.trim() === value) ||
+                        options.find(o => o.textContent.trim().includes(value)) ||
+                        (el.value === '' ? options[Math.min(i, options.length - 1)] : null)
+          if (match) el.value = match.value
+        } else if (el.type === 'radio') {
+          const radio = form.querySelector(`input[name="${el.name}"][value="${value}"]`) ||
+                        form.querySelector(`input[name="$${el.name}"][value="${value}"]`)
+          if (radio) radio.checked = true
+        } else if (el.type === 'checkbox') {
+          el.checked = ['true', 'yes', '是', '1'].includes(String(value).toLowerCase())
+        } else {
+          // 原生设置值（支持 React/Vue）
+          const nativeInputValueSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set
+          const nativeTextareaSetter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set
+          if (el.tagName === 'TEXTAREA' && nativeTextareaSetter) {
+            nativeTextareaSetter.call(el, value)
+          } else if (nativeInputValueSetter) {
+            nativeInputValueSetter.call(el, value)
+          } else {
+            el.value = value
+          }
+          // 触发事件以通知框架
+          el.dispatchEvent(new Event('input', { bubbles: true }))
+          el.dispatchEvent(new Event('change', { bubbles: true }))
+        }
+      } catch (e) {
+        console.warn('[AI Browser] 填入字段失败:', el.name || el.id, e.message)
+      }
+    }
+  }
+
+  function highlightForm(form) {
+    const prevBg = form.style.transition
+    form.style.transition = 'box-shadow .4s ease'
+    form.style.boxShadow = '0 0 0 3px rgba(16,185,129,0.4), 0 0 20px rgba(16,185,129,0.15)'
+    setTimeout(() => {
+      form.style.boxShadow = ''
+      form.style.transition = prevBg
+    }, 2000)
+  }
+
+  function showFillTooltip(form, message) {
+    const div = document.createElement('div')
+    div.textContent = message
+    div.style.cssText = 'position:fixed;top:10px;right:10px;z-index:2147483647;padding:10px 16px;background:#fff;border:1px solid #ef4444;border-radius:8px;font-size:13px;color:#ef4444;box-shadow:0 4px 12px rgba(0,0,0,0.1);font-family:sans-serif'
+    document.body.appendChild(div)
+    setTimeout(() => div.remove(), 3000)
   }
 })()

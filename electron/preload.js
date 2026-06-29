@@ -16,7 +16,6 @@ contextBridge.exposeInMainWorld('api', {
     canGoBack: () => ipcRenderer.invoke('browser:can-go-back'),
     canGoForward: () => ipcRenderer.invoke('browser:can-go-forward'),
     openExternal: (url) => ipcRenderer.invoke('browser:open-external', url),
-    installTampermonkey: ({ name, description, code, urlPattern }) => ipcRenderer.invoke('browser:install-tampermonkey', { name, description, code, urlPattern }),
     resize: (ratio) => ipcRenderer.send('browser:resize', { browserRatio: ratio }),
     togglePanel: (visible) => ipcRenderer.invoke('panel:toggle', { visible }),
     onNavState: (callback) => {

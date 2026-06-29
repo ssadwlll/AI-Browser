@@ -1,11 +1,14 @@
 // ============ SidebarService + PageService ============
 
 export class SidebarService {
+  // 打开原生 sidePanel。返回是否成功（手势丢失时 chrome.sidePanel.open 会抛错）
   async open(tabId) {
     try {
       await chrome.sidePanel.open({ tabId })
+      return true
     } catch (e) {
       console.warn('[SidebarService] open error:', e.message)
+      return false
     }
   }
 

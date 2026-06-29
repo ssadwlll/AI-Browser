@@ -14,6 +14,10 @@ const hotspotRoutes = require('./routes/hotspot')
 const statRoutes = require('./routes/stats')
 const userRoutes = require('./routes/users')
 const categoryRoutes = require('./routes/categories')
+const appKeyRoutes = require('./routes/app-keys')
+const aiModelRoutes = require('./routes/ai-models')
+const aiProxyRoutes = require('./routes/ai-proxy')
+const aiCallLogRoutes = require('./routes/ai-call-logs')
 
 const app = express()
 const PORT = process.env.PORT || 3001
@@ -37,6 +41,15 @@ app.use('/api/hotspot', hotspotRoutes)
 app.use('/api/stats', statRoutes)
 app.use('/api/users', userRoutes)
 app.use('/api/categories', categoryRoutes)
+app.use('/api/app-keys', appKeyRoutes)
+app.use('/api/ai-models', aiModelRoutes)
+app.use('/api/ai-proxy', aiProxyRoutes)
+app.use('/api/ai-call-logs', aiCallLogRoutes)
+app.use('/api/attachments', require('./routes/attachments'))
+
+// 静态文件 — 管理后台前端资源（CSS/JS）和上传的附件
+app.use(express.static(path.join(__dirname, 'public')))
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')))
 
 // 代理预览接口 - 获取目标页面 HTML，注入脚本，返回 JSON 给前端用 srcdoc 渲染
 app.get('/api/proxy-preview', (req, res) => {
@@ -90,7 +103,7 @@ app.get('/api/health', (req, res) => {
 
 // 根路径 - 管理后台首页
 app.get('/', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'admin.html'))
+  res.sendFile(path.join(__dirname, 'public', 'index.html'))
 })
 
 // 全局错误处理

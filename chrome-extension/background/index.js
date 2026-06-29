@@ -75,6 +75,46 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return false
   }
 
+  // 浮动按钮 toggle 原生 sidePanel：弹出/关闭，而非新建/销毁
+  if (msg.type === 'toggleSidebar') {
+    const tabId = sender.tab?.id
+    const action = msg.action
+    console.log('[Background] toggleSidebar 收到, tabId:', tabId, 'action:', action)
+    if (!tabId) {
+      console.warn('[Background] toggleSidebar: 无 tabId')
+      sendResponse({ ok: false, error: 'No tab id' })
+      return false
+    }
+    ;(async () => {
+      const key = `sidePanelOpen_${tabId}`
+      const result = await chrome.storage.local.get(key)
+      const isOpen = result[key]
+      console.log('[Background] toggleSidebar: 当前状态 isOpen=', isOpen)
+      if (isOpen) {
+        // 当前已打开 → 关闭
+        await sidebarService.close(tabId)
+        await chrome.storage.local.set({ [key]: false })
+        console.log('[Background] toggleSidebar: 已关闭')
+        sendResponse({ ok: true, opened: false })
+      } else {
+        // 当前已关闭 → 打开
+        const success = await sidebarService.open(tabId)
+        console.log('[Background] toggleSidebar: open 结果=', success)
+        if (success) {
+          await chrome.storage.local.set({ [key]: true })
+          // 传递 action 给 sidepanel，让它启动后切换到对应视图
+          if (action) {
+            await chrome.storage.local.set({ floatingToolAction: action })
+          }
+          sendResponse({ ok: true, opened: true })
+        } else {
+          sendResponse({ ok: false, error: '打开侧边栏失败（手势丢失），请用浏览器工具栏的扩展图标打开' })
+        }
+      }
+    })()
+    return true  // 异步响应
+  }
+
   // 接收 inject_js 注入脚本的回调反馈
   if (msg.type === 'injectCallback') {
     const callbackData = msg.data || {}
@@ -100,6 +140,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     }).catch(() => {})  // 忽略没有接收者的错误
     sendResponse({ ok: true })
     return false
+  }
+
+  // 智能表单填充：背景用 AI 生成字段值
+  if (msg.type === 'formFillRequest') {
+    handleFormFill(msg, sender).then(sendResponse)
+    return true
   }
 
   return false
@@ -158,6 +204,59 @@ chrome.commands.onCommand.addListener(async (command) => {
     if (tab) sidebarService.open(tab.id)
   }
 })
+
+// ============ 智能表单填充 ============
+async function handleFormFill(msg, sender) {
+  try {
+    const { fields, pageTitle, pageUrl } = msg
+    if (!fields || fields.length === 0) {
+      return { ok: false, error: '未检测到表单字段' }
+    }
+
+    // 构建字段描述
+    const fieldDesc = fields.map((f, i) => {
+      const label = f.label || f.name || '字段' + (i + 1)
+      const type = f.type || 'text'
+      const placeholder = f.placeholder ? ` (提示: "${f.placeholder}")` : ''
+      const required = f.required ? ' [必填]' : ''
+      const options = f.options?.length ? ` [选项: ${f.options.join(', ')}]` : ''
+      return `- ${label}: type=${type}${placeholder}${required}${options}`
+    }).join('\n')
+
+    const messages = [
+      {
+        role: 'system',
+        content: '你是一个智能表单填充助手。根据表单字段的描述，生成合理、真实、多样化的填充数据。以纯 JSON 格式返回，key 为字段索引号（字符串），value 为填充值。不要输出任何解释，只输出 JSON。'
+      },
+      {
+        role: 'user',
+        content: `页面: ${pageTitle || pageUrl || '未知页面'}
+需要填充的表单字段:
+${fieldDesc}
+
+请为以上每个字段生成一个合理的填充值，返回 JSON 格式：{"0": "值1", "1": "值2", ...}`
+      }
+    ]
+
+    const result = await aiService.chat(messages, { temperature: 0.7, maxTokens: 2000 })
+    const text = result.content || ''
+
+    // 提取 JSON
+    let json = text.trim()
+    // 移除外层的 markdown 代码块
+    const jsonMatch = json.match(/```(?:json)?\s*([\s\S]*?)```/)
+    if (jsonMatch) json = jsonMatch[1].trim()
+    // 提取 { } 内容
+    const braceMatch = json.match(/\{[\s\S]*\}/)
+    if (braceMatch) json = braceMatch[0]
+
+    const mapping = JSON.parse(json)
+    return { ok: true, mapping }
+  } catch (e) {
+    console.error('[Background] 表单填充失败:', e.message)
+    return { ok: false, error: e.message }
+  }
+}
 
 // 定时同步
 async function setupAlarm() {

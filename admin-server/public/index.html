@@ -1,0 +1,549 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI Browser 管理后台</title>
+<link rel="stylesheet" href="css/admin.css">
+<script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
+</head>
+<body>
+
+<!-- 登录页 -->
+<div id="loginPage" class="login-page">
+  <div class="login-card">
+    <h1>AI Browser</h1>
+    <div class="sub">管理后台</div>
+    <div id="loginError" class="error-msg"></div>
+    <div class="form-group">
+      <label>用户名</label>
+      <input type="text" id="loginUser" placeholder="请输入用户名" value="admin">
+    </div>
+    <div class="form-group">
+      <label>密码</label>
+      <input type="password" id="loginPass" placeholder="请输入密码" value="admin123" onkeydown="if(event.key==='Enter')login()">
+    </div>
+    <button class="btn btn-primary btn-block" onclick="login()">登 录</button>
+    <div style="text-align:center;margin-top:16px;font-size:12px;color:var(--text2)">
+      默认账号: admin / admin123
+    </div>
+  </div>
+</div>
+
+<!-- 主界面 -->
+<div id="mainPage" class="layout hidden">
+  <div class="sidebar">
+    <div class="sidebar-brand"><span>A</span> AI Browser</div>
+    <div class="sidebar-nav">
+      <div class="nav-item active" data-page="dashboard" onclick="switchPage('dashboard')">
+        <span class="icon">📊</span> 控制台
+      </div>
+      <div class="nav-item" data-page="scripts" onclick="switchPage('scripts')">
+        <span class="icon">📜</span> 脚本管理
+      </div>
+      <div class="nav-item" data-page="users" onclick="switchPage('users')">
+        <span class="icon">👥</span> 用户管理
+      </div>
+      <div class="nav-item" data-page="categories" onclick="switchPage('categories')">
+        <span class="icon">📁</span> 分类管理
+      </div>
+      <div class="nav-item" data-page="tokens" onclick="switchPage('tokens')">
+        <span class="icon">🔑</span> API Token
+      </div>
+      <div class="nav-item" data-page="appkeys" onclick="switchPage('appkeys')">
+        <span class="icon">🔐</span> AppKey管理
+      </div>
+      <div class="nav-item" data-page="aimodels" onclick="switchPage('aimodels')">
+        <span class="icon">🤖</span> AI模型配置
+      </div>
+      <div class="nav-item" data-page="aicalllogs" onclick="switchPage('aicalllogs')">
+        <span class="icon">📋</span> 调用记录
+      </div>
+      <div class="nav-item" data-page="attachments" onclick="switchPage('attachments')">
+        <span class="icon">📎</span> 附件管理
+      </div>
+    </div>
+    <div class="sidebar-footer">
+      <div class="user-info" id="sidebarUser">admin</div>
+      <div class="logout" onclick="logout()">退出登录</div>
+    </div>
+  </div>
+
+  <div class="main-content">
+
+    <!-- ===== 控制台 ===== -->
+    <div id="page-dashboard" class="page active">
+      <div class="page-header"><h2>控制台</h2></div>
+      <div class="stats-grid" id="statsGrid">
+        <div class="stat-card"><div class="stat-label">脚本总数</div><div class="stat-value">-</div></div>
+        <div class="stat-card"><div class="stat-label">用户总数</div><div class="stat-value">-</div></div>
+        <div class="stat-card"><div class="stat-label">总运行次数</div><div class="stat-value">-</div></div>
+        <div class="stat-card"><div class="stat-label">今日运行</div><div class="stat-value">-</div></div>
+      </div>
+      <div class="card">
+        <div class="card-header"><h3>热门脚本 Top 10</h3></div>
+        <div class="table-wrap">
+          <table><thead><tr><th>#</th><th>脚本名称</th><th>运行次数</th></tr></thead>
+          <tbody id="topScripts"><tr><td colspan="3" class="empty-state">加载中...</td></tr></tbody></table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== 脚本管理 ===== -->
+    <div id="page-scripts" class="page">
+      <div class="page-header">
+        <h2>脚本管理</h2>
+        <button class="btn btn-primary" onclick="showUploadModal()">+ 上传脚本</button>
+      </div>
+      <div class="card">
+        <div class="search-bar">
+          <input type="text" id="scriptSearch" placeholder="搜索脚本名称..." onkeydown="if(event.key==='Enter')loadScripts(1)">
+          <select id="scriptCategory" onchange="loadScripts(1)" style="width:160px;padding:8px;border:1px solid var(--border);border-radius:var(--radius);font-size:13px;outline:none">
+            <option value="">全部分类</option>
+          </select>
+          <button class="btn btn-primary btn-sm" onclick="loadScripts(1)">搜索</button>
+        </div>
+        <div class="table-wrap">
+          <table><thead><tr><th>ID</th><th>名称</th><th>分类</th><th>版本</th><th>作者</th><th>下载</th><th>状态</th><th>更新时间</th><th>操作</th></tr></thead>
+          <tbody id="scriptTable"><tr><td colspan="9" class="empty-state">加载中...</td></tr></tbody></table>
+        </div>
+        <div class="pagination" id="scriptPagination"></div>
+      </div>
+    </div>
+
+    <!-- ===== 用户管理 ===== -->
+    <div id="page-users" class="page">
+      <div class="page-header">
+        <h2>用户管理</h2>
+        <button class="btn btn-primary" onclick="showUserModal()">+ 添加用户</button>
+      </div>
+      <div class="card">
+        <div class="search-bar">
+          <input type="text" id="userSearch" placeholder="搜索用户名..." onkeydown="if(event.key==='Enter')loadUsers(1)">
+          <button class="btn btn-primary btn-sm" onclick="loadUsers(1)">搜索</button>
+        </div>
+        <div class="table-wrap">
+          <table><thead><tr><th>ID</th><th>用户名</th><th>角色</th><th>状态</th><th>创建时间</th><th>操作</th></tr></thead>
+          <tbody id="userTable"><tr><td colspan="6" class="empty-state">加载中...</td></tr></tbody></table>
+        </div>
+        <div class="pagination" id="userPagination"></div>
+      </div>
+    </div>
+
+    <!-- ===== 分类管理 ===== -->
+    <div id="page-categories" class="page">
+      <div class="page-header">
+        <h2>分类管理</h2>
+        <button class="btn btn-primary" onclick="showCategoryModal()">+ 添加分类</button>
+      </div>
+      <div class="card">
+        <div class="table-wrap">
+          <table><thead><tr><th>ID</th><th>名称</th><th>Slug</th><th>描述</th><th>脚本数</th><th>排序</th><th>操作</th></tr></thead>
+          <tbody id="categoryTable"><tr><td colspan="7" class="empty-state">加载中...</td></tr></tbody></table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== API Token ===== -->
+    <div id="page-tokens" class="page">
+      <div class="page-header"><h2>API Token</h2></div>
+      <div class="card">
+        <h3 style="margin-bottom:12px">当前 Token</h3>
+        <div class="token-display" id="tokenDisplay">-</div>
+        <button class="btn btn-primary btn-sm" onclick="copyToken()">复制 Token</button>
+        <button class="btn btn-warning btn-sm" style="margin-left:8px" onclick="refreshToken()">刷新 Token（重新登录）</button>
+      </div>
+      <div class="card">
+        <h3 style="margin-bottom:12px">使用说明</h3>
+        <div style="font-size:13px;color:var(--text2);line-height:1.8">
+          1. 将 Token 填入 AI Browser 客户端的「设置」→「管理后台配置」→「后台 Token」<br>
+          2. 或在 API 请求头中添加：<code style="background:#f0f0f0;padding:2px 6px;border-radius:4px">Authorization: Bearer {token}</code><br>
+          3. Token 有效期 7 天，过期后需重新登录获取
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== AppKey 管理 ===== -->
+    <div id="page-appkeys" class="page">
+      <div class="page-header">
+        <h2>AppKey 管理</h2>
+        <button class="btn btn-primary" onclick="showAppKeyModal()">+ 新建 AppKey</button>
+      </div>
+      <div class="card">
+        <div class="table-wrap">
+          <table><thead><tr><th>AppKey</th><th>AppSecret</th><th>名称</th><th>日限额</th><th>状态</th><th>创建时间</th><th>操作</th></tr></thead>
+          <tbody id="appKeyList"><tr><td colspan="7" class="empty-state">加载中...</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="card">
+        <h3 style="margin-bottom:12px">使用说明</h3>
+        <div style="font-size:13px;color:var(--text2);line-height:1.8">
+          1. AppKey 用于客户端连接服务端，替代旧的 Token 认证<br>
+          2. 客户端在「设置」→「服务端连接」中填入 AppKey 和 AppSecret<br>
+          3. 签名算法：HMAC-SHA256(appKey + timestamp, appSecret)<br>
+          4. 请求头需携带：X-App-Key、X-Timestamp（秒级）、X-Sign
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== AI 模型配置 ===== -->
+    <div id="page-aimodels" class="page">
+      <div class="page-header">
+        <h2>AI 模型配置</h2>
+      </div>
+      <div class="card">
+        <div class="card-header">
+          <h3>AI 服务商</h3>
+          <button class="btn btn-primary btn-sm" onclick="showProviderModal()">+ 添加服务商</button>
+        </div>
+        <div class="table-wrap">
+          <table><thead><tr><th>名称</th><th>Base URL</th><th>API Key</th><th>状态</th><th>排序</th><th>操作</th></tr></thead>
+          <tbody id="providerList"><tr><td colspan="6" class="empty-state">加载中...</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-header">
+          <h3>模型列表</h3>
+          <button class="btn btn-primary btn-sm" onclick="showModelModal()">+ 添加模型</button>
+        </div>
+        <div class="table-wrap">
+          <table><thead><tr><th>模型ID</th><th>显示名称</th><th>服务商</th><th>上下文窗口</th><th>Max Tokens</th><th>温度</th><th>能力</th><th>状态</th><th>操作</th></tr></thead>
+          <tbody id="modelList"><tr><td colspan="9" class="empty-state">加载中...</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== 调用记录 ===== -->
+    <div id="page-aicalllogs" class="page">
+      <div class="page-header"><h2>大模型调用记录</h2></div>
+
+      <div class="stats-row" id="aclOverview">
+        <div class="stat-card"><div class="stat-label">总调用</div><div class="stat-value">-</div></div>
+        <div class="stat-card"><div class="stat-label">成功</div><div class="stat-value">-</div></div>
+        <div class="stat-card"><div class="stat-label">失败</div><div class="stat-value">-</div></div>
+        <div class="stat-card"><div class="stat-label">总 Tokens</div><div class="stat-value">-</div></div>
+        <div class="stat-card"><div class="stat-label">平均耗时(ms)</div><div class="stat-value">-</div></div>
+      </div>
+
+      <div class="charts-row">
+        <div class="chart-card">
+          <h3>每日调用次数与 Token</h3>
+          <div id="aclDailyChart" class="chart-box"></div>
+        </div>
+        <div class="chart-card">
+          <h3>模型调用占比</h3>
+          <div id="aclModelChart" class="chart-box"></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-header"><h3>调用明细</h3></div>
+        <div class="filter-bar">
+          <div class="form-item"><label>开始日期</label><input type="date" id="aclStartDate"></div>
+          <div class="form-item"><label>结束日期</label><input type="date" id="aclEndDate"></div>
+          <div class="form-item"><label>模型</label><select id="aclModelFilter"><option value="">全部</option></select></div>
+          <div class="form-item"><label>供应商</label><select id="aclProviderFilter"><option value="">全部</option></select></div>
+          <div class="form-item"><label>AppKey</label><select id="aclAppKeyFilter"><option value="">全部</option></select></div>
+          <div class="form-item"><label>状态</label><select id="aclSuccessFilter"><option value="">全部</option><option value="1">成功</option><option value="0">失败</option></select></div>
+          <div class="form-item"><label>关键词</label><input type="text" id="aclKeyword" placeholder="错误信息"></div>
+          <button class="btn btn-primary btn-sm" onclick="aclApplyFilter()">查询</button>
+          <button class="btn btn-sm" onclick="aclResetFilter()">重置</button>
+        </div>
+        <div class="table-wrap">
+          <table><thead><tr><th>时间</th><th>模型</th><th>供应商</th><th>AppKey</th><th>流式</th><th>状态</th><th>耗时</th><th>上游状态</th><th>Prompt</th><th>Completion</th><th>总Token</th><th>错误</th></tr></thead>
+          <tbody id="aclList"><tr><td colspan="12" class="empty-state">加载中...</td></tr></tbody>
+          </table>
+        </div>
+        <div class="pager">
+          <span id="aclPageInfo">-</span>
+          <div class="pager-btns">
+            <button class="btn btn-sm" onclick="aclGoPage(aclPage-1)">上一页</button>
+            <button class="btn btn-sm" onclick="aclGoPage(aclPage+1)">下一页</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== 附件管理 ===== -->
+    <div id="page-attachments" class="page">
+      <div class="page-header"><h2>附件管理</h2></div>
+      <div class="card">
+        <div class="form-group">
+          <label>上传附件</label>
+          <div class="upload-zone" id="attUploadZone" style="border:2px dashed var(--border);border-radius:var(--radius);padding:30px;text-align:center;cursor:pointer;transition:border-color .2s;background:var(--bg)">
+            <div style="font-size:32px;margin-bottom:8px">📁</div>
+            <div style="font-size:14px;color:var(--text)">点击选择文件或拖拽到此处</div>
+            <div style="font-size:12px;color:var(--text2);margin-top:4px">支持图片 / PDF / 文本文档，单文件最大 50MB</div>
+          </div>
+          <input type="file" id="attFileInput" style="display:none" accept="image/*,.pdf,.txt,.csv,.json,.doc,.docx" multiple onchange="uploadAttachments(this.files)">
+        </div>
+        <div id="attUploadProgress" style="display:none;margin-top:8px;font-size:13px;color:var(--primary)"></div>
+      </div>
+      <div class="card">
+        <div class="search-bar" style="display:flex;gap:8px;align-items:center;margin-bottom:12px">
+          <select id="attFilter" onchange="loadAttachments(1)" style="width:140px;padding:8px;border:1px solid var(--border);border-radius:var(--radius);font-size:13px;outline:none">
+            <option value="">全部类型</option>
+            <option value="image">图片</option>
+            <option value="pdf">PDF</option>
+          </select>
+          <button class="btn btn-primary btn-sm" onclick="loadAttachments(1)">刷新</button>
+        </div>
+        <div class="table-wrap">
+          <table><thead><tr><th>ID</th><th>预览</th><th>原始文件名</th><th>大小</th><th>类型</th><th>上传时间</th><th>操作</th></tr></thead>
+          <tbody id="attTable"><tr><td colspan="7" class="empty-state">加载中...</td></tr></tbody></table>
+        </div>
+        <div class="pagination" id="attPagination"></div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ===== 弹窗 ===== -->
+
+<!-- 上传脚本弹窗 -->
+<div id="uploadModal" class="modal-overlay hidden" onclick="if(event.target===this)closeUploadModal()">
+  <div class="modal-box">
+    <h3>上传脚本</h3>
+    <div id="uploadError" class="error-msg"></div>
+    <div class="form-group"><label>脚本名称 *</label><input type="text" id="uploadName" placeholder="脚本名称"></div>
+    <div class="form-group"><label>描述</label><textarea id="uploadDesc" placeholder="脚本描述"></textarea></div>
+    <div class="form-group"><label>分类 *</label><select id="uploadCategory"></select></div>
+    <div class="form-group"><label>版本</label><input type="text" id="uploadVersion" value="1.0.0"></div>
+    <div class="form-group"><label>URL 匹配模式</label><input type="text" id="uploadUrlPattern" value="*" placeholder="* 匹配所有页面"></div>
+    <div class="form-group"><label>工具类型 <span style="font-weight:400;font-size:11px;color:var(--text2)">AI Agent自动调用</span></label><select id="uploadToolType"><option value="js">JS注入</option><option value="api">API调用</option></select></div>
+    <div class="form-group" id="uploadToolConfigGroup" style="display:none"><label>API工具配置 (JSON)</label><textarea id="uploadToolConfig" rows="4"></textarea></div>
+    <div class="form-group"><label>脚本文件 (.js) *</label><input type="file" id="uploadFile" accept=".js" multiple></div>
+    <div class="modal-actions">
+      <button class="btn btn-sm" onclick="closeUploadModal()" style="background:var(--bg);color:var(--text)">取消</button>
+      <button class="btn btn-primary btn-sm" onclick="uploadScript()">上传</button>
+    </div>
+  </div>
+</div>
+
+<!-- 用户编辑弹窗 -->
+<div id="userModal" class="modal-overlay hidden" onclick="if(event.target===this)closeUserModal()">
+  <div class="modal-box">
+    <h3 id="userModalTitle">添加用户</h3>
+    <div id="userModalError" class="error-msg"></div>
+    <div class="form-group"><label>用户名 *</label><input type="text" id="editUserName" placeholder="用户名"></div>
+    <div class="form-group"><label>密码 <span id="pwdHint" style="font-weight:400;font-size:11px;color:var(--text2)">*</span></label><input type="password" id="editUserPass" placeholder="密码"></div>
+    <div class="form-group"><label>角色</label><select id="editUserRole"><option value="admin">管理员</option><option value="developer">开发者</option><option value="editor" selected>编辑者</option></select></div>
+    <div class="form-group"><label>状态</label><select id="editUserStatus"><option value="1">启用</option><option value="0">禁用</option></select></div>
+    <input type="hidden" id="editUserId" value="">
+    <div class="modal-actions">
+      <button class="btn btn-sm" onclick="closeUserModal()" style="background:var(--bg);color:var(--text)">取消</button>
+      <button class="btn btn-primary btn-sm" onclick="saveUser()">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- 分类编辑弹窗 -->
+<div id="categoryModal" class="modal-overlay hidden" onclick="if(event.target===this)closeCategoryModal()">
+  <div class="modal-box">
+    <h3 id="categoryModalTitle">添加分类</h3>
+    <div id="categoryModalError" class="error-msg"></div>
+    <div class="form-group"><label>名称 *</label><input type="text" id="editCatName" placeholder="分类名称"></div>
+    <div class="form-group"><label>Slug *</label><input type="text" id="editCatSlug" placeholder="英文标识"></div>
+    <div class="form-group"><label>描述</label><input type="text" id="editCatDesc" placeholder="描述"></div>
+    <div class="form-group"><label>排序</label><input type="number" id="editCatSort" value="0"></div>
+    <input type="hidden" id="editCatId" value="">
+    <div class="modal-actions">
+      <button class="btn btn-sm" onclick="closeCategoryModal()" style="background:var(--bg);color:var(--text)">取消</button>
+      <button class="btn btn-primary btn-sm" onclick="saveCategory()">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- 查看代码 / 编辑代码弹窗 -->
+<div id="codeModal" class="modal-overlay hidden">
+  <div class="modal-box wide tall">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px">
+      <h3 id="codeModalTitle" style="margin:0">脚本代码</h3>
+      <div style="display:flex;gap:8px">
+        <button id="saveParamsBtn" class="btn btn-success btn-sm" onclick="saveParamsAndModules()">保存参数和模块</button>
+        <button id="codeEditBtn" class="btn btn-warning btn-sm" onclick="toggleCodeEdit()">编辑</button>
+        <button id="codeSaveBtn" class="btn btn-success btn-sm hidden" onclick="saveScriptCode()">保存代码</button>
+        <button id="codeCancelBtn" class="btn btn-sm hidden" onclick="cancelCodeEdit()" style="background:var(--bg);color:var(--text)">取消</button>
+        <button class="btn btn-sm" onclick="closeCodeModalWithConfirm()" style="background:var(--bg);color:var(--text)" title="关闭">&#10005;</button>
+      </div>
+    </div>
+    <div id="codeModalError" class="error-msg"></div>
+    <div id="codeMetaFields" class="hidden">
+      <div class="form-group"><label>脚本名称</label><input type="text" id="codeEditName"></div>
+      <div class="form-group"><label>脚本描述</label><textarea id="codeEditDesc" style="min-height:60px"></textarea></div>
+      <div class="form-group"><label>URL 匹配模式</label><input type="text" id="codeEditUrlPattern" placeholder="*"></div>
+      <div class="form-group"><label>工具类型</label><select id="codeEditToolType"><option value="js">JS注入</option><option value="api">API调用</option></select></div>
+      <div class="form-group" id="codeEditToolConfigGroup" style="display:none"><label>API工具配置 (JSON)</label><textarea id="codeEditToolConfig" rows="4"></textarea></div>
+      <div class="form-group"><label>版本</label><input type="text" id="codeEditVersion"></div>
+    </div>
+    <div id="codeViewWrap"><pre class="code-view" id="codeView"></pre></div>
+    <div id="codeEditWrap" class="hidden"><textarea class="code-edit" id="codeEditArea" spellcheck="false"></textarea></div>
+    <div id="paramsSection" style="margin-top:20px;padding-top:16px;border-top:1px solid var(--border);display:none"></div>
+    <div id="modulesSection" style="margin-top:20px;padding-top:16px;border-top:1px solid var(--border);display:none"></div>
+  </div>
+</div>
+
+<!-- 模块编辑弹窗 -->
+<div id="moduleEditModal" class="modal-overlay hidden" onclick="if(event.target===this)closeModuleEditModal()">
+  <div class="modal-box tall" style="width:700px">
+    <h3>编辑模块</h3>
+    <div class="form-group"><label>文件名</label><input type="text" id="moduleEditName"></div>
+    <div class="form-group"><label>加载顺序</label><input type="number" id="moduleEditOrder" value="0"></div>
+    <div class="form-group"><label>代码</label><textarea id="moduleEditArea" class="code-edit" style="min-height:300px" spellcheck="false"></textarea></div>
+    <input type="hidden" id="moduleEditIndex" value="">
+    <div class="modal-actions">
+      <button class="btn btn-sm" onclick="closeModuleEditModal()" style="background:var(--bg);color:var(--text)">取消</button>
+      <button class="btn btn-primary btn-sm" onclick="saveModuleEdit()">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- JS 注入预览弹窗 -->
+<div id="previewModal" class="modal-overlay hidden" onclick="if(event.target===this)closePreviewModal()">
+  <div class="modal-box wide tall">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px">
+      <h3 style="margin:0">JS 注入预览</h3>
+      <div style="display:flex;gap:8px;align-items:center">
+        <input type="text" id="previewUrl" value="https://example.com" placeholder="输入预览 URL" style="padding:6px 12px;border:1px solid var(--border);border-radius:var(--radius);font-size:13px;width:280px;outline:none">
+        <button class="btn btn-primary btn-sm" onclick="executePreview()">执行预览</button>
+      </div>
+    </div>
+    <div style="margin-bottom:12px">
+      <div style="font-size:12px;color:var(--text2);margin-bottom:6px">注入的脚本代码：</div>
+      <pre class="code-view" id="previewCode" style="max-height:150px;min-height:60px"></pre>
+    </div>
+    <div id="previewFrameWrap">
+      <iframe id="previewFrame" class="preview-iframe" sandbox="allow-scripts allow-same-origin allow-forms allow-popups" src="about:blank"></iframe>
+    </div>
+  </div>
+</div>
+
+<!-- AppKey 编辑弹窗 -->
+<div id="appKeyModal" class="modal-overlay hidden" onclick="if(event.target===this)closeAppKeyModal()">
+  <div class="modal-box">
+    <h3 id="appKeyModalTitle">新建 AppKey</h3>
+    <div class="form-group"><label>名称</label><input type="text" id="appKeyName" placeholder="例如：我的客户端"></div>
+    <div class="form-group"><label>日调用限额</label><input type="number" id="appKeyDailyLimit" value="200"></div>
+    <div class="form-group"><label>状态</label><select id="appKeyStatus"><option value="1">启用</option><option value="0">禁用</option></select></div>
+    <div class="modal-actions">
+      <button class="btn btn-sm" onclick="closeAppKeyModal()" style="background:var(--bg);color:var(--text)">取消</button>
+      <button class="btn btn-primary btn-sm" onclick="saveAppKey()">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- AppKey 结果弹窗（创建后显示密钥） -->
+<div id="appKeyResultModal" class="modal-overlay hidden">
+  <div class="modal-box">
+    <h3>AppKey 创建成功</h3>
+    <p style="font-size:14px;color:var(--text2);margin-bottom:16px">请立即复制 AppSecret，关闭后将无法查看</p>
+    <div class="form-group"><label>AppKey</label><div class="token-display" id="appKeyResultKey">-</div></div>
+    <div class="form-group"><label>AppSecret</label><div class="token-display" id="appKeyResultSecret">-</div></div>
+    <div class="modal-actions">
+      <button class="btn btn-sm btn-primary" onclick="copyText('appKeyResultKey')">复制 AppKey</button>
+      <button class="btn btn-sm btn-primary" onclick="copyText('appKeyResultSecret')">复制 Secret</button>
+      <button class="btn btn-sm" onclick="closeAppKeyResult()" style="background:var(--bg);color:var(--text)">关闭</button>
+    </div>
+  </div>
+</div>
+
+<!-- AI 服务商弹窗 -->
+<div id="providerModal" class="modal-overlay hidden" onclick="if(event.target===this)closeProviderModal()">
+  <div class="modal-box">
+    <h3 id="providerModalTitle">添加服务商</h3>
+    <div class="form-group"><label>服务商名称 (ID)</label><input type="text" id="providerName" placeholder="例如：openai"></div>
+    <div class="form-group"><label>显示名称</label><input type="text" id="providerDisplayName" placeholder="例如：OpenAI"></div>
+    <div class="form-group"><label>Base URL</label><input type="text" id="providerBaseUrl" placeholder="https://api.openai.com/v1"></div>
+    <div class="form-group"><label>API Key</label><input type="text" id="providerApiKey"></div>
+    <div class="form-group"><label>排序</label><input type="number" id="providerSort" value="0"></div>
+    <div class="modal-actions">
+      <button class="btn btn-sm" onclick="closeProviderModal()" style="background:var(--bg);color:var(--text)">取消</button>
+      <button class="btn btn-primary btn-sm" onclick="saveProvider()">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- AI 模型弹窗 -->
+<div id="modelModal" class="modal-overlay hidden" onclick="if(event.target===this)closeModelModal()">
+  <div class="modal-box tall" style="width:600px">
+    <h3 id="modelModalTitle">添加模型</h3>
+    <div class="form-group"><label>服务商</label><select id="modelProviderId"></select></div>
+    <div class="form-group"><label>模型 ID</label><input type="text" id="modelModelId" placeholder="例如：gpt-4o"></div>
+    <div class="form-group"><label>显示名称</label><input type="text" id="modelDisplayName" placeholder="例如：GPT-4o"></div>
+    <div class="form-group"><label>上下文窗口</label><input type="number" id="modelContextWindow" value="8192"></div>
+    <div class="form-group"><label>Max Tokens</label><input type="number" id="modelMaxTokens" value="4096"></div>
+    <div class="form-group"><label>温度</label><input type="number" id="modelTemperature" value="0.7" step="0.1"></div>
+    <div class="form-group">
+      <label style="display:flex;gap:16px">
+        <span><input type="checkbox" id="modelSupportsVision"> 支持图片</span>
+        <span><input type="checkbox" id="modelSupportsTools"> 支持工具调用</span>
+        <span><input type="checkbox" id="modelSupportsStream" checked> 支持流式</span>
+      </label>
+    </div>
+    <div class="form-group"><label>描述</label><textarea id="modelDescription" rows="2"></textarea></div>
+    <div class="modal-actions">
+      <button class="btn btn-sm" onclick="closeModelModal()" style="background:var(--bg);color:var(--text)">取消</button>
+      <button class="btn btn-primary btn-sm" onclick="saveModel()">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== 脚本加载顺序 ===== -->
+<script src="js/common.js"></script>
+<script src="js/scripts.js"></script>
+<script src="js/users.js"></script>
+<script src="js/categories.js"></script>
+<script src="js/appkeys.js"></script>
+<script src="js/aimodels.js"></script>
+<script src="js/aicalllogs.js"></script>
+<script src="js/attachments.js"></script>
+<script src="js/auth.js"></script>
+
+<script>
+// ============ 路由 & 控制台（依赖其他模块加载完成后定义） ============
+let currentPage = 'dashboard';
+
+function switchPage(page) {
+  currentPage = page;
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.getElementById('page-' + page).classList.add('active');
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  document.querySelector('[data-page="' + page + '"]').classList.add('active');
+  if (page === 'dashboard') loadDashboard();
+  if (page === 'scripts') loadScripts(1);
+  if (page === 'users') loadUsers(1);
+  if (page === 'categories') loadCategories();
+  if (page === 'appkeys') loadAppKeys();
+  if (page === 'aimodels') loadAIModels();
+  if (page === 'aicalllogs') initAICallLogs();
+  if (page === 'attachments') loadAttachments(1);
+}
+
+async function loadDashboard() {
+  try {
+    const res = await api('GET', '/api/stats/overview');
+    if (res.success) {
+      const d = res.data;
+      const grid = document.getElementById('statsGrid');
+      grid.innerHTML =
+        '<div class="stat-card"><div class="stat-label">脚本总数</div><div class="stat-value">' + (d.totalScripts||0) + '</div></div>' +
+        '<div class="stat-card"><div class="stat-label">用户总数</div><div class="stat-value">' + (d.totalUsers||0) + '</div></div>' +
+        '<div class="stat-card"><div class="stat-label">总运行次数</div><div class="stat-value">' + (d.totalRuns||0) + '</div></div>' +
+        '<div class="stat-card"><div class="stat-label">今日运行</div><div class="stat-value">' + (d.todayRuns||0) + '</div><div class="stat-sub">' + new Date().toLocaleDateString() + '</div></div>';
+      const tbody = document.getElementById('topScripts');
+      if (d.topScripts && d.topScripts.length > 0) {
+        tbody.innerHTML = d.topScripts.map((s, i) => '<tr><td>'+(i+1)+'</td><td>'+esc(s.name)+'</td><td>'+(s.run_count||0)+'</td></tr>').join('');
+      } else {
+        tbody.innerHTML = '<tr><td colspan="3" class="empty-state">暂无数据</td></tr>';
+      }
+    }
+  } catch(e) { console.error(e); }
+}
+</script>
+
+</body>
+</html>

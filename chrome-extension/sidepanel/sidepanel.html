@@ -63,11 +63,16 @@
 
         <!-- 输入区域 -->
         <div class="chat-input-area">
+          <div class="attachment-preview" id="attachmentPreview"></div>
           <div class="input-box">
             <textarea id="chatInput" placeholder="问我任何问题..." rows="1"></textarea>
             <div class="sender-bar">
               <button class="icon-btn new-chat-btn" id="newChatBtn" title="新建对话">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+              </button>
+              <button class="model-pill-btn" id="modelPillBtn" title="切换模型">
+                <span class="model-pill-name" id="modelPillName">模型</span>
+                <svg class="model-pill-chevron" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
               </button>
               <div class="input-toolbar">
                 <button class="toolbar-btn" id="summarizeFloatBtn" title="总结页面">
@@ -75,6 +80,9 @@
                 </button>
                 <button class="toolbar-btn" id="toolboxFloatBtn" title="智能工具箱">
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3.77-3.77a6 6 0 01-7.94 7.94l-6.91 6.91a2.12 2.12 0 01-3-3l6.91-6.91a6 6 0 017.94-7.94l-3.76 3.76z"/></svg>
+                </button>
+                <button class="toolbar-btn" id="uploadBtn" title="上传图片/PDF">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/></svg>
                 </button>
               </div>
               <button class="send-btn" id="sendBtn" title="发送">
@@ -93,6 +101,17 @@
             </button>
           </div>
           <div class="toolbox-content" id="toolboxScripts"></div>
+        </div>
+
+        <!-- 模型选择弹出面板 -->
+        <div class="model-dropdown-panel" id="modelDropdownPanel">
+          <div class="model-dropdown-header">
+            <span>选择模型</span>
+            <button class="model-dropdown-close" id="modelDropdownCloseBtn">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
+            </button>
+          </div>
+          <div class="model-dropdown-content" id="modelDropdownContent"></div>
         </div>
 
         <!-- JS注入面板 -->
@@ -150,28 +169,24 @@
         </div>
         <div class="settings-content">
           <div class="settings-section">
+            <h3>服务端连接</h3>
+            <div class="form-group">
+              <label>管理后台地址</label>
+              <input type="text" id="syncServerUrl" placeholder="http://localhost:3001">
+            </div>
+            <div class="form-group">
+              <label>AppKey</label>
+              <input type="text" id="syncAppKey" placeholder="输入AppKey">
+            </div>
+            <div class="form-group">
+              <label>AppSecret</label>
+              <input type="password" id="syncAppSecret" placeholder="输入AppSecret">
+            </div>
+            <button class="btn btn-secondary btn-sm" id="testConnectionBtn">测试连接</button>
+            <span id="connectionStatus" class="hint"></span>
+          </div>
+          <div class="settings-section">
             <h3>AI 模型配置</h3>
-            <div class="form-group">
-              <label>服务商</label>
-              <select id="aiProvider">
-                <option value="ollama">Ollama (本地)</option>
-                <option value="openai">OpenAI</option>
-                <option value="qwen">通义千问</option>
-                <option value="custom">自定义</option>
-              </select>
-            </div>
-            <div class="form-group">
-              <label>API 地址</label>
-              <input type="text" id="aiBaseUrl" placeholder="http://localhost:11434/v1">
-            </div>
-            <div class="form-group">
-              <label>API Key</label>
-              <input type="password" id="aiApiKey" placeholder="可选">
-            </div>
-            <div class="form-group">
-              <label>模型</label>
-              <input type="text" id="aiModel" placeholder="qwen2.5:7b">
-            </div>
             <div class="form-group">
               <label>系统提示词</label>
               <textarea id="aiSystemPrompt" rows="3" placeholder="你是 AI Browser 助手..."></textarea>
@@ -182,23 +197,7 @@
             </div>
             <div class="form-group">
               <label>上下文窗口大小 (max_tokens)</label>
-              <input type="number" id="aiMaxTokens" value="16384" min="512" max="131072" step="512">
-              <span class="hint">模型单次输出上限，DeepSeek等大模型建议≥8192</span>
-            </div>
-          </div>
-          <div class="settings-section">
-            <h3>脚本同步</h3>
-            <div class="form-group">
-              <label>管理后台地址</label>
-              <input type="text" id="syncServerUrl" placeholder="http://localhost:3001">
-            </div>
-            <div class="form-group">
-              <label>API Token</label>
-              <input type="password" id="syncToken" placeholder="从管理后台获取">
-            </div>
-            <div class="form-group">
-              <label>同步间隔（分钟）</label>
-              <input type="number" id="syncInterval" value="30" min="5" max="1440">
+              <input type="number" id="aiMaxTokens" value="4096" min="512" max="131072" step="512">
             </div>
           </div>
           <div class="settings-section">

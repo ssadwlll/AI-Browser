@@ -100,7 +100,25 @@ tr:hover{background:var(--bg)}
 
 /* 预览 iframe */
 .preview-iframe{width:100%;height:500px;border:1px solid var(--border);border-radius:var(--radius);background:#fff}
+
+/* ============ 调用记录页 ============ */
+.filter-bar{display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end;margin-bottom:16px}
+.filter-bar label{font-size:12px;color:var(--text2);display:block;margin-bottom:4px}
+.filter-bar .form-item{display:flex;flex-direction:column}
+.filter-bar select,.filter-bar input[type=date],.filter-bar input[type=text]{padding:7px 10px;border:1px solid var(--border);border-radius:8px;font-size:13px;background:var(--bg-card);color:var(--text);min-width:130px}
+.charts-row{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:20px}
+.chart-card{background:var(--bg-card);border-radius:12px;padding:20px;box-shadow:0 1px 3px rgba(0,0,0,0.06)}
+.chart-card h3{font-size:15px;margin-bottom:12px}
+.chart-box{width:100%;height:300px}
+.stats-row{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin-bottom:20px}
+.stats-row .stat-card .stat-value{font-size:22px}
+.pager{display:flex;justify-content:space-between;align-items:center;margin-top:14px;font-size:13px;color:var(--text2)}
+.pager .pager-btns{display:flex;gap:6px}
+.badge-ok{background:#d1fae5;color:#065f46}
+.badge-fail{background:#fee2e2;color:#991b1b}
+@media(max-width:1100px){.charts-row{grid-template-columns:1fr}.stats-row{grid-template-columns:repeat(2,1fr)}}
 </style>
+<script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
 </head>
 <body>
 
@@ -144,6 +162,18 @@ tr:hover{background:var(--bg)}
       </div>
       <div class="nav-item" data-page="tokens" onclick="switchPage('tokens')">
         <span class="icon">🔑</span> API Token
+      </div>
+      <div class="nav-item" data-page="appkeys" onclick="switchPage('appkeys')">
+        <span class="icon">🔐</span> AppKey管理
+      </div>
+      <div class="nav-item" data-page="aimodels" onclick="switchPage('aimodels')">
+        <span class="icon">🤖</span> AI模型配置
+      </div>
+      <div class="nav-item" data-page="aicalllogs" onclick="switchPage('aicalllogs')">
+        <span class="icon">📋</span> 调用记录
+      </div>
+      <div class="nav-item" data-page="attachments" onclick="switchPage('attachments')">
+        <span class="icon">📎</span> 附件管理
       </div>
     </div>
     <div class="sidebar-footer">
@@ -272,10 +302,176 @@ tr:hover{background:var(--bg)}
         </div>
       </div>
     </div>
+
+    <!-- AppKey 管理 -->
+    <div id="page-appkeys" class="page">
+      <div class="page-header">
+        <h2>AppKey 管理</h2>
+        <button class="btn btn-primary" onclick="showAppKeyModal()">+ 新建 AppKey</button>
+      </div>
+      <div class="card">
+        <div class="table-wrap">
+          <table><thead><tr><th>AppKey</th><th>AppSecret</th><th>名称</th><th>日限额</th><th>状态</th><th>创建时间</th><th>操作</th></tr></thead>
+          <tbody id="appKeyList"><tr><td colspan="7" class="empty-state">加载中...</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="card">
+        <h3 style="margin-bottom:12px">使用说明</h3>
+        <div style="font-size:13px;color:var(--text2);line-height:1.8">
+          1. AppKey 用于客户端连接服务端，替代旧的 Token 认证<br>
+          2. 客户端在「设置」→「服务端连接」中填入 AppKey 和 AppSecret<br>
+          3. 签名算法：HMAC-SHA256(appKey + timestamp, appSecret)<br>
+          4. 请求头需携带：X-App-Key、X-Timestamp（秒级）、X-Sign
+        </div>
+      </div>
+    </div>
+
+    <!-- AI 模型配置 -->
+    <div id="page-aimodels" class="page">
+      <div class="page-header">
+        <h2>AI 模型配置</h2>
+      </div>
+      <!-- 服务商管理 -->
+      <div class="card">
+        <div class="card-header">
+          <h3>AI 服务商</h3>
+          <button class="btn btn-primary btn-sm" onclick="showProviderModal()">+ 添加服务商</button>
+        </div>
+        <div class="table-wrap">
+          <table><thead><tr><th>名称</th><th>Base URL</th><th>API Key</th><th>状态</th><th>排序</th><th>操作</th></tr></thead>
+          <tbody id="providerList"><tr><td colspan="6" class="empty-state">加载中...</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+      <!-- 模型管理 -->
+      <div class="card">
+        <div class="card-header">
+          <h3>模型列表</h3>
+          <button class="btn btn-primary btn-sm" onclick="showModelModal()">+ 添加模型</button>
+        </div>
+        <div class="table-wrap">
+          <table><thead><tr><th>模型ID</th><th>显示名称</th><th>服务商</th><th>上下文窗口</th><th>Max Tokens</th><th>温度</th><th>能力</th><th>状态</th><th>操作</th></tr></thead>
+          <tbody id="modelList"><tr><td colspan="9" class="empty-state">加载中...</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- 调用记录 -->
+    <div id="page-aicalllogs" class="page">
+      <div class="page-header"><h2>大模型调用记录</h2></div>
+
+      <!-- 概览统计 -->
+      <div class="stats-row" id="aclOverview">
+        <div class="stat-card"><div class="stat-label">总调用</div><div class="stat-value">-</div></div>
+        <div class="stat-card"><div class="stat-label">成功</div><div class="stat-value">-</div></div>
+        <div class="stat-card"><div class="stat-label">失败</div><div class="stat-value">-</div></div>
+        <div class="stat-card"><div class="stat-label">总 Tokens</div><div class="stat-value">-</div></div>
+        <div class="stat-card"><div class="stat-label">平均耗时(ms)</div><div class="stat-value">-</div></div>
+      </div>
+
+      <!-- 按天图表 -->
+      <div class="charts-row">
+        <div class="chart-card">
+          <h3>每日调用次数与 Token</h3>
+          <div id="aclDailyChart" class="chart-box"></div>
+        </div>
+        <div class="chart-card">
+          <h3>模型调用占比</h3>
+          <div id="aclModelChart" class="chart-box"></div>
+        </div>
+      </div>
+
+      <!-- 调用明细列表 -->
+      <div class="card">
+        <div class="card-header"><h3>调用明细</h3></div>
+        <div class="filter-bar">
+          <div class="form-item">
+            <label>开始日期</label>
+            <input type="date" id="aclStartDate">
+          </div>
+          <div class="form-item">
+            <label>结束日期</label>
+            <input type="date" id="aclEndDate">
+          </div>
+          <div class="form-item">
+            <label>模型</label>
+            <select id="aclModelFilter"><option value="">全部</option></select>
+          </div>
+          <div class="form-item">
+            <label>供应商</label>
+            <select id="aclProviderFilter"><option value="">全部</option></select>
+          </div>
+          <div class="form-item">
+            <label>AppKey</label>
+            <select id="aclAppKeyFilter"><option value="">全部</option></select>
+          </div>
+          <div class="form-item">
+            <label>状态</label>
+            <select id="aclSuccessFilter">
+              <option value="">全部</option>
+              <option value="1">成功</option>
+              <option value="0">失败</option>
+            </select>
+          </div>
+          <div class="form-item">
+            <label>关键词</label>
+            <input type="text" id="aclKeyword" placeholder="错误信息">
+          </div>
+          <button class="btn btn-primary btn-sm" onclick="aclApplyFilter()">查询</button>
+          <button class="btn btn-sm" onclick="aclResetFilter()">重置</button>
+        </div>
+        <div class="table-wrap">
+          <table><thead><tr><th>时间</th><th>模型</th><th>供应商</th><th>AppKey</th><th>流式</th><th>状态</th><th>耗时</th><th>上游状态</th><th>Prompt</th><th>Completion</th><th>总Token</th><th>错误</th></tr></thead>
+          <tbody id="aclList"><tr><td colspan="12" class="empty-state">加载中...</td></tr></tbody>
+          </table>
+        </div>
+        <div class="pager">
+          <span id="aclPageInfo">-</span>
+          <div class="pager-btns">
+            <button class="btn btn-sm" onclick="aclGoPage(aclPage-1)">上一页</button>
+            <button class="btn btn-sm" onclick="aclGoPage(aclPage+1)">下一页</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+    <!-- 附件管理 -->
+    <div id="page-attachments" class="page">
+      <div class="page-header"><h2>附件管理</h2></div>
+      <div class="card">
+        <div class="form-group">
+          <label>上传附件</label>
+          <div class="upload-zone" id="attUploadZone" style="border:2px dashed var(--border);border-radius:var(--radius);padding:30px;text-align:center;cursor:pointer;transition:border-color .2s;background:var(--bg)">
+            <div style="font-size:32px;margin-bottom:8px">📁</div>
+            <div style="font-size:14px;color:var(--text)">点击选择文件或拖拽到此处</div>
+            <div style="font-size:12px;color:var(--text2);margin-top:4px">支持图片 / PDF / 文本文档，单文件最大 50MB</div>
+          </div>
+          <input type="file" id="attFileInput" style="display:none" accept="image/*,.pdf,.txt,.csv,.json,.doc,.docx" multiple onchange="uploadAttachments(this.files)">
+        </div>
+        <div id="attUploadProgress" style="display:none;margin-top:8px;font-size:13px;color:var(--primary)"></div>
+      </div>
+      <div class="card">
+        <div class="search-bar" style="display:flex;gap:8px;align-items:center;margin-bottom:12px">
+          <select id="attFilter" onchange="loadAttachments(1)" style="width:140px;padding:8px;border:1px solid var(--border);border-radius:var(--radius);font-size:13px;outline:none">
+            <option value="">全部类型</option>
+            <option value="image">图片</option>
+            <option value="pdf">PDF</option>
+          </select>
+          <button class="btn btn-primary btn-sm" onclick="loadAttachments(1)">刷新</button>
+        </div>
+        <div class="table-wrap">
+          <table><thead><tr><th>ID</th><th>预览</th><th>原始文件名</th><th>大小</th><th>类型</th><th>上传时间</th><th>操作</th></tr></thead>
+          <tbody id="attTable"><tr><td colspan="7" class="empty-state">加载中...</td></tr></tbody></table>
+        </div>
+        <div class="pagination" id="attPagination"></div>
+      </div>
+    </div>
+
   </div>
 </div>
-
-<!-- 上传脚本弹窗 -->
 <div id="uploadModal" class="modal-overlay hidden" onclick="if(event.target===this)closeUploadModal()">
   <div class="modal-box">
     <h3>上传脚本</h3>
@@ -472,6 +668,10 @@ function switchPage(page) {
   if (page === 'scripts') loadScripts(1);
   if (page === 'users') loadUsers(1);
   if (page === 'categories') loadCategories();
+  if (page === 'appkeys') loadAppKeys();
+  if (page === 'aimodels') loadAIModels();
+  if (page === 'aicalllogs') initAICallLogs();
+  if (page === 'attachments') loadAttachments(1);
 }
 
 // ============ 控制台 ============
@@ -1337,6 +1537,98 @@ function refreshToken() {
   toast('请重新登录获取新 Token', 'success');
 }
 
+// ============ 附件管理 ============
+let attPage = 1
+
+async function loadAttachments(page) {
+  attPage = page || 1
+  const type = document.getElementById('attFilter').value
+  let url = '/api/attachments?page=' + attPage + '&limit=15'
+  if (type) url += '&type=' + type
+  try {
+    const res = await api('GET', url)
+    const tbody = document.getElementById('attTable')
+    if (res.success && res.data && res.data.length > 0) {
+      tbody.innerHTML = res.data.map(a => {
+        const isImage = a.mime_type && a.mime_type.startsWith('image/')
+        const preview = isImage
+          ? '<img src="' + esc(a.url) + '" style="width:48px;height:48px;object-fit:cover;border-radius:4px;border:1px solid var(--border)" alt="">'
+          : '<span style="font-size:24px">' + (a.mime_type && a.mime_type.includes('pdf') ? '📄' : '📎') + '</span>'
+        var delClick = "deleteAttachment(" + a.id + ",'" + esc(a.original_name) + "')"
+        return '<tr>' +
+          '<td>' + a.id + '</td>' +
+          '<td>' + preview + '</td>' +
+          '<td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + esc(a.original_name) + '">' + esc(a.original_name) + '</td>' +
+          '<td>' + fmtSize(a.file_size) + '</td>' +
+          '<td style="font-size:11px;color:var(--text2)">' + esc(a.mime_type || '-') + '</td>' +
+          '<td>' + fmtDate(a.created_at) + '</td>' +
+          '<td>' +
+            '<a href="' + esc(a.url) + '" target="_blank" class="btn-icon" title="下载" style="text-decoration:none">⬇</a>' +
+            '<button class="btn-icon danger" onclick="' + delClick + '" title="删除">🗑</button>' +
+          '</td>' +
+        '</tr>'
+      }).join('')
+    } else {
+      tbody.innerHTML = '<tr><td colspan="7" class="empty-state">暂无附件</td></tr>'
+    }
+    const pag = res.pagination || {}
+    document.getElementById('attPagination').innerHTML =
+      '<button ' + (pag.page <= 1 ? 'disabled' : '') + ' onclick="loadAttachments(' + (pag.page - 1) + ')">上一页</button>' +
+      '<span>第 ' + (pag.page || 1) + ' / ' + (pag.totalPages || 1) + ' 页 (共 ' + (pag.total || 0) + ' 条)</span>' +
+      '<button ' + (pag.page >= pag.totalPages ? 'disabled' : '') + ' onclick="loadAttachments(' + (pag.page + 1) + ')">下一页</button>'
+  } catch(e) {
+    document.getElementById('attTable').innerHTML = '<tr><td colspan="7" class="empty-state">加载失败: ' + e.message + '</td></tr>'
+  }
+}
+
+async function uploadAttachments(files) {
+  if (!files || files.length === 0) return
+  const progress = document.getElementById('attUploadProgress')
+  progress.style.display = 'block'
+  let success = 0, fail = 0
+
+  for (const file of files) {
+    progress.textContent = '上传中: ' + file.name + '...'
+    const form = new FormData()
+    form.append('file', file)
+    try {
+      const res = await api('POST', '/api/attachments/upload', form, true)
+      if (res.success) success++
+      else { fail++; toast(file.name + ': ' + (res.message || '失败'), 'error') }
+    } catch(e) {
+      fail++
+      toast(file.name + ': 网络错误', 'error')
+    }
+  }
+  progress.style.display = 'none'
+  document.getElementById('attFileInput').value = ''
+  if (success > 0) toast('成功上传 ' + success + ' 个文件', 'success')
+  if (fail > 0) toast(fail + ' 个文件上传失败', 'error')
+  loadAttachments(attPage)
+}
+
+async function deleteAttachment(id, name) {
+  if (!confirm('确定删除附件 "' + name + '" 吗？')) return
+  try {
+    const res = await api('DELETE', '/api/attachments/' + id)
+    if (res.success) {
+      toast('附件已删除', 'success')
+      loadAttachments(attPage)
+    } else {
+      toast('删除失败: ' + (res.message || res.error), 'error')
+    }
+  } catch(e) {
+    toast('网络错误', 'error')
+  }
+}
+
+function fmtSize(bytes) {
+  if (!bytes) return '-'
+  if (bytes < 1024) return bytes + ' B'
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB'
+  return (bytes / (1024 * 1024)).toFixed(1) + ' MB'
+}
+
 // ============ 辅助函数 ============
 function esc(str) { return (str||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
 function fmtDate(d) { if(!d) return '-'; return new Date(d).toLocaleString('zh-CN'); }
@@ -1381,8 +1673,529 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('loginPass').addEventListener('keydown', (e) => {
     if (e.key === 'Enter') login();
   });
+  // 附件上传区域事件
+  const uploadZone = document.getElementById('attUploadZone')
+  const fileInput = document.getElementById('attFileInput')
+  if (uploadZone && fileInput) {
+    uploadZone.addEventListener('click', () => fileInput.click())
+    uploadZone.addEventListener('dragover', (e) => { e.preventDefault(); uploadZone.style.borderColor = 'var(--primary)'; })
+    uploadZone.addEventListener('dragleave', () => { uploadZone.style.borderColor = 'var(--border)'; })
+    uploadZone.addEventListener('drop', (e) => {
+      e.preventDefault()
+      uploadZone.style.borderColor = 'var(--border)'
+      uploadAttachments(e.dataTransfer.files)
+    })
+  }
 });
+
+// ============ AppKey 管理 ============
+let editingAppKeyId = null;
+
+async function loadAppKeys() {
+  try {
+    const res = await api('GET', '/api/app-keys');
+    if (res.success) {
+      const tbody = document.getElementById('appKeyList');
+      if (!res.data.length) { tbody.innerHTML = '<tr><td colspan="7" class="empty-state">暂无数据</td></tr>'; return; }
+      tbody.innerHTML = res.data.map(k => `
+        <tr>
+          <td style="font-family:monospace;font-size:12px">${k.app_key}</td>
+          <td style="font-family:monospace;font-size:12px">${k.app_secret_masked || '****'}</td>
+          <td>${k.name || '-'}</td>
+          <td>${k.daily_limit || '不限'}</td>
+          <td><span class="badge ${k.status ? 'badge-active' : 'badge-disabled'}">${k.status ? '启用' : '禁用'}</span></td>
+          <td>${new Date(k.created_at).toLocaleString()}</td>
+          <td>
+            <button class="btn-icon" onclick="editAppKey(${k.id})">✏️</button>
+            <button class="btn-icon danger" onclick="deleteAppKey(${k.id}, '${k.name}')">🗑️</button>
+          </td>
+        </tr>`).join('');
+    }
+  } catch (e) { toast('加载失败: ' + e.message, 'error'); }
+}
+
+function showAppKeyModal(data) {
+  editingAppKeyId = data?.id || null;
+  document.getElementById('appKeyModalTitle').textContent = data ? '编辑 AppKey' : '新建 AppKey';
+  document.getElementById('appKeyName').value = data?.name || '';
+  document.getElementById('appKeyDailyLimit').value = data?.daily_limit ?? 200;
+  document.getElementById('appKeyStatus').value = data?.status ?? 1;
+  document.getElementById('appKeyModal').classList.remove('hidden');
+}
+function closeAppKeyModal() { document.getElementById('appKeyModal').classList.add('hidden'); }
+
+function editAppKey(id) {
+  api('GET', '/api/app-keys').then(res => {
+    if (res.success) {
+      const k = res.data.find(x => x.id === id);
+      if (k) showAppKeyModal(k);
+    }
+  });
+}
+
+async function saveAppKey() {
+  const body = {
+    name: document.getElementById('appKeyName').value,
+    daily_limit: parseInt(document.getElementById('appKeyDailyLimit').value) || 0,
+    status: parseInt(document.getElementById('appKeyStatus').value),
+  };
+  try {
+    const res = editingAppKeyId
+      ? await api('PUT', '/api/app-keys/' + editingAppKeyId, body)
+      : await api('POST', '/api/app-keys', body);
+    if (res.success) {
+      if (!editingAppKeyId && res.data.app_secret) {
+        closeAppKeyModal();
+        showAppKeyResult(res.data.app_key, res.data.app_secret);
+      } else {
+        toast('更新成功', 'success');
+        closeAppKeyModal();
+        loadAppKeys();
+      }
+    } else { toast(res.error || '操作失败', 'error'); }
+  } catch (e) { toast('操作失败: ' + e.message, 'error'); }
+}
+
+async function deleteAppKey(id, name) {
+  if (!confirm('确定删除 AppKey「' + (name || id) + '」？')) return;
+  try {
+    const res = await api('DELETE', '/api/app-keys/' + id);
+    if (res.success) { toast('删除成功', 'success'); loadAppKeys(); }
+    else toast(res.error || '删除失败', 'error');
+  } catch (e) { toast('删除失败: ' + e.message, 'error'); }
+}
+
+// ============ AI 模型配置 ============
+let editingProviderId = null;
+let editingModelId = null;
+let providersCache = [];
+
+async function loadAIModels() {
+  await loadProviders();
+  await loadModels();
+}
+
+async function loadProviders() {
+  try {
+    const res = await api('GET', '/api/ai-models/providers');
+    if (res.success) {
+      providersCache = res.data;
+      const tbody = document.getElementById('providerList');
+      if (!res.data.length) { tbody.innerHTML = '<tr><td colspan="6" class="empty-state">暂无数据</td></tr>'; return; }
+      tbody.innerHTML = res.data.map(p => `
+        <tr>
+          <td>${p.display_name} <span style="color:var(--text2);font-size:11px">(${p.name})</span></td>
+          <td style="font-family:monospace;font-size:12px">${p.base_url}</td>
+          <td>${p.api_key ? '✅ 已配置' : '<span style="color:var(--danger)">❌ 未配置</span>'}</td>
+          <td><span class="badge ${p.status ? 'badge-active' : 'badge-disabled'}">${p.status ? '启用' : '禁用'}</span></td>
+          <td>${p.sort_order}</td>
+          <td>
+            <button class="btn-icon" onclick="editProvider(${p.id})">✏️</button>
+            <button class="btn-icon danger" onclick="deleteProvider(${p.id}, '${p.display_name}')">🗑️</button>
+          </td>
+        </tr>`).join('');
+    }
+  } catch (e) { toast('加载服务商失败: ' + e.message, 'error'); }
+}
+
+async function loadModels() {
+  try {
+    const res = await api('GET', '/api/ai-models');
+    if (res.success) {
+      const tbody = document.getElementById('modelList');
+      if (!res.data.length) { tbody.innerHTML = '<tr><td colspan="9" class="empty-state">暂无数据</td></tr>'; return; }
+      tbody.innerHTML = res.data.map(m => {
+        const provider = providersCache.find(p => p.id === m.provider_id);
+        const caps = [];
+        if (m.supports_vision) caps.push('<span class="badge badge-active">图片</span>');
+        if (m.supports_tools) caps.push('<span class="badge badge-admin">工具</span>');
+        if (m.supports_stream) caps.push('<span class="badge badge-developer">流式</span>');
+        return `
+        <tr>
+          <td style="font-family:monospace;font-size:12px">${m.model_id}</td>
+          <td>${m.display_name}</td>
+          <td>${provider ? provider.display_name : '-'}</td>
+          <td>${m.context_window}</td>
+          <td>${m.max_tokens}</td>
+          <td>${m.temperature}</td>
+          <td>${caps.join(' ') || '-'}</td>
+          <td><span class="badge ${m.status ? 'badge-active' : 'badge-disabled'}">${m.status ? '启用' : '禁用'}</span></td>
+          <td>
+            <button class="btn-icon" onclick="editModel(${m.id})">✏️</button>
+            <button class="btn-icon danger" onclick="deleteModel(${m.id}, '${m.display_name}')">🗑️</button>
+          </td>
+        </tr>`;
+      }).join('');
+    }
+  } catch (e) { toast('加载模型失败: ' + e.message, 'error'); }
+}
+
+function showProviderModal(data) {
+  editingProviderId = data?.id || null;
+  document.getElementById('providerModalTitle').textContent = data ? '编辑服务商' : '添加服务商';
+  document.getElementById('providerName').value = data?.name || '';
+  document.getElementById('providerDisplayName').value = data?.display_name || '';
+  document.getElementById('providerBaseUrl').value = data?.base_url || '';
+  document.getElementById('providerApiKey').value = data?.api_key || '';
+  document.getElementById('providerSort').value = data?.sort_order ?? 0;
+  document.getElementById('providerModal').classList.remove('hidden');
+}
+function closeProviderModal() { document.getElementById('providerModal').classList.add('hidden'); }
+
+function editProvider(id) {
+  const p = providersCache.find(x => x.id === id);
+  if (p) showProviderModal(p);
+}
+
+async function saveProvider() {
+  const body = {
+    name: document.getElementById('providerName').value,
+    display_name: document.getElementById('providerDisplayName').value,
+    base_url: document.getElementById('providerBaseUrl').value,
+    api_key: document.getElementById('providerApiKey').value,
+    sort_order: parseInt(document.getElementById('providerSort').value) || 0,
+  };
+  try {
+    const res = editingProviderId
+      ? await api('PUT', '/api/ai-models/providers/' + editingProviderId, body)
+      : await api('POST', '/api/ai-models/providers', body);
+    if (res.success) { toast('保存成功', 'success'); closeProviderModal(); loadAIModels(); }
+    else toast(res.error || '操作失败', 'error');
+  } catch (e) { toast('操作失败: ' + e.message, 'error'); }
+}
+
+async function deleteProvider(id, name) {
+  if (!confirm('确定删除服务商「' + name + '」？关联的模型也会被删除。')) return;
+  try {
+    const res = await api('DELETE', '/api/ai-models/providers/' + id);
+    if (res.success) { toast('删除成功', 'success'); loadAIModels(); }
+    else toast(res.error || '删除失败', 'error');
+  } catch (e) { toast('删除失败: ' + e.message, 'error'); }
+}
+
+function showModelModal(data) {
+  editingModelId = data?.id || null;
+  document.getElementById('modelModalTitle').textContent = data ? '编辑模型' : '添加模型';
+  const sel = document.getElementById('modelProviderId');
+  sel.innerHTML = providersCache.map(p => `<option value="${p.id}">${p.display_name}</option>`).join('');
+  document.getElementById('modelModelId').value = data?.model_id || '';
+  document.getElementById('modelDisplayName').value = data?.display_name || '';
+  document.getElementById('modelContextWindow').value = data?.context_window ?? 8192;
+  document.getElementById('modelMaxTokens').value = data?.max_tokens ?? 4096;
+  document.getElementById('modelTemperature').value = data?.temperature ?? 0.7;
+  document.getElementById('modelSupportsVision').checked = !!data?.supports_vision;
+  document.getElementById('modelSupportsTools').checked = !!data?.supports_tools;
+  document.getElementById('modelSupportsStream').checked = data?.supports_stream !== 0;
+  document.getElementById('modelDescription').value = data?.description || '';
+  if (data?.provider_id) sel.value = data.provider_id;
+  document.getElementById('modelModal').classList.remove('hidden');
+}
+function closeModelModal() { document.getElementById('modelModal').classList.add('hidden'); }
+
+function editModel(id) {
+  api('GET', '/api/ai-models').then(res => {
+    if (res.success) {
+      const m = res.data.find(x => x.id === id);
+      if (m) showModelModal(m);
+    }
+  });
+}
+
+async function saveModel() {
+  const body = {
+    provider_id: parseInt(document.getElementById('modelProviderId').value),
+    model_id: document.getElementById('modelModelId').value,
+    display_name: document.getElementById('modelDisplayName').value,
+    context_window: parseInt(document.getElementById('modelContextWindow').value) || 8192,
+    max_tokens: parseInt(document.getElementById('modelMaxTokens').value) || 4096,
+    temperature: parseFloat(document.getElementById('modelTemperature').value) || 0.7,
+    supports_vision: document.getElementById('modelSupportsVision').checked ? 1 : 0,
+    supports_tools: document.getElementById('modelSupportsTools').checked ? 1 : 0,
+    supports_stream: document.getElementById('modelSupportsStream').checked ? 1 : 0,
+    description: document.getElementById('modelDescription').value,
+  };
+  try {
+    const res = editingModelId
+      ? await api('PUT', '/api/ai-models/' + editingModelId, body)
+      : await api('POST', '/api/ai-models', body);
+    if (res.success) { toast('保存成功', 'success'); closeModelModal(); loadModels(); }
+    else toast(res.error || '操作失败', 'error');
+  } catch (e) { toast('操作失败: ' + e.message, 'error'); }
+}
+
+async function deleteModel(id, name) {
+  if (!confirm('确定删除模型「' + name + '」？')) return;
+  try {
+    const res = await api('DELETE', '/api/ai-models/' + id);
+    if (res.success) { toast('删除成功', 'success'); loadModels(); }
+    else toast(res.error || '删除失败', 'error');
+  } catch (e) { toast('删除失败: ' + e.message, 'error'); }
+}
+function showAppKeyResult(appKey, appSecret) {
+  document.getElementById('resultAppKey').value = appKey;
+  document.getElementById('resultAppSecret').value = appSecret;
+  document.getElementById('appKeyResultModal').classList.remove('hidden');
+  loadAppKeys();
+}
+function closeAppKeyResult() {
+  document.getElementById('appKeyResultModal').classList.add('hidden');
+}
+function copyText(text) {
+  navigator.clipboard.writeText(text).then(() => toast('已复制', 'success')).catch(() => {
+    const ta = document.createElement('textarea');
+    ta.value = text; document.body.appendChild(ta); ta.select();
+    document.execCommand('copy'); document.body.removeChild(ta);
+    toast('已复制', 'success');
+  });
+}
+
+// ============ 大模型调用记录 ============
+let aclPage = 1;
+let aclPageSize = 20;
+let aclDailyChartInst = null;
+let aclModelChartInst = null;
+
+async function initAICallLogs() {
+  // 默认最近 30 天
+  const end = new Date();
+  const start = new Date();
+  start.setDate(start.getDate() - 29);
+  document.getElementById('aclStartDate').value = start.toISOString().slice(0, 10);
+  document.getElementById('aclEndDate').value = end.toISOString().slice(0, 10);
+  await aclLoadFilters();
+  await aclLoadStats();
+  await aclLoadList();
+  // 图表自适应
+  window.addEventListener('resize', aclResizeCharts);
+}
+
+function aclResizeCharts() {
+  if (aclDailyChartInst) aclDailyChartInst.resize();
+  if (aclModelChartInst) aclModelChartInst.resize();
+}
+
+function aclQueryParams() {
+  return {
+    start_date: document.getElementById('aclStartDate').value,
+    end_date: document.getElementById('aclEndDate').value,
+    model: document.getElementById('aclModelFilter').value,
+    provider_id: document.getElementById('aclProviderFilter').value,
+    app_key_id: document.getElementById('aclAppKeyFilter').value,
+    success: document.getElementById('aclSuccessFilter').value,
+    keyword: document.getElementById('aclKeyword').value.trim(),
+  };
+}
+
+async function aclLoadFilters() {
+  try {
+    const res = await api('GET', '/api/ai-call-logs/filters');
+    if (!res.success) return;
+    const d = res.data;
+    const ms = document.getElementById('aclModelFilter');
+    ms.innerHTML = '<option value="">全部</option>' + d.models.map(m => `<option value="${m}">${m}</option>`).join('');
+    const ps = document.getElementById('aclProviderFilter');
+    ps.innerHTML = '<option value="">全部</option>' + d.providers.map(p => `<option value="${p.id}">${p.display_name}</option>`).join('');
+    const ks = document.getElementById('aclAppKeyFilter');
+    ks.innerHTML = '<option value="">全部</option>' + d.appKeys.map(k => `<option value="${k.id}">${k.name || k.id}</option>`).join('');
+  } catch (e) { console.error('加载筛选项失败', e); }
+}
+
+async function aclLoadStats() {
+  try {
+    const q = aclQueryParams();
+    const res = await api('GET', '/api/ai-call-logs/daily-stats?' + new URLSearchParams(q));
+    if (!res.success) return;
+    const d = res.data;
+    const o = d.overview || {};
+    const total = Number(o.total_calls || 0);
+    const okCount = Number(o.total_success || 0);
+    const failCount = Number(o.total_fail || 0);
+    document.getElementById('aclOverview').innerHTML = `
+      <div class="stat-card"><div class="stat-label">总调用</div><div class="stat-value">${total}</div></div>
+      <div class="stat-card"><div class="stat-label">成功</div><div class="stat-value" style="color:#10b981">${okCount}</div></div>
+      <div class="stat-card"><div class="stat-label">失败</div><div class="stat-value" style="color:#ef4444">${failCount}</div></div>
+      <div class="stat-card"><div class="stat-label">总 Tokens</div><div class="stat-value">${Number(o.total_tokens || 0).toLocaleString()}</div></div>
+      <div class="stat-card"><div class="stat-label">平均耗时(ms)</div><div class="stat-value">${Math.round(o.avg_duration_ms || 0)}</div></div>`;
+    aclRenderDailyChart(d.daily || []);
+    aclRenderModelChart(d.byModel || []);
+  } catch (e) { console.error('加载统计失败', e); }
+}
+
+function aclRenderDailyChart(daily) {
+  if (typeof echarts === 'undefined') return;
+  if (!aclDailyChartInst) aclDailyChartInst = echarts.init(document.getElementById('aclDailyChart'));
+  const dates = daily.map(r => r.date);
+  const counts = daily.map(r => Number(r.call_count || 0));
+  const tokens = daily.map(r => Number(r.total_tokens || 0));
+  aclDailyChartInst.setOption({
+    tooltip: { trigger: 'axis' },
+    legend: { data: ['调用次数', '总Token'], top: 0 },
+    grid: { left: 50, right: 50, top: 36, bottom: 30 },
+    xAxis: { type: 'category', data: dates, axisLabel: { fontSize: 10 } },
+    yAxis: [
+      { type: 'value', name: '次数', position: 'left' },
+      { type: 'value', name: 'Token', position: 'right' },
+    ],
+    series: [
+      { name: '调用次数', type: 'bar', data: counts, itemStyle: { color: '#6366f1' } },
+      { name: '总Token', type: 'line', yAxisIndex: 1, data: tokens, smooth: true, itemStyle: { color: '#10b981' } },
+    ],
+  });
+}
+
+function aclRenderModelChart(byModel) {
+  if (typeof echarts === 'undefined') return;
+  if (!aclModelChartInst) aclModelChartInst = echarts.init(document.getElementById('aclModelChart'));
+  const data = byModel.map(r => ({ name: r.model, value: Number(r.call_count || 0) }));
+  aclModelChartInst.setOption({
+    tooltip: { trigger: 'item', formatter: '{b}: {c} ({d}%)' },
+    legend: { type: 'scroll', orient: 'vertical', right: 10, top: 'middle' },
+    series: [{
+      type: 'pie',
+      radius: ['40%', '70%'],
+      center: ['40%', '50%'],
+      data: data,
+      label: { formatter: '{b}\n{d}%', fontSize: 11 },
+    }],
+  });
+}
+
+async function aclLoadList() {
+  const tbody = document.getElementById('aclList');
+  tbody.innerHTML = '<tr><td colspan="12" class="empty-state">加载中...</td></tr>';
+  try {
+    const q = aclQueryParams();
+    const params = new URLSearchParams({ page: aclPage, pageSize: aclPageSize, ...q });
+    const res = await api('GET', '/api/ai-call-logs?' + params);
+    if (!res.success) { tbody.innerHTML = `<tr><td colspan="12" class="empty-state">${res.error || '加载失败'}</td></tr>`; return; }
+    const rows = res.data || [];
+    const pg = res.pagination || {};
+    if (rows.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="12" class="empty-state">暂无数据</td></tr>';
+    } else {
+      tbody.innerHTML = rows.map(r => `
+        <tr>
+          <td>${new Date(r.created_at).toLocaleString('zh-CN', {hour12:false})}</td>
+          <td>${r.model || '-'}</td>
+          <td>${r.provider_name || '-'}</td>
+          <td>${r.app_key_name || '-'}</td>
+          <td>${r.stream ? '流式' : '同步'}</td>
+          <td><span class="badge ${r.success ? 'badge-ok' : 'badge-fail'}">${r.success ? '成功' : '失败'}</span></td>
+          <td>${r.duration_ms != null ? r.duration_ms : '-'}</td>
+          <td>${r.status_code != null ? r.status_code : '-'}</td>
+          <td>${r.prompt_tokens != null ? r.prompt_tokens : '-'}</td>
+          <td>${r.completion_tokens != null ? r.completion_tokens : '-'}</td>
+          <td>${r.total_tokens != null ? r.total_tokens : '-'}</td>
+          <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${(r.error_msg||'').replace(/"/g,'&quot;')}">${r.error_msg || ''}</td>
+        </tr>`).join('');
+    }
+    const total = pg.total || 0;
+    const totalPages = pg.totalPages || 1;
+    document.getElementById('aclPageInfo').textContent = `第 ${aclPage} / ${totalPages} 页，共 ${total} 条`;
+  } catch (e) {
+    tbody.innerHTML = `<tr><td colspan="12" class="empty-state">加载失败: ${e.message}</td></tr>`;
+  }
+}
+
+function aclApplyFilter() {
+  aclPage = 1;
+  aclLoadStats();
+  aclLoadList();
+}
+function aclResetFilter() {
+  document.getElementById('aclModelFilter').value = '';
+  document.getElementById('aclProviderFilter').value = '';
+  document.getElementById('aclAppKeyFilter').value = '';
+  document.getElementById('aclSuccessFilter').value = '';
+  document.getElementById('aclKeyword').value = '';
+  aclApplyFilter();
+}
+function aclGoPage(p) {
+  if (p < 1) return;
+  aclPage = p;
+  aclLoadList();
+}
 </script>
+
+<!-- AppKey 创建结果弹窗 -->
+<div id="appKeyResultModal" class="modal-overlay hidden" onclick="if(event.target===this)closeAppKeyResult()">
+  <div class="modal-box">
+    <h3>AppKey 创建成功</h3>
+    <div style="background:#fef3c7;border:1px solid #f59e0b;border-radius:8px;padding:12px;margin-bottom:16px;font-size:13px;color:#92400e">
+      ⚠️ 请妥善保存以下密钥，AppSecret 仅此一次显示完整内容！
+    </div>
+    <div class="form-group">
+      <label>AppKey</label>
+      <div style="display:flex;gap:8px;align-items:center">
+        <input type="text" id="resultAppKey" readonly style="flex:1;font-family:monospace;font-size:13px;background:#f9fafb">
+        <button class="btn btn-primary btn-sm" onclick="copyText(document.getElementById('resultAppKey').value)">复制</button>
+      </div>
+    </div>
+    <div class="form-group">
+      <label>AppSecret</label>
+      <div style="display:flex;gap:8px;align-items:center">
+        <input type="text" id="resultAppSecret" readonly style="flex:1;font-family:monospace;font-size:13px;background:#f9fafb">
+        <button class="btn btn-primary btn-sm" onclick="copyText(document.getElementById('resultAppSecret').value)">复制</button>
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-primary" onclick="closeAppKeyResult()">我已保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- AppKey 弹窗 -->
+<div id="appKeyModal" class="modal-overlay hidden" onclick="if(event.target===this)closeAppKeyModal()">
+  <div class="modal-box">
+    <h3 id="appKeyModalTitle">新建 AppKey</h3>
+    <div class="form-group"><label>名称</label><input type="text" id="appKeyName" placeholder="如：默认编辑"></div>
+    <div class="form-group"><label>日限额（0=不限）</label><input type="number" id="appKeyDailyLimit" value="200" min="0"></div>
+    <div class="form-group"><label>状态</label><select id="appKeyStatus"><option value="1">启用</option><option value="0">禁用</option></select></div>
+    <div class="modal-actions">
+      <button class="btn btn-sm" onclick="closeAppKeyModal()" style="background:var(--bg);color:var(--text)">取消</button>
+      <button class="btn btn-primary btn-sm" onclick="saveAppKey()">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- 服务商弹窗 -->
+<div id="providerModal" class="modal-overlay hidden" onclick="if(event.target===this)closeProviderModal()">
+  <div class="modal-box">
+    <h3 id="providerModalTitle">添加服务商</h3>
+    <div class="form-group"><label>标识名（英文）</label><input type="text" id="providerName" placeholder="如：deepseek"></div>
+    <div class="form-group"><label>显示名称</label><input type="text" id="providerDisplayName" placeholder="如：DeepSeek"></div>
+    <div class="form-group"><label>Base URL</label><input type="text" id="providerBaseUrl" placeholder="https://api.deepseek.com/v1"></div>
+    <div class="form-group"><label>API Key</label><input type="password" id="providerApiKey" placeholder="服务商API密钥"></div>
+    <div class="form-group"><label>排序</label><input type="number" id="providerSort" value="0"></div>
+    <div class="modal-actions">
+      <button class="btn btn-sm" onclick="closeProviderModal()" style="background:var(--bg);color:var(--text)">取消</button>
+      <button class="btn btn-primary btn-sm" onclick="saveProvider()">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- 模型弹窗 -->
+<div id="modelModal" class="modal-overlay hidden" onclick="if(event.target===this)closeModelModal()">
+  <div class="modal-box">
+    <h3 id="modelModalTitle">添加模型</h3>
+    <div class="form-group"><label>服务商</label><select id="modelProviderId"></select></div>
+    <div class="form-group"><label>模型ID</label><input type="text" id="modelModelId" placeholder="如：deepseek-chat"></div>
+    <div class="form-group"><label>显示名称</label><input type="text" id="modelDisplayName" placeholder="如：DeepSeek Chat"></div>
+    <div class="form-group"><label>上下文窗口</label><input type="number" id="modelContextWindow" value="8192"></div>
+    <div class="form-group"><label>Max Tokens</label><input type="number" id="modelMaxTokens" value="4096"></div>
+    <div class="form-group"><label>温度</label><input type="number" id="modelTemperature" value="0.7" step="0.1" min="0" max="2"></div>
+    <div class="form-group"><label>功能支持</label>
+      <label style="font-weight:normal;display:flex;align-items:center;gap:6px;font-size:13px"><input type="checkbox" id="modelSupportsVision"> 支持图片（多模态）</label>
+      <label style="font-weight:normal;display:flex;align-items:center;gap:6px;font-size:13px"><input type="checkbox" id="modelSupportsTools"> 支持工具调用</label>
+      <label style="font-weight:normal;display:flex;align-items:center;gap:6px;font-size:13px"><input type="checkbox" id="modelSupportsStream" checked> 支持流式输出</label>
+    </div>
+    <div class="form-group"><label>描述</label><textarea id="modelDescription" placeholder="模型描述（可选）"></textarea></div>
+    <div class="modal-actions">
+      <button class="btn btn-sm" onclick="closeModelModal()" style="background:var(--bg);color:var(--text)">取消</button>
+      <button class="btn btn-primary btn-sm" onclick="saveModel()">保存</button>
+    </div>
+  </div>
+</div>
 
 <!-- 模块代码编辑弹窗 -->
 <div id="moduleEditModal" class="modal-overlay hidden" onclick="if(event.target===this)closeModuleEditModal()">

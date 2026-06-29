@@ -45,7 +45,7 @@
   ],
   "web_accessible_resources": [
     {
-      "resources": ["sidepanel/sidepanel.html", "content/*", "shared/*"],
+      "resources": ["sidepanel/*", "content/*", "shared/*", "icons/*", "popup/*"],
       "matches": ["<all_urls>"]
     }
   ],

@@ -274,48 +274,6 @@ function registerIpcHandlers() {
     return { success: false }
   })
 
-  // 生成本地脚本的油猴格式临时文件并用系统浏览器打开
-  ipcMain.handle('browser:install-tampermonkey', async (event, { name, description, code, urlPattern }) => {
-    try {
-      const os = require('os')
-      const fs = require('fs')
-      const path = require('path')
-
-      // 如果代码已包含 ==UserScript== 块，直接用
-      let userjsCode = code
-      if (!code.includes('==UserScript==')) {
-        const pattern = urlPattern || '*'
-        const matchRules = pattern.split(',').map(p => p.trim()).filter(Boolean)
-        const matchLines = matchRules.map(r => `// @match        ${r}`).join('\n')
-        const header = `// ==UserScript==
-// @name         ${name || '未命名脚本'}
-// @namespace    ai-browser-scripts
-// @version      1.0.0
-// @description  ${description || ''}
-// @author       AI Browser
-${matchLines}
-// @grant        none
-// @run-at       document-idle
-// ==/UserScript==
-
-`
-        userjsCode = header + code
-      }
-
-      // 写入临时文件
-      const tmpDir = os.tmpdir()
-      const safeName = (name || 'script').replace(/[^a-zA-Z0-9\u4e00-\u9fa5_-]/g, '_')
-      const tmpFile = path.join(tmpDir, `${safeName}.user.js`)
-      fs.writeFileSync(tmpFile, userjsCode, 'utf-8')
-
-      // 用系统默认浏览器打开，油猴会自动识别 .user.js 并弹出安装提示
-      await shell.openExternal(`file:///${tmpFile.replace(/\\/g, '/')}`)
-      return { success: true, path: tmpFile }
-    } catch (e) {
-      return { success: false, error: e.message }
-    }
-  })
-
   ipcMain.on('browser:resize', (event, { browserRatio, position, ratio }) => {
     if (!isWindowValid()) return
     if (position) panelPosition = position
@@ -810,12 +768,10 @@ ${matchLines}
   // 通用 HTTP 请求辅助函数
   function adminRequest(method, apiPath, token, body = null) {
     return new Promise((resolve, reject) => {
-      // 从 body 中提取 _serverUrl，其余作为请求体
+      const url = new URL(apiPath, token ? 'http://placeholder' : 'http://placeholder')
+      // 从 adminServerUrl 中解析
       const serverUrl = body && body._serverUrl ? body._serverUrl : ''
-      const reqBody = body ? { ...body } : null
-      delete reqBody?._serverUrl
-      // GET/HEAD 请求不发送 body
-      const hasBody = reqBody && Object.keys(reqBody).length > 0 && !['GET', 'HEAD'].includes(method.toUpperCase())
+      delete body?._serverUrl
       const fullUrl = serverUrl + apiPath
       const parsedUrl = new URL(fullUrl)
       const isHttps = parsedUrl.protocol === 'https:'
@@ -826,7 +782,7 @@ ${matchLines}
         path: parsedUrl.pathname + parsedUrl.search,
         method,
         headers: {
-          ...(hasBody ? { 'Content-Type': 'application/json' } : {}),
+          'Content-Type': 'application/json',
           ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
       }
@@ -843,8 +799,8 @@ ${matchLines}
       })
       req.on('error', reject)
       req.setTimeout(15000, () => { req.destroy(); reject(new Error('请求超时')) })
-      if (hasBody) {
-        req.write(JSON.stringify(reqBody))
+      if (body) {
+        req.write(JSON.stringify(body))
       }
       req.end()
     })
@@ -950,11 +906,7 @@ ${matchLines}
       if (category) params.set('category', category)
       const query = params.toString() ? '?' + params.toString() : ''
       const result = await adminRequest('GET', '/api/scripts' + query, token, { _serverUrl: serverUrl })
-      if (result.data?.success) {
-        return { success: true, data: result.data.data || [], pagination: result.data.pagination }
-      } else {
-        return { success: false, error: result.data?.error || `HTTP ${result.status}` }
-      }
+      return { success: result.data?.success || false, data: result.data }
     } catch (e) {
       return { success: false, error: e.message }
     }
@@ -967,28 +919,28 @@ ${matchLines}
         return { success: false, error: '请先配置管理后台地址和 Token' }
       }
       const result = await adminRequest('GET', '/api/stats/categories', token, { _serverUrl: serverUrl })
-      if (result.data?.success) {
-        return { success: true, data: result.data.data || result.data }
-      } else {
-        return { success: false, error: result.data?.error || `HTTP ${result.status}` }
-      }
+      return { success: result.data?.success || false, data: result.data }
     } catch (e) {
       return { success: false, error: e.message }
     }
   })
 
-  // 获取脚本详情（含参数注入和多模块合并）
+  // 获取脚本详情
   ipcMain.handle('admin:get-script-detail', async (event, { serverUrl, token, id }) => {
     try {
       if (!serverUrl || !token) {
         return { success: false, error: '请先配置管理后台地址和 Token' }
       }
-      const result = await adminRequest('GET', `/api/scripts/${id}/inject`, token, { _serverUrl: serverUrl })
-      if (!result.data?.success) {
-        return { success: false, error: result.data?.error || `HTTP ${result.status}` }
+      const result = await adminRequest('GET', `/api/scripts/${id}`, token, { _serverUrl: serverUrl })
+      // 如果详情中没有 code 字段，尝试下载脚本文件内容
+      const detail = result.data?.data || result.data
+      if (detail && detail.file_path && !detail.code) {
+        try {
+          const code = fs.readFileSync(detail.file_path, 'utf-8')
+          detail.code = code
+        } catch {}
       }
-      const detail = result.data.data || result.data
-      return { success: true, data: detail }
+      return { success: true, data: result.data }
     } catch (e) {
       return { success: false, error: e.message }
     }

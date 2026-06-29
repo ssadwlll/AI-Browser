@@ -622,66 +622,28 @@ export default function UnifiedPanel({ config }) {
     }
   }
 
-  // 安装脚本到油猴 (Tampermonkey)
-  const handleInstallToTampermonkey = (serverScript) => {
-    const serverUrl = config.adminServerUrl || ''
-    if (!serverUrl) {
-      addMessage({ role: 'assistant', type: 'error', content: '请先在设置中配置管理后台地址' })
-      return
-    }
-    const userjsUrl = serverUrl.replace(/\/+$/, '') + '/api/scripts/' + serverScript.id + '/userjs'
-    // 在系统默认浏览器中打开，油猴会自动识别 .user.js 并弹出安装提示
-    window.api.action.openExternal(userjsUrl)
-    addMessage({ role: 'system', type: 'tool_call', content: `已在浏览器中打开油猴安装页面: ${serverScript.name}` })
-  }
-
-  // 安装本地保存的脚本到油猴
-  const handleInstallLocalToTampermonkey = async (script) => {
-    try {
-      const res = await window.api.action.installTampermonkey({
-        name: script.name,
-        description: script.description,
-        code: script.code,
-        urlPattern: '*',
-      })
-      if (res.success) {
-        addMessage({ role: 'system', type: 'tool_call', content: `已在浏览器中打开油猴安装页面: ${script.name}` })
-      } else {
-        addMessage({ role: 'assistant', type: 'error', content: `油猴安装失败: ${res.error || '未知错误'}` })
-      }
-    } catch (e) {
-      addMessage({ role: 'assistant', type: 'error', content: `油猴安装异常: ${e.message}` })
-    }
-  }
-
-  // 从脚本中心获取注入代码（含参数注入和多模块合并）
-  const fetchInjectCode = async (serverScript) => {
-    const serverUrl = config.adminServerUrl || ''
-    const tk = config.adminToken || ''
-    const detailResult = await window.api.admin.getScriptDetail({ serverUrl, token: tk, id: serverScript.id })
-    if (!detailResult.success || !detailResult.data) {
-      addMessage({ role: 'assistant', type: 'error', content: `获取脚本详情失败: ${detailResult.error || '未知错误'}` })
-      return null
-    }
-    const detail = detailResult.data.data || detailResult.data
-    const code = detail.code || ''
-    if (!code) {
-      addMessage({ role: 'assistant', type: 'error', content: '脚本内容为空' })
-      return null
-    }
-    return { code, urlPattern: detail.url_pattern || '*' }
-  }
-
   // 从脚本中心下载脚本到本地
   const handleDownloadFromCenter = async (serverScript) => {
+    const serverUrl = config.adminServerUrl || ''
+    const tk = config.adminToken || ''
     try {
-      const result = await fetchInjectCode(serverScript)
-      if (!result) return
+      // 先获取脚本详情（包含代码内容）
+      const detailResult = await window.api.admin.getScriptDetail({ serverUrl, token: tk, id: serverScript.id })
+      if (!detailResult.success || !detailResult.data) {
+        addMessage({ role: 'assistant', type: 'error', content: `获取脚本详情失败: ${detailResult.error || '未知错误'}` })
+        return
+      }
+      const detail = detailResult.data.data || detailResult.data
+      const code = detail.code || detail.content || ''
+      if (!code) {
+        addMessage({ role: 'assistant', type: 'error', content: '脚本内容为空，无法下载' })
+        return
+      }
       const newScript = {
         id: 'script_' + Date.now(),
         name: serverScript.name,
         description: serverScript.description || '',
-        code: result.code,
+        code,
         savedAt: Date.now(),
       }
       setSavedScripts(prev => {
@@ -692,17 +654,6 @@ export default function UnifiedPanel({ config }) {
       addMessage({ role: 'system', type: 'tool_call', content: `脚本 "${serverScript.name}" 已从脚本中心下载到本地` })
     } catch (e) {
       addMessage({ role: 'assistant', type: 'error', content: `下载脚本异常: ${e.message}` })
-    }
-  }
-
-  // 从脚本中心添加为自动注入脚本
-  const handleAddAutoInjectFromCenter = async (serverScript) => {
-    try {
-      const result = await fetchInjectCode(serverScript)
-      if (!result) return
-      await handleAddAutoInject(result.code, serverScript.name)
-    } catch (e) {
-      addMessage({ role: 'assistant', type: 'error', content: `添加自动注入异常: ${e.message}` })
     }
   }
 
@@ -1002,13 +953,6 @@ export default function UnifiedPanel({ config }) {
               </div>
               <div style={{ display: 'flex', gap: '4px', marginTop: 4 }}>
                 <button
-                  style={{ background: '#76b900', color: '#fff', fontSize: 11, padding: '3px 8px', borderRadius: 4, border: 'none', cursor: 'pointer' }}
-                  onClick={(e) => { e.stopPropagation(); handleInstallLocalToTampermonkey(script) }}
-                  title="安装到油猴 (Tampermonkey)"
-                >
-                  安装到油猴
-                </button>
-                <button
                   style={{ background: '#ec4899', color: '#fff', fontSize: 11, padding: '3px 8px', borderRadius: 4, border: 'none', cursor: 'pointer' }}
                   onClick={(e) => { e.stopPropagation(); handleUploadToServer(script.code, script.name, script.description) }}
                   title="上传到管理后台"
@@ -1064,20 +1008,6 @@ export default function UnifiedPanel({ config }) {
                   title="下载到本地脚本库"
                 >
                   下载到本地
-                </button>
-                <button
-                  style={{ background: '#f59e0b', color: '#fff', fontSize: 11, padding: '3px 8px', borderRadius: 4, border: 'none', cursor: 'pointer' }}
-                  onClick={() => handleAddAutoInjectFromCenter(script)}
-                  title="添加为自动注入脚本（页面加载后自动执行）"
-                >
-                  自动注入
-                </button>
-                <button
-                  style={{ background: '#76b900', color: '#fff', fontSize: 11, padding: '3px 8px', borderRadius: 4, border: 'none', cursor: 'pointer' }}
-                  onClick={() => handleInstallToTampermonkey(script)}
-                  title="安装到油猴 (Tampermonkey)"
-                >
-                  安装到油猴
                 </button>
               </div>
             </div>

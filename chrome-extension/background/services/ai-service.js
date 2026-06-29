@@ -1,40 +1,40 @@
 // ============ AIService ============
+// 通过服务端代理调用 AI（POST {serverUrl}/api/ai-proxy/chat），请求头携带 appKey 签名
 export class AIService {
   constructor(configService) {
     this.configService = configService
   }
 
-  async chat(messages, options = {}) {
-    const config = await this.configService.getAIConfig()
-    const mergedConfig = { ...config, ...options }
-
+  /**
+   * 构建请求体（与 OpenAI Chat Completions 兼容）
+   * 若首条消息非 system，自动注入系统提示词
+   */
+  _buildBody(messages, mergedConfig, stream = false) {
     const body = {
       model: mergedConfig.model,
       messages: messages,
       temperature: mergedConfig.temperature,
       max_tokens: mergedConfig.maxTokens,
     }
+    if (stream) body.stream = true
 
     if (messages[0]?.role !== 'system') {
       const sysPrompt = mergedConfig.systemPrompt || '你是 AI Browser 助手，可以帮助用户分析网页内容、回答问题、编写代码和执行操作。'
       body.messages = [{ role: 'system', content: sysPrompt + ' 请总是尽力回答用户问题，不要拒绝。' }, ...messages]
     }
+    return body
+  }
 
-    const headers = { 'Content-Type': 'application/json' }
-    if (mergedConfig.apiKey) {
-      headers['Authorization'] = `Bearer ${mergedConfig.apiKey}`
-    }
+  async chat(messages, options = {}) {
+    const config = await this.configService.getAIConfig()
+    const mergedConfig = { ...config, ...options }
+
+    const body = this._buildBody(messages, mergedConfig, false)
+    const { appKey, appSecret } = await this.configService.getAppAuth()
+    const headers = await this.configService.generateAuthHeaders(appKey, appSecret)
+    const url = await this.configService.getAIProxyUrl()
 
     try {
-      let url = mergedConfig.baseUrl
-      if (url.endsWith('/chat/completions')) {
-        // 用户填了完整路径
-      } else if (url.endsWith('/chat/completions/')) {
-        url = url.slice(0, -1)
-      } else {
-        url = url.replace(/\/+$/, '') + '/chat/completions'
-      }
-
       const res = await fetch(url, {
         method: 'POST',
         headers,
@@ -59,35 +59,13 @@ export class AIService {
     const config = await this.configService.getAIConfig()
     const mergedConfig = { ...config, ...options }
 
-    const body = {
-      model: mergedConfig.model,
-      messages: messages,
-      temperature: mergedConfig.temperature,
-      max_tokens: mergedConfig.maxTokens,
-      stream: true,
-    }
-
-    if (messages[0]?.role !== 'system') {
-      const sysPrompt = mergedConfig.systemPrompt || '你是 AI Browser 助手，可以帮助用户分析网页内容、回答问题、编写代码和执行操作。'
-      body.messages = [{ role: 'system', content: sysPrompt + ' 请总是尽力回答用户问题，不要拒绝。' }, ...messages]
-    }
-
-    const headers = { 'Content-Type': 'application/json' }
-    if (mergedConfig.apiKey) {
-      headers['Authorization'] = `Bearer ${mergedConfig.apiKey}`
-    }
+    const body = this._buildBody(messages, mergedConfig, true)
+    const { appKey, appSecret } = await this.configService.getAppAuth()
+    const headers = await this.configService.generateAuthHeaders(appKey, appSecret)
+    const url = await this.configService.getAIProxyUrl()
 
     try {
-      let url = mergedConfig.baseUrl
-      if (url.endsWith('/chat/completions')) {
-        // 用户填了完整路径
-      } else if (url.endsWith('/chat/completions/')) {
-        url = url.slice(0, -1)
-      } else {
-        url = url.replace(/\/+$/, '') + '/chat/completions'
-      }
-
-      console.log('[AIService] 请求:', url, '模型:', mergedConfig.model)
+      console.log('[AIService] 请求代理:', url, '模型:', mergedConfig.model)
 
       const res = await fetch(url, {
         method: 'POST',
