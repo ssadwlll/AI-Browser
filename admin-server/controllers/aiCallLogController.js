@@ -93,7 +93,7 @@ exports.dailyStats = async (req, res) => {
     if (app_key_id) { where.push('l.app_key_id = ?'); params.push(parseInt(app_key_id)) }
 
     const [rows] = await pool.query(
-      `SELECT DATE(l.created_at) AS date,
+      `SELECT DATE_FORMAT(l.created_at, '%Y-%m-%d') AS date,
               COUNT(*) AS call_count,
               SUM(CASE WHEN l.success = 1 THEN 1 ELSE 0 END) AS success_count,
               SUM(CASE WHEN l.success = 0 THEN 1 ELSE 0 END) AS fail_count,
@@ -103,7 +103,7 @@ exports.dailyStats = async (req, res) => {
               ROUND(AVG(l.duration_ms), 0) AS avg_duration_ms
        FROM ai_call_logs l
        WHERE ${where.join(' AND ')}
-       GROUP BY DATE(l.created_at)
+       GROUP BY DATE_FORMAT(l.created_at, '%Y-%m-%d')
        ORDER BY date ASC`,
       params,
     )
@@ -116,6 +116,18 @@ exports.dailyStats = async (req, res) => {
        WHERE ${where.join(' AND ')}
        GROUP BY l.model
        ORDER BY call_count DESC`,
+      params,
+    )
+
+    // 按天+模型维度汇总（用于每日分模型图表）
+    const [dailyByModelRaw] = await pool.query(
+      `SELECT DATE_FORMAT(l.created_at, '%Y-%m-%d') AS date, l.model,
+              COUNT(*) AS call_count,
+              COALESCE(SUM(l.total_tokens), 0) AS total_tokens
+       FROM ai_call_logs l
+       WHERE ${where.join(' AND ')}
+       GROUP BY DATE_FORMAT(l.created_at, '%Y-%m-%d'), l.model
+       ORDER BY date ASC, call_count DESC`,
       params,
     )
 
@@ -138,6 +150,7 @@ exports.dailyStats = async (req, res) => {
       endDate: end_date,
       daily: rows,
       byModel,
+      dailyByModel: dailyByModelRaw,
       overview: overview[0] || {},
     }))
   } catch (err) {

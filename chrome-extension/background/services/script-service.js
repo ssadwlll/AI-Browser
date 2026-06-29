@@ -67,8 +67,10 @@ export class ScriptService {
     const config = await this.configService.getSyncConfig()
     if (!config.serverUrl) return null
     try {
+      const auth = await this.configService.getAppAuth()
+      const authHeaders = await this.configService.generateAuthHeaders(auth.appKey, auth.appSecret)
       const res = await fetch(`${config.serverUrl}/api/scripts/${scriptId}/inject`, {
-        headers: config.token ? { Authorization: `Bearer ${config.token}` } : {},
+        headers: authHeaders,
       })
       const data = await res.json()
       if (data.success && data.data) return data.data

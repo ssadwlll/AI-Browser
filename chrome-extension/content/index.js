@@ -220,31 +220,20 @@
     `
 
     shadow.querySelectorAll('[data-action]').forEach(el => {
-      el.addEventListener('click', async () => {
+      el.addEventListener('click', () => {
         try {
           const action = el.dataset.action
           if (action === 'ai') {
-            // AI 按钮：优先尝试原生 sidePanel，成功则隐藏 iframe，失败则 iframe toggle
-            const nativeOpened = await tryNativeSidePanel()
-            if (nativeOpened) {
-              // 原生侧边栏已打开，隐藏 iframe 避免双窗口
-              closeFloatingSidebar()
-            } else {
-              if (isSidebarVisible()) {
-                closeFloatingSidebar()
-              } else {
-                openFloatingSidebar()
-              }
-            }
-          } else {
-            // 其它按钮：设定 action
-            chrome.storage.local.set({ floatingToolAction: action }).catch(() => {})
-            const nativeOpened = await tryNativeSidePanel()
-            if (nativeOpened) {
+            // AI 按钮：切换 iframe 浮层
+            if (isSidebarVisible()) {
               closeFloatingSidebar()
             } else {
               openFloatingSidebar()
             }
+          } else {
+            // 其它按钮：设定 action 并打开 iframe
+            chrome.storage.local.set({ floatingToolAction: action }).catch(() => {})
+            openFloatingSidebar()
           }
         } catch (e) {
           console.warn('[AI Browser] 浮动按钮点击异常:', e.message)
@@ -259,21 +248,7 @@
     fabShadow = shadow
   }
 
-  // ---- 尝试原生 sidePanel.open()（内容脚本中有用户手势，可能成功） ----
-  async function tryNativeSidePanel() {
-    try {
-      // chrome.sidePanel 可能在内容脚本中不可用
-      if (!chrome?.sidePanel?.open) return false
-      // 直接调用，不传参数则默认当前窗口
-      await chrome.sidePanel.open()
-      return true
-    } catch (e) {
-      console.warn('[AI Browser] 原生 sidePanel.open 失败:', e.message, '→ 回退到 iframe')
-      return false
-    }
-  }
-
-  // ---- 浮动侧边栏（iframe 叠层，回退方案） ----
+  // ---- 浮动侧边栏（iframe 叠层） ----
   let floatingSidebar = null
 
   function isSidebarVisible() {
@@ -309,7 +284,7 @@
         .sidebar{position:fixed;top:0;right:0;width:${sidebarWidth}px;height:100vh;z-index:2147483599;background:#fff;border-left:1px solid #e2e8f0;box-shadow:-4px 0 12px rgba(0,0,0,0.1);display:flex;flex-direction:column;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif}
         .sidebar-resize-handle{position:absolute;top:0;left:-3px;width:6px;height:100%;cursor:col-resize;z-index:10;transition:background-color .15s}
         .sidebar-resize-handle:hover,.sidebar-resize-handle:active{background:rgba(104,65,234,0.3)}
-        .sidebar-header{display:flex;align-items:center;gap:8px;height:44px;padding:0 16px;background:linear-gradient(135deg,#b059f8,#6841ea);flex-shrink:0}
+        .sidebar-header{display:flex;align-items:center;gap:8px;height:44px;padding:0 16px;background:linear-gradient(135deg,#b059f8,#fff);flex-shrink:0}
         .sidebar-header-icon{width:24px;height:24px;flex-shrink:0}
         .sidebar-header-icon img{width:24px;height:24px;display:block}
         .sidebar-header-title{font-size:14px;font-weight:600;color:#fff}
@@ -391,9 +366,7 @@
     const prompt = prompts[action] || '请分析以下内容：\n\n'
     const fullMessage = prompt + text
     chrome.storage.local.set({ pendingMessage: fullMessage }).catch(() => {})
-    tryNativeSidePanel().then(opened => {
-      if (!opened) openFloatingSidebar()
-    })
+    openFloatingSidebar()
   }
 
   // ---- 页面内容提取 ----

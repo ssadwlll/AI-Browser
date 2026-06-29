@@ -1,5 +1,8 @@
 const http = require('http')
 const https = require('https')
+const fs = require('fs')
+const path = require('path')
+const crypto = require('crypto')
 const { URL } = require('url')
 const pool = require('../config/db')
 const { error } = require('../utils/response')
@@ -243,5 +246,100 @@ exports.chat = async (req, res) => {
     if (!res.headersSent) {
       return res.status(500).json(error(err.message))
     }
+  }
+}
+
+/**
+ * POST /api/ai-proxy/upload-image
+ * 接收图片文件，返回公网可访问的 URL
+ */
+exports.uploadImage = async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ success: false, error: '请选择图片文件' })
+    }
+
+    const file = req.file
+    const ext = path.extname(file.originalname).toLowerCase()
+    const imageExts = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg']
+    if (!imageExts.includes(ext)) {
+      // 删除非图片文件
+      fs.unlinkSync(file.path)
+      return res.status(400).json({ success: false, error: `不支持的图片格式: ${ext}` })
+    }
+
+    // 构造公网 URL：优先使用 X-Forwarded 头，其次环境变量，最后 localhost
+    const host = req.get('X-Forwarded-Host') || req.get('Host') || 'localhost:3000'
+    const proto = req.get('X-Forwarded-Proto') || req.protocol || 'http'
+    const url = `${proto}://${host}/uploads/${file.filename}`
+
+    // 可选：写入 attachments 表
+    try {
+      await pool.query(
+        'INSERT INTO attachments (filename, original_name, file_size, mime_type, file_path, purpose) VALUES (?, ?, ?, ?, ?, ?)',
+        [file.filename, file.originalname, file.size, file.mimetype, 'uploads/' + file.filename, 'chat-image'],
+      )
+    } catch (_) { /* 写入失败不影响上传 */ }
+
+    res.json({
+      success: true,
+      data: { url, filename: file.filename, original_name: file.originalname, size: file.size },
+    })
+  } catch (err) {
+    console.error('[aiProxy] uploadImage 失败:', err)
+    res.status(500).json({ success: false, error: err.message })
+  }
+}
+
+/**
+ * POST /api/ai-proxy/parse-pdf
+ * 接收 PDF 文件，解析文本内容后返回
+ */
+exports.parsePdf = async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ success: false, error: '请选择 PDF 文件' })
+    }
+
+    const file = req.file
+    if (file.mimetype !== 'application/pdf' && !file.originalname.toLowerCase().endsWith('.pdf')) {
+      fs.unlinkSync(file.path)
+      return res.status(400).json({ success: false, error: '仅支持 PDF 文件' })
+    }
+
+    // 尝试使用 pdf-parse 解析
+    let fullText = '', pages = 0, chars = 0
+    try {
+      const pdfParse = require('pdf-parse')
+      const dataBuffer = fs.readFileSync(file.path)
+      const data = await pdfParse(dataBuffer)
+      fullText = data.text || ''
+      // 去掉多余空行
+      fullText = fullText.replace(/\n{3,}/g, '\n\n').trim()
+      pages = data.numpages || 0
+      chars = fullText.length
+    } catch (parseErr) {
+      // pdf-parse 未安装时返回提示
+      return res.status(500).json({
+        success: false,
+        error: 'PDF 解析失败，请确认服务端已安装 pdf-parse: ' + parseErr.message,
+      })
+    }
+
+    // 可选：写入 attachments 表
+    try {
+      await pool.query(
+        'INSERT INTO attachments (filename, original_name, file_size, mime_type, file_path, purpose) VALUES (?, ?, ?, ?, ?, ?)',
+        [file.filename, file.originalname, file.size, file.mimetype, 'uploads/' + file.filename, 'chat-pdf'],
+      )
+    } catch (_) { /* noop */ }
+
+    res.json({
+      success: true,
+      data: { full_text: fullText, chars, pages, filename: file.filename },
+    })
+  } catch (err) {
+    console.error('[aiProxy] parsePdf 失败:', err)
+    res.status(500).json({ success: false, error: err.message })
   }
 }

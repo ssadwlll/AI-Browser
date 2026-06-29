@@ -5,7 +5,6 @@ let aclDailyChartInst = null;
 let aclModelChartInst = null;
 
 async function initAICallLogs() {
-  // 默认最近 30 天
   const end = new Date();
   const start = new Date();
   start.setDate(start.getDate() - 29);
@@ -14,7 +13,6 @@ async function initAICallLogs() {
   await aclLoadFilters();
   await aclLoadStats();
   await aclLoadList();
-  // 图表自适应
   window.addEventListener('resize', aclResizeCharts);
 }
 
@@ -65,30 +63,76 @@ async function aclLoadStats() {
       <div class="stat-card"><div class="stat-label">失败</div><div class="stat-value" style="color:#ef4444">${failCount}</div></div>
       <div class="stat-card"><div class="stat-label">总 Tokens</div><div class="stat-value">${Number(o.total_tokens || 0).toLocaleString()}</div></div>
       <div class="stat-card"><div class="stat-label">平均耗时(ms)</div><div class="stat-value">${Math.round(o.avg_duration_ms || 0)}</div></div>`;
-    aclRenderDailyChart(d.daily || []);
+    aclRenderDailyChart(d.daily || [], d.dailyByModel || []);
     aclRenderModelChart(d.byModel || []);
   } catch (e) { console.error('加载统计失败', e); }
 }
 
-function aclRenderDailyChart(daily) {
+function aclRenderDailyChart(daily, dailyByModel) {
   if (typeof echarts === 'undefined') return;
   if (!aclDailyChartInst) aclDailyChartInst = echarts.init(document.getElementById('aclDailyChart'));
+
   const dates = daily.map(r => r.date);
-  const counts = daily.map(r => Number(r.call_count || 0));
   const tokens = daily.map(r => Number(r.total_tokens || 0));
+
+  // 从 dailyByModel 构建堆叠柱状图数据
+  const modelMap = {};
+  dailyByModel.forEach(r => {
+    if (!modelMap[r.model]) modelMap[r.model] = {};
+    modelMap[r.model][r.date] = Number(r.call_count || 0);
+  });
+
+  const colors = ['#6366f1','#10b981','#f59e0b','#ef4444','#8b5cf6','#06b6d4','#ec4899','#f97316'];
+  const modelNames = Object.keys(modelMap).slice(0, 8);
+  const barSeries = modelNames.map((model, i) => ({
+    name: model,
+    type: 'bar',
+    stack: 'calls',
+    data: dates.map(d => modelMap[model][d] || 0),
+    itemStyle: { color: colors[i] },
+    barMaxWidth: 40,
+  }));
+
+  // 剩余模型合并为"其他"
+  if (Object.keys(modelMap).length > 8) {
+    const othersMap = {};
+    Object.keys(modelMap).slice(8).forEach(m => {
+      Object.entries(modelMap[m]).forEach(([d, v]) => {
+        othersMap[d] = (othersMap[d] || 0) + v;
+      });
+    });
+    barSeries.push({
+      name: '其他',
+      type: 'bar',
+      stack: 'calls',
+      data: dates.map(d => othersMap[d] || 0),
+      itemStyle: { color: '#94a3b8' },
+      barMaxWidth: 40,
+    });
+    modelNames.push('其他');
+  }
+
+  const allLegend = [...modelNames, '总Token'];
+
+  // 如果没有 dailyByModel，回退到简单的总次数柱状图
+  const finalSeries = barSeries.length > 0 ? [
+    ...barSeries,
+    { name: '总Token', type: 'line', yAxisIndex: 1, data: tokens, smooth: true, itemStyle: { color: '#10b981' } },
+  ] : [
+    { name: '调用次数', type: 'bar', data: daily.map(r => Number(r.call_count || 0)), itemStyle: { color: '#6366f1' } },
+    { name: '总Token', type: 'line', yAxisIndex: 1, data: tokens, smooth: true, itemStyle: { color: '#10b981' } },
+  ];
+
   aclDailyChartInst.setOption({
     tooltip: { trigger: 'axis' },
-    legend: { data: ['调用次数', '总Token'], top: 0 },
+    legend: { data: barSeries.length > 0 ? allLegend : ['调用次数', '总Token'], top: 0 },
     grid: { left: 50, right: 50, top: 36, bottom: 30 },
     xAxis: { type: 'category', data: dates, axisLabel: { fontSize: 10 } },
     yAxis: [
       { type: 'value', name: '次数', position: 'left' },
       { type: 'value', name: 'Token', position: 'right' },
     ],
-    series: [
-      { name: '调用次数', type: 'bar', data: counts, itemStyle: { color: '#6366f1' } },
-      { name: '总Token', type: 'line', yAxisIndex: 1, data: tokens, smooth: true, itemStyle: { color: '#10b981' } },
-    ],
+    series: finalSeries,
   });
 }
 

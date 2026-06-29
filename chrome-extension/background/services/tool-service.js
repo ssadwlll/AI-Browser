@@ -50,20 +50,6 @@ export class ToolService {
     return null
   }
 
-  async getPageContent() {
-    try {
-      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
-      if (!tab?.id) return null
-      const response = await chrome.tabs.sendMessage(tab.id, {
-        type: 'extractPageContent',
-      })
-      return response?.data || null
-    } catch (e) {
-      console.warn('[ToolService] getPageContent error:', e.message)
-      return null
-    }
-  }
-
   async executeTool(tool, tabId) {
     console.log('[ToolService] executeTool:', tool.id, tool.name, 'type:', tool.toolType)
     const injectData = await this.fetchInjectData(tool.id)

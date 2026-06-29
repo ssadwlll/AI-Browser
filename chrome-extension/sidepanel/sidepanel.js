@@ -12,7 +12,6 @@ let isStreaming = false
 let currentPort = null
 let agentMode = false      // Agent 自主决策模式
 let agentStepCards = []    // Agent 步骤卡片
-let availableModelsData = null  // 缓存从服务端获取的模型列表
 let currentModelInfo = null     // 当前选中模型的能力信息
 let currentSelectedModelId = null  // 当前选中模型 ID（与配置同步）
 let attachedImage = null        // 已附加的图片 base64 data URL
@@ -174,9 +173,9 @@ document.getElementById('floatToolsBtn').addEventListener('click', () => {
   loadScripts()
 })
 
-// 浮动Agent按钮 - 跳转画图视图（占位）
+// 浮动Agent按钮 - 切换Agent模式
 document.getElementById('floatAgentBtn').addEventListener('click', () => {
-  showView('drawView')
+  toggleAgentMode()
 })
 
 // 浮动设置按钮 - 跳转设置视图
@@ -428,6 +427,8 @@ async function sendMessage(text) {
   // 参考 Monica：Monica 把图片上传 CDN 后在历史里存 URL；本项目暂用 base64 内联存储
   chatHistory.push({ role: 'user', content: text, attachments: { image: sentImage, pdf: sentPdf } })
   addMessage('user', text, { image: sentImage, pdf: sentPdf })
+  // 立即持久化，防止导航导致未保存消息丢失
+  callService('storageService', 'saveChatHistory', chatHistory)
   chatInput.value = ''
   chatInput.style.height = 'auto'
   sendBtn.classList.remove('active')
@@ -527,6 +528,13 @@ async function sendMessage(text) {
         currentPort = null
       }
     })
+
+    currentPort.onDisconnect.addListener(() => {
+      console.log('[SidePanel] Agent port 断开')
+      isStreaming = false
+      sendBtn.disabled = false
+      currentPort = null
+    })
   } catch (e) {
     updateStreamingMessage(streamDiv, '❌ ' + e.message)
     isStreaming = false
@@ -559,8 +567,6 @@ function toggleAgentMode() {
 }
 
 async function loadAgentMode() {
-  // Agent模式默认关闭，不持久化（旧版本可能存了true，清除掉）
-  await chrome.storage.local.remove('agentMode')
   agentMode = false
   const btn = document.getElementById('agentNavBtn')
   if (btn) btn.classList.remove('active')
@@ -588,8 +594,6 @@ function formatToolArgs(toolName, toolArgs) {
       return `搜索关键词：${a.query || ''}`
     case 'read_page_content':
       return '读取当前页面的标题和正文'
-    case 'navigate_to_url':
-      return `打开网址：${a.url || ''}`
     case 'extract_content':
       return `提取元素：${a.selector || ''}${a.multiple ? '（提取所有）' : ''}`
     case 'click_element':
@@ -610,20 +614,21 @@ function formatToolArgs(toolName, toolArgs) {
   }
 }
 
-function updateAgentStepCard(card, step, toolName, toolArgs, status) {
-  const nameMap = {
-    search_tools: '搜索工具',
-    read_page_content: '读取页面',
-    navigate_to_url: '打开网页',
-    extract_content: '提取内容',
-    click_element: '点击元素',
-    fill_input: '填写输入',
-    wait_for_element: '等待加载',
-    finish_task: '任务完成',
-  }
+// 工具元数据：统一管理名称和图标
+const TOOL_META = {
+  search_tools:    { name: '搜索工具', icon: '\uD83D\uDD0D' },
+  read_page_content: { name: '读取页面', icon: '\u26A1' },
+  extract_content: { name: '提取内容', icon: '\u26A1' },
+  click_element:   { name: '点击元素', icon: '\u26A1' },
+  fill_input:      { name: '填写输入', icon: '\u26A1' },
+  wait_for_element:{ name: '等待加载', icon: '\u26A1' },
+  finish_task:     { name: '任务完成', icon: '\u2705' },
+}
 
-  let icon = '\u26A1'
-  let displayName = nameMap[toolName] || '执行工具'
+function updateAgentStepCard(card, step, toolName, toolArgs, status) {
+  const meta = TOOL_META[toolName]
+  let icon = meta?.icon || '\u26A1'
+  let displayName = meta?.name || '执行工具'
   if (toolName.startsWith('inject_script_')) {
     icon = '\uD83D\uDE80'
     displayName = toolArgs?.scriptName || '执行脚本'
@@ -647,15 +652,30 @@ async function runAgent(userText, pageContext) {
 
   try {
     currentPort = chrome.runtime.connect({ name: 'agent-stream' })
+
+    // Agent 模式 PDF 附件处理
+    let agentUserMessage = pageContext ? userText + pageContext : userText
+    if (attachedPdf && attachedPdf.text) {
+      const pagesInfo = attachedPdf.pages ? `（共 ${Array.isArray(attachedPdf.pages) ? attachedPdf.pages.length : attachedPdf.pages} 页）` : ''
+      agentUserMessage = `【PDF 文档：${attachedPdf.name}${pagesInfo}】\n${attachedPdf.text}\n\n【以上为 PDF 内容，请据此回答以下问题】\n${agentUserMessage}`
+    }
+    // 发送后清除附件
+    if (attachedPdf) {
+      attachedPdf = null
+      renderAttachmentPreview()
+    }
+
     currentPort.postMessage({
       type: 'agentStart',
-      userMessage: pageContext ? userText + pageContext : userText,
+      userMessage: agentUserMessage,
       chatHistory,
     })
 
     currentPort.onMessage.addListener((msg) => {
       if (msg.type === 'agentStart') {
         card.querySelector('.agent-step-title').textContent = 'Agent 已启动，分析需求中...'
+      } else if (msg.type === 'agentStatus') {
+        card.querySelector('.agent-step-title').textContent = msg.text || '处理中...'
       } else if (msg.type === 'agentStep') {
         updateAgentStepCard(card, msg.step, msg.toolName, msg.toolArgs, msg.status || 'running')
       } else if (msg.type === 'agentSearchResult') {
@@ -709,13 +729,12 @@ async function runAgent(userText, pageContext) {
         fullContent += msg.content
         updateStreamingMessage(streamDiv, fullContent)
       } else if (msg.type === 'streamDone') {
-        // 保存 AI 回复 + 工具调用摘要到历史
+        // 更新内存中的聊天记录（Agent 负责写入 storage）
         const agentRecord = { role: 'assistant', content: fullContent }
         if (toolResults.length > 0) {
           agentRecord.toolCalls = toolResults.map(t => ({ name: t.name, summary: String(t.result).slice(0, 200) }))
         }
         chatHistory.push(agentRecord)
-        callService('storageService', 'saveChatHistory', chatHistory)
         isStreaming = false
         sendBtn.disabled = false
         currentPort = null
@@ -727,6 +746,13 @@ async function runAgent(userText, pageContext) {
         sendBtn.disabled = false
         currentPort = null
       }
+    })
+
+    currentPort.onDisconnect.addListener(() => {
+      console.log('[SidePanel] Agent port 断开')
+      isStreaming = false
+      sendBtn.disabled = false
+      currentPort = null
     })
   } catch (e) {
     updateStreamingMessage(streamDiv, '\u274C ' + e.message)
@@ -843,7 +869,6 @@ async function loadModelSelect(selectedModel) {
 
   try {
     const data = await callService('configService', 'getAvailableModels')
-    availableModelsData = data
     content.innerHTML = ''
 
     const providers = (data && data.providers) || []
@@ -1400,6 +1425,11 @@ document.getElementById('syncScriptsBtn').addEventListener('click', async () => 
 async function loadChatHistory() {
   try {
     const raw = await callService('storageService', 'getChatHistory') || []
+    if (!Array.isArray(raw)) {
+      console.warn('[SidePanel] chatHistory 数据损坏，已重置')
+      await callService('storageService', 'clearChatHistory')
+      return
+    }
     // 检测"拒绝循环"：如果最近N条assistant回复都是相同的拒绝语，自动清理
     const refusalPatterns = ['无法给到', '无法提供', '不能提供', '无法回答', 'cannot provide', '无法帮助']
     const assistantMsgs = raw.filter(m => m.role === 'assistant')
@@ -1415,6 +1445,22 @@ async function loadChatHistory() {
     }
     chatHistory = raw
     for (const msg of chatHistory) {
+      // Agent 消息如果有 toolCalls，渲染一个已完成的步骤摘要卡片
+      if (msg.role === 'assistant' && msg.toolCalls && msg.toolCalls.length > 0) {
+        const card = document.createElement('div')
+        card.className = 'agent-step-card history'
+        const toolList = msg.toolCalls.map((t, i) =>
+          `<div class="agent-history-step"><span class="step-num">${i + 1}.</span> ${escapeHtml(t.name)}</div>`
+        ).join('')
+        card.innerHTML = `
+          <div class="agent-step-header">
+            <span class="agent-step-icon">&#x2705;</span>
+            <span class="agent-step-title">Agent 已执行 ${msg.toolCalls.length} 个步骤</span>
+          </div>
+          <div class="agent-step-body">${toolList}</div>
+        `
+        chatMessages.appendChild(card)
+      }
       addMessage(msg.role, msg.content, msg.attachments)
     }
   } catch (e) {
@@ -1423,11 +1469,14 @@ async function loadChatHistory() {
 }
 
 // ============ 初始化 ============
-loadChatHistory()
-loadSettings()
-loadAgentMode()
-// 立即恢复未发送附件（不依赖模型加载，避免 service worker 冷启动时 callService 卡住导致永远无法恢复/持久化）
-loadAttachmentsFromStorage()
+;(async () => {
+  // 先加载聊天记录，确保用户消息在 DOM 中，再执行自动重连
+  await loadChatHistory()
+  await loadSettings()
+  await loadAgentMode()
+  // 立即恢复未发送附件
+  loadAttachmentsFromStorage()
+})()
 
 // 初始化模型选择列表（读取已保存的模型并选中）；模型加载后 updateModelInfo 会按视觉能力清空图片
 ;(async () => {
@@ -1478,6 +1527,41 @@ chrome.storage.onChanged.addListener((changes, area) => {
       chrome.storage.local.remove('floatingToolAction')
       handleFloatingAction(action)
     }
+    // Agent 在后台写入 chatHistory 时，自动同步到 UI
+    if (changes.chatHistory?.newValue) {
+      const newHistory = changes.chatHistory.newValue
+      if (newHistory.length >= chatHistory.length) {
+        const newMsgs = newHistory.slice(chatHistory.length)
+        if (newMsgs.length > 0) {
+          console.log('[SidePanel] storage.onChanged: 检测到', newMsgs.length, '条新消息（来自 Agent）')
+          chatHistory = newHistory
+          for (const msg of newMsgs) {
+            if (msg.role === 'assistant' && msg.toolCalls && msg.toolCalls.length > 0) {
+              const card = document.createElement('div')
+              card.className = 'agent-step-card history'
+              const toolList = msg.toolCalls.map((t, i) =>
+                `<div class="agent-history-step"><span class="step-num">${i + 1}.</span> ${escapeHtml(t.name)}</div>`
+              ).join('')
+              card.innerHTML = `
+                <div class="agent-step-header">
+                  <span class="agent-step-icon">&#x2705;</span>
+                  <span class="agent-step-title">Agent 已执行 ${msg.toolCalls.length} 个步骤</span>
+                </div>
+                <div class="agent-step-body">${toolList}</div>
+              `
+              chatMessages.appendChild(card)
+            }
+            addMessage(msg.role, msg.content, msg.attachments)
+          }
+          // 如果正在 streaming 状态（isStreaming=true），说明 Agent 刚完成
+          if (isStreaming) {
+            isStreaming = false
+            sendBtn.disabled = false
+            currentPort = null
+          }
+        }
+      }
+    }
   }
 })
 
@@ -1494,7 +1578,7 @@ async function handleFloatingAction(action) {
       loadScripts()
       break
     case 'agent':
-      showView('drawView')
+      toggleAgentMode()
       break
     case 'settings':
       showView('settingsView')

@@ -34,7 +34,7 @@ const scriptService = new ScriptService(configService)
 const sidebarService = new SidebarService()
 const pageService = new PageService(scriptService)
 const toolService = new ToolService(configService)
-const agentService = new AgentService(configService, toolService)
+const agentService = new AgentService(configService, toolService, pageService)
 
 const services = {
   configService,
@@ -166,11 +166,14 @@ chrome.runtime.onConnect.addListener((port) => {
   if (port.name === 'agent-stream') {
     port.onMessage.addListener(async (msg) => {
       if (msg.type === 'agentStart') {
-        await agentService.run(port, msg.userMessage, msg.chatHistory)
+        // Plan B: 不传 port 给 run，而是通过 startAgent 管理
+        await agentService.startAgent(port, msg.userMessage, msg.chatHistory)
       }
     })
     port.onDisconnect.addListener(() => {
-      console.log('[Background] agent-stream port 已断开')
+      // Plan B: Port 断开不终止 Agent，只解除绑定
+      agentService.detachPortByPort(port)
+      console.log('[Background] agent-stream port 已断开（Agent 继续运行）')
     })
   }
 })

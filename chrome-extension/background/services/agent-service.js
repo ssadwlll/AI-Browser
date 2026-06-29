@@ -6,6 +6,9 @@ export class AgentService {
     this.MAX_AI_REQUESTS = 15    // AI API 请求次数上限（每次请求可执行多个工具）
     this.MAX_TOOL_CALLS = 30     // 工具调用总次数上限（防止本地工具无限调用）
     this.TIMEOUT_MS = 120000
+    // Plan B: Agent 生命周期与 Port 解耦
+    // tabId → { port, messages:[], running:bool }
+    this.agentStates = new Map()
   }
 
   buildToolDefinitions(userQuery, searchResults) {
@@ -33,21 +36,6 @@ export class AgentService {
         name: 'read_page_content',
         description: '读取当前页面标题、URL和正文',
         parameters: { type: 'object', properties: {}, required: [] },
-      },
-    })
-
-    tools.push({
-      type: 'function',
-      function: {
-        name: 'navigate_to_url',
-        description: '导航到指定URL',
-        parameters: {
-          type: 'object',
-          properties: {
-            url: { type: 'string', description: '完整URL' },
-          },
-          required: ['url'],
-        },
       },
     })
 
@@ -266,12 +254,122 @@ export class AgentService {
     }
   }
 
-  async run(port, userMessage, chatHistory) {
+  // ===== Plan B: 入口方法，管理 Port 绑定 =====
+  async startAgent(port, userMessage, chatHistory) {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
+    const tabId = tab?.id
+    if (!tabId) {
+      try { port.postMessage({ type: 'agentError', error: '无法获取标签页' }) } catch {}
+      return
+    }
+
+    // 如果该 tab 已有 Agent 运行中，attach 新 port（重连场景）
+    // 如果已完成但状态未清理（30s 内），清理后继续走新 Agent 流程
+    const existingState = this.agentStates.get(tabId)
+    if (existingState?.running) {
+      this.attachPort(tabId, port)
+      return
+    }
+    if (existingState) {
+      this.agentStates.delete(tabId)
+    }
+
+    const state = { port, messages: [], running: true }
+    this.agentStates.set(tabId, state)
+
+    try {
+      await this.run(tabId, userMessage, chatHistory)
+    } finally {
+      // 保留状态 30 秒，供重连时回放消息
+      const state = this.agentStates.get(tabId)
+      if (state) state.running = false
+      setTimeout(() => {
+        this.agentStates.delete(tabId)
+      }, 30000)
+    }
+  }
+
+  attachPort(tabId, port) {
+    const state = this.agentStates.get(tabId)
+    if (!state) return
+    state.port = port
+    // 重放排队消息
+    if (state.messages.length > 0) {
+      console.log('[Agent] Port 重连，回放', state.messages.length, '条消息')
+      for (const msg of state.messages) {
+        try { port.postMessage(msg) } catch { break }
+      }
+      state.messages = []
+    }
+  }
+
+  detachPortByPort(port) {
+    for (const [tabId, state] of this.agentStates) {
+      if (state.port === port) {
+        console.log('[Agent] Port 断开，Agent 继续运行 (tabId:', tabId, ')')
+        state.port = null
+        return
+      }
+    }
+  }
+
+  postToUI(tabId, msg) {
+    const state = this.agentStates.get(tabId)
+    if (!state) return
+    if (state.port) {
+      try {
+        state.port.postMessage(msg)
+      } catch {
+        state.port = null
+        state.messages.push(msg)
+      }
+    } else {
+      state.messages.push(msg)
+    }
+  }
+
+  // 统一入口：Agent 完成时写入 chatHistory，是唯一写入方
+  async _saveToChatHistoryStorage(tabId, content, toolCalls) {
+    try {
+      const historyData = await chrome.storage.local.get('chatHistory')
+      const history = (historyData.chatHistory || []).slice()
+      // 去重：如果最后一条 assistant 消息内容相同，跳过
+      const lastMsg = history[history.length - 1]
+      if (lastMsg && lastMsg.role === 'assistant' && lastMsg.content === content) {
+        console.log('[Agent] chatHistory 已存在相同内容，跳过写入')
+        return
+      }
+      const record = { role: 'assistant', content }
+      if (toolCalls && toolCalls.length > 0) {
+        record.toolCalls = toolCalls.map(t => ({ name: t.name, summary: String(t.result || '').slice(0, 200) }))
+      }
+      history.push(record)
+      const MAX_CHARS = 8000, MAX_ITEMS = 50
+      let trimmed = history.slice(-MAX_ITEMS)
+      let totalChars = 0
+      const keep = []
+      for (let i = trimmed.length - 1; i >= 0; i--) {
+        const m = trimmed[i]
+        const charLen = (m.content || '').length + (m.role || '').length
+        totalChars += charLen
+        if (m.attachments && (m.attachments.image || m.attachments.pdf)) { keep.unshift(m); continue }
+        if (totalChars > MAX_CHARS && keep.length >= 2) break
+        keep.unshift(m)
+      }
+      await chrome.storage.local.set({ chatHistory: keep })
+      console.log('[Agent] chatHistory 已写入 storage, 长度:', content.length)
+    } catch (e) {
+      console.error('[Agent] chatHistory 写入失败:', e)
+    }
+  }
+
+  async run(tabId, userMessage, chatHistory) {
     const startTime = Date.now()
     let aiRequestCount = 0      // AI API 请求次数（每次 while 循环 +1）
     let totalToolCalls = 0      // 工具调用总次数（含本地工具，防止无限调用）
     let searchResults = []
     const executedTools = []
+    let resultsText = ''          // finish_task 时工具结果文本（提升作用域供 storage 保存使用）
     let consecutiveFailCount = 0  // 连续无进展计数（工具失败或结果无变化时+1，有进展时重置为0）
     const MAX_CONSECUTIVE_FAILS = 5 // 连续无进展上限
 
@@ -288,7 +386,6 @@ export class AgentService {
 可用工具：
 - search_tools: 搜索工具脚本库
 - read_page_content: 读取当前页面内容
-- navigate_to_url: 导航到URL
 - extract_content: 按CSS选择器提取元素文本
 - click_element: 点击页面元素
 - fill_input: 填写输入框(可回车提交)
@@ -309,26 +406,15 @@ export class AgentService {
 
     const messages = [systemMsg, ...cleanHistory, { role: 'user', content: userMessage }]
 
-    try { port.postMessage({ type: 'agentStart' }) } catch {}
+    this.postToUI(tabId, { type: 'agentStart' })
 
-    // port 存活检测：postMessage 抛异常说明 port 已断开
-    let portAlive = true
-    const safePost = (msg) => {
-      if (!portAlive) return
-      try {
-        port.postMessage(msg)
-      } catch {
-        portAlive = false
-      }
-    }
-
-    while (aiRequestCount < this.MAX_AI_REQUESTS && portAlive) {
+    while (aiRequestCount < this.MAX_AI_REQUESTS) {
       if (Date.now() - startTime > this.TIMEOUT_MS) {
-        safePost({ type: 'agentError', error: 'Agent执行超时' })
+        this.postToUI(tabId, { type: 'agentError', error: 'Agent执行超时' })
         return
       }
       if (totalToolCalls >= this.MAX_TOOL_CALLS) {
-        safePost({ type: 'agentError', error: '工具调用次数超限，请简化任务重试' })
+        this.postToUI(tabId, { type: 'agentError', error: '工具调用次数超限，请简化任务重试' })
         return
       }
 
@@ -375,7 +461,7 @@ export class AgentService {
             if (attempt < MAX_API_RETRIES) {
               const waitMs = (attempt + 1) * 1000  // 1s, 2s
               console.warn(`[Agent] API返回 ${res.status}，${waitMs}ms后重试 (${attempt + 1}/${MAX_API_RETRIES})`)
-              safePost({ type: 'agentStep', step: totalToolCalls, toolName: '等待重试', status: 'waiting' })
+              this.postToUI(tabId, { type: 'agentStep', step: totalToolCalls, toolName: '等待重试', status: 'waiting' })
               await new Promise(r => setTimeout(r, waitMs))
             }
           } catch (e) {
@@ -384,7 +470,7 @@ export class AgentService {
             if (isTimeout) {
               console.warn(`[Agent] API请求超时(${API_TIMEOUT_MS}ms)，尝试 ${attempt + 1}/${MAX_API_RETRIES + 1}`)
               if (attempt < MAX_API_RETRIES) {
-                safePost({ type: 'agentStep', step: totalToolCalls, toolName: '请求超时，重试中', status: 'waiting' })
+                this.postToUI(tabId, { type: 'agentStep', step: totalToolCalls, toolName: '请求超时，重试中', status: 'waiting' })
               }
             } else {
               console.warn(`[Agent] API请求异常: ${e.message}，${waitMs}ms后重试 (${attempt + 1}/${MAX_API_RETRIES})`)
@@ -417,16 +503,16 @@ export class AgentService {
                 res = fallbackRes
               } else {
                 const errStatus = res?.status || '网络错误'
-                safePost({ type: 'agentError', error: `AI API错误: ${errStatus}（该模型可能不支持Function Calling）` })
+                this.postToUI(tabId, { type: 'agentError', error: `AI API错误: ${errStatus}（该模型可能不支持Function Calling）` })
                 return
               }
             } catch (e2) {
-              safePost({ type: 'agentError', error: `AI API错误: ${e2.message}` })
+              this.postToUI(tabId, { type: 'agentError', error: `AI API错误: ${e2.message}` })
               return
             }
           } else {
             const errStatus = res?.status || '网络错误'
-            safePost({ type: 'agentError', error: `AI API错误: ${errStatus}${lastError ? ' (' + lastError.message + ')' : ''}` })
+            this.postToUI(tabId, { type: 'agentError', error: `AI API错误: ${errStatus}${lastError ? ' (' + lastError.message + ')' : ''}` })
             return
           }
         }
@@ -436,7 +522,7 @@ export class AgentService {
         const msg = choice?.message
 
         if (!msg) {
-          safePost({ type: 'agentError', error: 'AI返回为空' })
+          this.postToUI(tabId, { type: 'agentError', error: 'AI返回为空' })
           return
         }
 
@@ -448,7 +534,6 @@ export class AgentService {
 
           // 逐个执行 tool calls（串行执行，因为很多操作依赖同一标签页状态）
           for (const toolCall of msg.tool_calls) {
-            if (!portAlive) return
             if (totalToolCalls >= this.MAX_TOOL_CALLS) break
 
             const funcName = toolCall.function.name
@@ -459,7 +544,7 @@ export class AgentService {
 
             // 无进展检测：在工具执行后判断是否有进展（见下方 result 判断）
 
-            safePost({
+            this.postToUI(tabId, {
               type: 'agentStep',
               step: totalToolCalls,
               toolName: funcName,
@@ -470,14 +555,13 @@ export class AgentService {
             if (funcName === 'finish_task') {
               console.log('[Agent] finish_task, summary:', funcArgs.summary)
               const summary = funcArgs.summary || '任务已完成'
-              safePost({ type: 'agentStepResult', step: totalToolCalls, result: summary, done: true })
+              this.postToUI(tabId, { type: 'agentStepResult', step: totalToolCalls, result: summary, done: true })
               for (const char of summary) {
-                safePost({ type: 'streamChunk', content: char })
-                if (!portAlive) return
+                this.postToUI(tabId, { type: 'streamChunk', content: char })
                 await new Promise(r => setTimeout(r, 15))
               }
               if (executedTools.length > 0) {
-                const resultsText = '\n\n---\n### 工具执行结果\n' + executedTools.map((t, i) => {
+                resultsText = '\n\n---\n### 工具执行结果\n' + executedTools.map((t, i) => {
                   let display = ''
                   try {
                     const parsed = typeof t.result === 'string' ? JSON.parse(t.result) : t.result
@@ -494,16 +578,22 @@ export class AgentService {
                   return (i + 1) + '. **' + t.name + '**\n' + display
                 }).join('\n\n')
                 for (const char of resultsText) {
-                  safePost({ type: 'streamChunk', content: char })
-                  if (!portAlive) return
+                  this.postToUI(tabId, { type: 'streamChunk', content: char })
                   await new Promise(r => setTimeout(r, 5))
                 }
               }
-              safePost({ type: 'streamDone' })
+              this.postToUI(tabId, { type: 'streamDone' })
+              // 统一写入 chatHistory storage（唯一写入入口）
+              const fullContent = summary + (executedTools.length > 0 ? resultsText : '')
+              const toolResults = executedTools.map(t => ({
+                name: t.name,
+                result: typeof t.result === 'string' ? t.result : JSON.stringify(t.result || '')
+              }))
+              await this._saveToChatHistoryStorage(tabId, fullContent, toolResults)
               return
             } else if (funcName === 'search_tools') {
               const query = funcArgs.query || userMessage
-              safePost({ type: 'agentStep', step: totalToolCalls, toolName: 'search_tools', toolArgs: { query }, status: 'searching' })
+              this.postToUI(tabId, { type: 'agentStep', step: totalToolCalls, toolName: 'search_tools', toolArgs: { query }, status: 'searching' })
               const newResults = await this.toolService.searchScripts(query)
               // 累积搜索结果（按ID去重），不覆盖之前的，保证工具定义一致
               const existingIds = new Set(searchResults.map(s => s.id))
@@ -516,7 +606,7 @@ export class AgentService {
               if (newResults.length === 0) {
                 toolResult = JSON.stringify({
                   ok: true,
-                  result: `未找到与"${query}"匹配的专用工具。请改用 navigate_to_url + DOM工具（extract_content/fill_input/click_element）直接在页面上操作完成需求。不要再调用 search_tools。`,
+                  result: `未找到与"${query}"匹配的专用工具。请改用 DOM工具（extract_content/fill_input/click_element）直接在页面上操作完成需求。不要再调用 search_tools。`,
                 })
               } else {
                 toolResult = JSON.stringify(newResults.slice(0, 5).map(t => ({
@@ -525,9 +615,9 @@ export class AgentService {
                 })))
               }
               executedTools.push({ name: 'search_tools', result: { ok: newResults.length > 0, count: newResults.length } })
-              safePost({ type: 'agentSearchResult', results: newResults.slice(0, 5) })
+              this.postToUI(tabId, { type: 'agentSearchResult', results: newResults.slice(0, 5) })
             } else if (funcName === 'read_page_content') {
-              const pageData = await this.toolService.getPageContent()
+              const pageData = await this.pageService.getContent()
               toolResult = JSON.stringify({
                 ok: true,
                 title: pageData?.title || '',
@@ -541,35 +631,20 @@ export class AgentService {
               } else {
                 const tool = searchResults.find(t => t.id === scriptId) || { id: scriptId, name: '脚本#' + scriptId, toolType: 'js', toolConfig: {} }
                 const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
-                safePost({ type: 'agentStep', step: totalToolCalls, toolName: funcName, toolArgs: { scriptId, scriptName: tool.name }, status: 'running' })
+                this.postToUI(tabId, { type: 'agentStep', step: totalToolCalls, toolName: funcName, toolArgs: { scriptId, scriptName: tool.name }, status: 'running' })
                 const execResult = await this.toolService.executeTool(tool, tab?.id)
                 toolResult = JSON.stringify(execResult)
                 executedTools.push({ name: tool.name || funcName, result: execResult })
               }
-            } else if (funcName === 'navigate_to_url') {
+            } else if (funcName === 'extract_content' || funcName === 'click_element' || funcName === 'fill_input' || funcName === 'wait_for_element') {
               const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
               if (!tab?.id) {
-                toolResult = JSON.stringify({ ok: false, error: '无法获取当前标签页' })
+                toolResult = JSON.stringify({ ok: false, error: '无法获取目标标签页' })
               } else {
-                safePost({ type: 'agentStep', step: totalToolCalls, toolName: funcName, toolArgs: funcArgs, status: 'running' })
-                await chrome.tabs.update(tab.id, { url: funcArgs.url })
-                toolResult = JSON.stringify({ ok: true, result: `已导航到: ${funcArgs.url}` })
-                executedTools.push({ name: funcName, result: { ok: true, result: funcArgs.url } })
-              }
-            } else if (funcName === 'extract_content' || funcName === 'click_element' || funcName === 'fill_input' || funcName === 'wait_for_element') {
-              // port已断开时不再执行有副作用的DOM操作
-              if (!portAlive) {
-                toolResult = JSON.stringify({ ok: false, error: '用户已关闭面板，操作取消' })
-              } else {
-                const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
-                if (!tab?.id) {
-                  toolResult = JSON.stringify({ ok: false, error: '无法获取当前标签页' })
-                } else {
-                  safePost({ type: 'agentStep', step: totalToolCalls, toolName: funcName, toolArgs: funcArgs, status: 'running' })
-                  const domResult = await this.executeDOMTool(tab.id, funcName, funcArgs)
-                  toolResult = JSON.stringify(domResult)
-                  executedTools.push({ name: funcName, result: domResult })
-                }
+                this.postToUI(tabId, { type: 'agentStep', step: totalToolCalls, toolName: funcName, toolArgs: funcArgs, status: 'running' })
+                const domResult = await this.executeDOMTool(tab.id, funcName, funcArgs)
+                toolResult = JSON.stringify(domResult)
+                executedTools.push({ name: funcName, result: domResult })
               }
             } else {
               toolResult = JSON.stringify({ ok: false, error: `未知工具: ${funcName}` })
@@ -582,10 +657,6 @@ export class AgentService {
               const parsed = JSON.parse(toolResult)
               // 明确失败 → 无进展
               if (parsed?.ok === false) {
-                hasProgress = false
-              }
-              // 导航类工具不重置计数（导航成功不等于任务有进展，只是改变了位置）
-              else if (funcName === 'navigate_to_url') {
                 hasProgress = false
               }
               // search_tools 不重置计数（搜到工具不等于任务有进展，可能执行后仍失败）
@@ -617,15 +688,15 @@ export class AgentService {
               console.warn('[Agent] 连续', consecutiveFailCount, '次无进展，强制结束')
               const stopMsg = `任务无法继续：已连续${consecutiveFailCount}次操作无进展（工具失败或结果未变化），可能页面被阻塞或任务超出能力范围。请调整后重试。`
               for (const char of stopMsg) {
-                safePost({ type: 'streamChunk', content: char })
-                if (!portAlive) return
+                this.postToUI(tabId, { type: 'streamChunk', content: char })
                 await new Promise(r => setTimeout(r, 10))
               }
-              safePost({ type: 'streamDone' })
+              this.postToUI(tabId, { type: 'streamDone' })
+              await this._saveToChatHistoryStorage(tabId, stopMsg)
               return
             }
 
-            safePost({
+            this.postToUI(tabId, {
               type: 'agentStepResult',
               step: totalToolCalls,
               toolName: funcName,
@@ -674,26 +745,27 @@ export class AgentService {
         } else {
           console.log('[Agent] 纯文本回复（无tool_calls）:', (msg.content || '').slice(0, 80))
           const content = msg.content || ''
+          const textContent = content || 'AI未返回有效响应，请重试。'
           if (content) {
             for (const char of content) {
-              try { safePost({ type: 'streamChunk', content: char }) } catch {}
+              try { this.postToUI(tabId, { type: 'streamChunk', content: char }) } catch {}
               await new Promise(r => setTimeout(r, 15))
             }
           } else {
-            // AI 返回空内容且不调用工具，视为异常，直接结束
             console.warn('[Agent] AI返回空内容且无工具调用，强制结束')
-            safePost({ type: 'streamChunk', content: 'AI未返回有效响应，请重试。' })
+            this.postToUI(tabId, { type: 'streamChunk', content: textContent })
           }
-          safePost({ type: 'streamDone' })
+          this.postToUI(tabId, { type: 'streamDone' })
+          await this._saveToChatHistoryStorage(tabId, textContent)
           return
         }
       } catch (e) {
         console.error('[AgentService] iteration error:', e)
-        safePost({ type: 'agentError', error: e.message })
+        this.postToUI(tabId, { type: 'agentError', error: e.message })
         return
       }
     }
 
-    safePost({ type: 'agentError', error: 'Agent达到最大请求次数，请简化任务重试' })
+    this.postToUI(tabId, { type: 'agentError', error: 'Agent达到最大请求次数，请简化任务重试' })
   }
 }

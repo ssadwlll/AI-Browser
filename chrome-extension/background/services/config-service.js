@@ -112,15 +112,6 @@ export class ConfigService {
     return merged
   }
 
-  async getSidebarMode() {
-    const data = await chrome.storage.local.get('sidebarMode')
-    return data.sidebarMode || 'sidepanel'
-  }
-
-  async saveSidebarMode(mode) {
-    await chrome.storage.local.set({ sidebarMode: mode })
-  }
-
   async getSelectionToolsEnabled() {
     const data = await chrome.storage.local.get('selectionToolsEnabled')
     return data.selectionToolsEnabled !== false

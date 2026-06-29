@@ -15,7 +15,6 @@ function switchTab(page) {
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'))
   document.getElementById('page-' + page).classList.add('active')
   if (page === 'scripts') loadScripts()
-  if (page === 'settings') loadSettings()
 }
 document.querySelectorAll('.tab').forEach(t => {
   t.addEventListener('click', () => switchTab(t.dataset.page))
@@ -87,12 +86,8 @@ async function loadSettings() {
   const syncConfig = await callService('configService', 'getSyncConfig')
   const selEnabled = await callService('configService', 'getSelectionToolsEnabled')
 
-  document.getElementById('aiProvider').value = aiConfig.provider || 'ollama'
-  document.getElementById('aiBaseUrl').value = aiConfig.baseUrl || ''
-  document.getElementById('aiApiKey').value = aiConfig.apiKey || ''
   document.getElementById('aiModel').value = aiConfig.model || ''
   document.getElementById('serverUrl').value = syncConfig.serverUrl || ''
-  document.getElementById('token').value = syncConfig.token || ''
   document.getElementById('syncInterval').value = syncConfig.syncInterval || 30
   document.getElementById('selectionToggle').classList.toggle('on', selEnabled !== false)
 }
@@ -101,28 +96,12 @@ document.getElementById('selectionToggle').addEventListener('click', function() 
   this.classList.toggle('on')
 })
 
-document.getElementById('aiProvider').addEventListener('change', function() {
-  const defaults = {
-    ollama: { baseUrl: 'http://localhost:11434/v1', model: 'qwen2.5:7b' },
-    openai: { baseUrl: 'https://api.openai.com/v1', model: 'gpt-4o-mini' },
-    qwen: { baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1', model: 'qwen-plus' },
-    custom: { baseUrl: '', model: '' },
-  }
-  const d = defaults[this.value] || defaults.custom
-  document.getElementById('aiBaseUrl').value = d.baseUrl
-  document.getElementById('aiModel').value = d.model
-})
-
 document.getElementById('saveConfigBtn').addEventListener('click', async () => {
   await callService('configService', 'saveAIConfig', {
-    provider: document.getElementById('aiProvider').value,
-    baseUrl: document.getElementById('aiBaseUrl').value.trim(),
-    apiKey: document.getElementById('aiApiKey').value.trim(),
     model: document.getElementById('aiModel').value.trim(),
   })
   await callService('configService', 'saveSyncConfig', {
     serverUrl: document.getElementById('serverUrl').value.trim(),
-    token: document.getElementById('token').value.trim(),
     syncInterval: parseInt(document.getElementById('syncInterval').value) || 30,
     enabled: true,
   })

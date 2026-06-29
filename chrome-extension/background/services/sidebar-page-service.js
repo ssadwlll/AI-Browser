@@ -21,10 +21,6 @@ export class SidebarService {
     }
   }
 
-  async setMode(mode) {
-    await chrome.storage.local.set({ sidebarMode: mode })
-  }
-
   setupPanelBehavior() {
     try {
       chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true })

@@ -382,6 +382,11 @@ tr:hover{background:var(--bg)}
           <div id="aclModelChart" class="chart-box"></div>
         </div>
       </div>
+      <!-- 各模型每日趋势 -->
+      <div class="chart-card" style="margin-bottom:20px">
+        <h3>各模型每日调用趋势</h3>
+        <div id="aclDailyModelChart" class="chart-box" style="height:360px"></div>
+      </div>
 
       <!-- 调用明细列表 -->
       <div class="card">
@@ -1954,6 +1959,7 @@ let aclPage = 1;
 let aclPageSize = 20;
 let aclDailyChartInst = null;
 let aclModelChartInst = null;
+let aclDailyModelChartInst = null;
 
 async function initAICallLogs() {
   // 默认最近 30 天
@@ -1972,6 +1978,7 @@ async function initAICallLogs() {
 function aclResizeCharts() {
   if (aclDailyChartInst) aclDailyChartInst.resize();
   if (aclModelChartInst) aclModelChartInst.resize();
+  if (aclDailyModelChartInst) aclDailyModelChartInst.resize();
 }
 
 function aclQueryParams() {
@@ -2018,6 +2025,7 @@ async function aclLoadStats() {
       <div class="stat-card"><div class="stat-label">平均耗时(ms)</div><div class="stat-value">${Math.round(o.avg_duration_ms || 0)}</div></div>`;
     aclRenderDailyChart(d.daily || []);
     aclRenderModelChart(d.byModel || []);
+    aclRenderDailyModelChart(d.dailyByModel || []);
   } catch (e) { console.error('加载统计失败', e); }
 }
 
@@ -2058,6 +2066,51 @@ function aclRenderModelChart(byModel) {
       label: { formatter: '{b}\n{d}%', fontSize: 11 },
     }],
   });
+}
+
+function aclRenderDailyModelChart(dailyByModel) {
+  if (typeof echarts === 'undefined') return;
+  if (!dailyByModel || dailyByModel.length === 0) return;
+  if (!aclDailyModelChartInst) aclDailyModelChartInst = echarts.init(document.getElementById('aclDailyModelChart'));
+
+  // 提取日期列表（去重排序）
+  const dateSet = new Set();
+  dailyByModel.forEach(r => dateSet.add(r.date));
+  const dates = Array.from(dateSet).sort();
+
+  // 按模型分组
+  const modelMap = {};
+  dailyByModel.forEach(r => {
+    if (!modelMap[r.model]) modelMap[r.model] = {};
+    modelMap[r.model][r.date] = Number(r.call_count || 0);
+  });
+
+  const modelNames = Object.keys(modelMap);
+  // 限制最多显示 8 条线，其余归入"其他"
+  const maxSeries = 8;
+  let seriesModels = modelNames;
+  if (modelNames.length > maxSeries) {
+    seriesModels = modelNames.slice(0, maxSeries);
+  }
+
+  const colors = ['#6366f1','#10b981','#f59e0b','#ef4444','#8b5cf6','#06b6d4','#ec4899','#f97316'];
+  const series = seriesModels.map((model, i) => ({
+    name: model,
+    type: 'line',
+    data: dates.map(d => modelMap[model][d] || 0),
+    smooth: true,
+    lineStyle: { color: colors[i] },
+    itemStyle: { color: colors[i] },
+  }));
+
+  aclDailyModelChartInst.setOption({
+    tooltip: { trigger: 'axis' },
+    legend: { type: 'scroll', top: 0, data: seriesModels },
+    grid: { left: 50, right: 30, top: 40, bottom: 30 },
+    xAxis: { type: 'category', data: dates, axisLabel: { fontSize: 10 } },
+    yAxis: { type: 'value', name: '调用次数' },
+    series: series,
+  }, true);
 }
 
 async function aclLoadList() {

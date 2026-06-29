@@ -269,17 +269,13 @@ body{font-family:var(--font-sans);background:var(--bg-white);color:var(--text-pr
 
 /* ============ Agent 步骤卡片 ============ */
 .agent-step-card{margin:8px 16px;padding:10px 14px;background:var(--bg-gray2);border:1px solid var(--border-light);border-radius:var(--radius-lg);font-size:var(--fs-xs)}
+.agent-step-card.history{background:var(--bg-white);border-color:var(--border-color);cursor:default}
 .agent-step-header{display:flex;align-items:center;gap:8px;margin-bottom:6px}
 .agent-step-icon{font-size:16px}
 .agent-step-title{font-weight:600;color:var(--text-primary);font-size:var(--fs-xs)}
 .agent-step-body{font-family:var(--font-mono);font-size:var(--fs-xxs);color:var(--text-quaternary);white-space:pre-wrap;word-break:break-all;max-height:120px;overflow-y:auto;line-height:1.5;padding:6px 8px;background:var(--bg-white);border-radius:var(--radius)}
-
-/* ============ 占位视图 ============ */
-.placeholder-view{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:32px;text-align:center;animation:fadeIn .3s ease-in}
-.placeholder-icon-wrap{width:64px;height:64px;background:var(--brand-light);border-radius:var(--radius-xl);display:flex;align-items:center;justify-content:center;margin-bottom:16px}
-.placeholder-title{font-size:var(--fs-h2);font-weight:700;margin-bottom:6px}
-.placeholder-desc{color:var(--text-quaternary);font-size:var(--fs-body);margin-bottom:16px}
-.placeholder-tag{background:var(--brand-light);color:var(--brand);font-size:var(--fs-xxs);font-weight:600;padding:4px 14px;border-radius:var(--radius-pill)}
+.agent-history-step{padding:2px 0;color:var(--text-secondary);font-size:var(--fs-xs)}
+.agent-history-step .step-num{color:var(--ai-primary);font-weight:600}
 
 /* ============ 子页面头部 ============ */
 .sub-header{display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid var(--border-light);flex-shrink:0;background:var(--bg-white)}

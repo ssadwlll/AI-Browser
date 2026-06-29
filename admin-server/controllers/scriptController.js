@@ -311,6 +311,9 @@ exports.create = async (req, res) => {
     }
 
     res.json(success({ id: scriptId, name: scriptName }, '脚本上传成功'))
+
+    // 异步生成向量（不阻塞响应）
+    embeddingService.generateVector(scriptId)
   } catch (err) {
     // 清理文件
     if (req.file && fs.existsSync(req.file.path)) {
@@ -389,8 +392,20 @@ exports.update = async (req, res) => {
     }
 
     if (fields.length > 0) {
+      // 如果更新了 name 或 description，清除旧向量以触发重新生成
+      const nameChanged = fields.some(f => f.startsWith('name '))
+      const descChanged = description !== undefined
+      if (nameChanged || descChanged) {
+        fields.push('vector = NULL')
+        fields.push('vector_updated_at = NULL')
+      }
       params.push(req.params.id)
       await pool.query(`UPDATE scripts SET ${fields.join(', ')} WHERE id = ?`, params)
+
+      // 异步重新生成向量
+      if (nameChanged || descChanged) {
+        embeddingService.generateVector(req.params.id)
+      }
     }
 
     res.json(success(null, '更新成功'))

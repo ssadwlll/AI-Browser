@@ -1,0 +1,4 @@
+{
+  "watch": [".", "controllers", "services", "routes", "middleware", "config"],
+  "ignore": ["uploads/*", "models/*", "node_modules/*", "sql/*", "public/*", "*.log"]
+}
