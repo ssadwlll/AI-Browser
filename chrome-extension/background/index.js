@@ -159,12 +159,18 @@ chrome.runtime.onConnect.addListener((port) => {
         await aiService.chatStream(port, msg.messages, msg.options || {})
       }
     })
+    port.onDisconnect.addListener(() => {
+      console.log('[Background] ai-stream port 已断开')
+    })
   }
   if (port.name === 'agent-stream') {
     port.onMessage.addListener(async (msg) => {
       if (msg.type === 'agentStart') {
         await agentService.run(port, msg.userMessage, msg.chatHistory)
       }
+    })
+    port.onDisconnect.addListener(() => {
+      console.log('[Background] agent-stream port 已断开')
     })
   }
 })

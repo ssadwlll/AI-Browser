@@ -73,9 +73,11 @@ export class AIService {
         body: JSON.stringify(body),
       })
 
+      const safePost = (msg) => { try { port.postMessage(msg) } catch {} }
+
       if (!res.ok) {
         const text = await res.text()
-        port.postMessage({ type: 'streamError', error: `AI API 错误: ${res.status} ${text.slice(0, 100)}` })
+        safePost({ type: 'streamError', error: `AI API 错误: ${res.status} ${text.slice(0, 100)}` })
         return
       }
 
@@ -96,25 +98,23 @@ export class AIService {
           if (!trimmed || !trimmed.startsWith('data:')) continue
           const data = trimmed.slice(5).trim()
           if (data === '[DONE]') {
-            port.postMessage({ type: 'streamDone' })
+            safePost({ type: 'streamDone' })
             return
           }
           try {
             const parsed = JSON.parse(data)
             const content = parsed.choices?.[0]?.delta?.content || ''
             if (content) {
-              port.postMessage({ type: 'streamChunk', content })
+              safePost({ type: 'streamChunk', content })
             }
           } catch {}
         }
       }
 
-      port.postMessage({ type: 'streamDone' })
+      safePost({ type: 'streamDone' })
     } catch (e) {
       console.error('[AIService] stream error:', e)
-      try {
-        port.postMessage({ type: 'streamError', error: e.message })
-      } catch {}
+      try { port.postMessage({ type: 'streamError', error: e.message }) } catch {}
     }
   }
 }
