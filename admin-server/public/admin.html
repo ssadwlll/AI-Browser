@@ -285,6 +285,8 @@ tr:hover{background:var(--bg)}
     <div class="form-group"><label>分类 *</label><select id="uploadCategory"></select></div>
     <div class="form-group"><label>版本</label><input type="text" id="uploadVersion" value="1.0.0"></div>
     <div class="form-group"><label>URL 匹配模式</label><input type="text" id="uploadUrlPattern" value="*" placeholder="* 匹配所有页面"></div>
+    <div class="form-group"><label>工具类型 <span style="font-weight:400;font-size:11px;color:var(--text2)">AI Agent自动调用</span></label><select id="uploadToolType"><option value="js">JS注入</option><option value="api">API调用</option></select></div>
+    <div class="form-group" id="uploadToolConfigGroup" style="display:none"><label>API工具配置 (JSON)</label><textarea id="uploadToolConfig" rows="4" placeholder='{"apiEndpoint":"https://api.example.com/data","apiMethod":"GET","apiHeaders":{},"toolDescription":"工具描述","parameters":{"type":"object","properties":{},"required":[]}}'></textarea></div>
     <div class="form-group"><label>脚本文件 (.js) *<br><span style="font-weight:400;font-size:11px;color:var(--text2)">可选择多个文件，第一个文件作为主入口，其余作为模块（按文件名排序加载）</span></label><input type="file" id="uploadFile" accept=".js" multiple></div>
     <div class="modal-actions">
       <button class="btn btn-sm" onclick="closeUploadModal()" style="background:var(--bg);color:var(--text)">取消</button>
@@ -345,7 +347,9 @@ tr:hover{background:var(--bg)}
     <div id="codeMetaFields" class="hidden">
       <div class="form-group"><label>脚本名称</label><input type="text" id="codeEditName"></div>
       <div class="form-group"><label>脚本描述</label><textarea id="codeEditDesc" style="min-height:60px"></textarea></div>
-      <div class="form-group"><label>URL 匹配模式 <span style="font-weight:400;font-size:11px;color:var(--text2)">（多个用逗号分隔，如 *://work.66wz.com:7001/pub/*, *://tech.66wz.com:7443/pub/*）</span></label><input type="text" id="codeEditUrlPattern" placeholder="*"></div>
+      <div class="form-group"><label>URL 匹配模式 <span style="font-weight:400;font-size:11px;color:var(--text2)">（多个用逗号分隔）</span></label><input type="text" id="codeEditUrlPattern" placeholder="*"></div>
+      <div class="form-group"><label>工具类型 <span style="font-weight:400;font-size:11px;color:var(--text2)">AI Agent自动调用</span></label><select id="codeEditToolType"><option value="js">JS注入</option><option value="api">API调用</option></select></div>
+      <div class="form-group" id="codeEditToolConfigGroup" style="display:none"><label>API工具配置 (JSON)</label><textarea id="codeEditToolConfig" rows="4" placeholder='{"apiEndpoint":"https://api.example.com/data","apiMethod":"GET","apiHeaders":{},"toolDescription":"工具描述","parameters":{"type":"object","properties":{},"required":[]}}'></textarea></div>
       <div class="form-group"><label>版本</label><input type="text" id="codeEditVersion"></div>
     </div>
     <!-- 代码展示区域 -->
@@ -593,6 +597,11 @@ async function uploadScript() {
       formData.append('category_id', catId);
       formData.append('version', version || '1.0.0');
       formData.append('url_pattern', urlPattern || '*');
+      // 工具类型和配置
+      const toolType = document.getElementById('uploadToolType').value;
+      formData.append('tool_type', toolType);
+      const toolConfig = document.getElementById('uploadToolConfig').value.trim();
+      if (toolConfig) formData.append('tool_config', toolConfig);
       formData.append('script', files[0]);
       const res = await api('POST', '/api/scripts', formData, true);
       if (res.success) { closeUploadModal(); loadScripts(currentScriptPage); toast('脚本上传成功', 'success'); }
@@ -607,6 +616,11 @@ async function uploadScript() {
       formData.append('category_id', catId);
       formData.append('version', version || '1.0.0');
       formData.append('url_pattern', urlPattern || '*');
+      // 工具类型和配置
+      const toolType2 = document.getElementById('uploadToolType').value;
+      formData.append('tool_type', toolType2);
+      const toolConfig2 = document.getElementById('uploadToolConfig').value.trim();
+      if (toolConfig2) formData.append('tool_config', toolConfig2);
       formData.append('script', files[0]);
       // Add modules as JSON
       formData.append('modules', JSON.stringify(modules));
@@ -681,6 +695,13 @@ function toggleCodeEdit() {
   document.getElementById('codeEditDesc').value = currentCodeScript.description || '';
   document.getElementById('codeEditUrlPattern').value = currentCodeScript.url_pattern || '*';
   document.getElementById('codeEditVersion').value = currentCodeScript.version || '1.0.0';
+  // 工具类型
+  document.getElementById('codeEditToolType').value = currentCodeScript.tool_type || 'js';
+  const config = currentCodeScript.tool_config;
+  if (config && typeof config === 'object') {
+    document.getElementById('codeEditToolConfig').value = JSON.stringify(config, null, 2);
+    document.getElementById('codeEditToolConfigGroup').style.display = (currentCodeScript.tool_type === 'api') ? '' : 'none';
+  }
 
   // 切换显示
   document.getElementById('codeViewWrap').classList.add('hidden');
@@ -712,6 +733,12 @@ async function saveScriptCode() {
   const description = document.getElementById('codeEditDesc').value.trim();
   const url_pattern = document.getElementById('codeEditUrlPattern').value.trim() || '*';
   const version = document.getElementById('codeEditVersion').value.trim() || '1.0.0';
+  const tool_type = document.getElementById('codeEditToolType').value;
+  let tool_config = null;
+  try {
+    const raw = document.getElementById('codeEditToolConfig').value.trim();
+    if (raw) tool_config = JSON.parse(raw);
+  } catch {}
 
   if (!name) { errEl.textContent = '脚本名称不能为空'; errEl.style.display = 'block'; return; }
   errEl.style.display = 'none';
@@ -725,6 +752,8 @@ async function saveScriptCode() {
       version,
       params_schema: JSON.stringify(currentParamsSchema),
       params_data: JSON.stringify(currentParamsData),
+      tool_type,
+      tool_config: tool_config ? JSON.stringify(tool_config) : null,
       modules: currentModules.map(m => ({ name: m.name, code: m.code, load_order: m.load_order }))
     };
     const res = await api('PUT', '/api/scripts/' + currentCodeScript.id, body);
@@ -1314,6 +1343,15 @@ function fmtDate(d) { if(!d) return '-'; return new Date(d).toLocaleString('zh-C
 
 // ============ 初始化 ============
 document.addEventListener('DOMContentLoaded', () => {
+  // 工具类型切换 - 上传表单
+  document.getElementById('uploadToolType').addEventListener('change', function() {
+    document.getElementById('uploadToolConfigGroup').style.display = this.value === 'api' ? '' : 'none';
+  });
+  // 工具类型切换 - 编辑表单
+  document.getElementById('codeEditToolType').addEventListener('change', function() {
+    document.getElementById('codeEditToolConfigGroup').style.display = this.value === 'api' ? '' : 'none';
+  });
+
   // 优先从 localStorage 恢复登录状态
   const savedToken = localStorage.getItem('admin_token');
   const savedUser = localStorage.getItem('admin_user');

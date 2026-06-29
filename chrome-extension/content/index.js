@@ -43,6 +43,18 @@
     sendResponse({ ok: true })
   })
 
+  // 监听注入脚本的回调（inject_js 通过 window.postMessage 反馈）
+  window.addEventListener('message', (event) => {
+    if (event.source !== window) return
+    if (event.data?.type === 'AI_BROWSER_CALLBACK') {
+      safeSendMessage({
+        type: 'injectCallback',
+        data: event.data.data || {},
+        tabUrl: location.href,
+      })
+    }
+  })
+
   // ---- 划词工具栏 ----
   function initSelectionToolbar() {
     const SELECTION_TOOLS = [

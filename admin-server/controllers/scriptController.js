@@ -3,6 +3,21 @@ const fs = require('fs')
 const path = require('path')
 const { success, error, paginated } = require('../utils/response')
 
+const PROJECT_ROOT = path.join(__dirname, '..')
+const UPLOADS_DIR = path.join(PROJECT_ROOT, 'uploads')
+
+// 将 file_path 解析为绝对路径（兼容已有的绝对路径和新的相对路径）
+function resolveFilePath(filePath) {
+  if (!filePath) return null
+  // 已经是绝对路径且文件存在，直接返回（兼容旧数据）
+  if (path.isAbsolute(filePath) && fs.existsSync(filePath)) return filePath
+  // 尝试相对于项目根目录解析
+  const resolved = path.join(PROJECT_ROOT, filePath)
+  if (fs.existsSync(resolved)) return resolved
+  // 最后兜底：直接返回原值
+  return filePath
+}
+
 const safeParse = v => {
   if (!v) return v === 0 || v === false ? v : undefined
   return typeof v === 'string' ? JSON.parse(v) : v
@@ -168,8 +183,9 @@ exports.detail = async (req, res) => {
     }
     const script = rows[0]
     // 读取脚本文件内容，作为 code 字段返回
-    if (script.file_path && fs.existsSync(script.file_path)) {
-      script.code = fs.readFileSync(script.file_path, 'utf-8')
+    const resolvedPath = resolveFilePath(script.file_path)
+    if (resolvedPath && fs.existsSync(resolvedPath)) {
+      script.code = fs.readFileSync(resolvedPath, 'utf-8')
     } else {
       script.code = ''
     }
@@ -232,7 +248,7 @@ exports.create = async (req, res) => {
         parseInt(category_id),
         version || meta.version || '1.0.0',
         req.user.id,
-        req.file.path,
+        path.relative(PROJECT_ROOT, req.file.path),  // 存相对路径
         req.file.size,
         icon || 'code',
         url_pattern || meta.urlPattern || '*',
@@ -305,9 +321,10 @@ exports.update = async (req, res) => {
 
     // 如果提供了 code，写入脚本文件
     if (code !== undefined && script[0].file_path) {
-      fs.writeFileSync(script[0].file_path, code, 'utf-8')
+      const resolvedPath = resolveFilePath(script[0].file_path)
+      fs.writeFileSync(resolvedPath, code, 'utf-8')
       // 更新文件大小
-      const stat = fs.statSync(script[0].file_path)
+      const stat = fs.statSync(resolvedPath)
       fields.push('file_size = ?')
       params.push(stat.size)
       // Update/insert the first module for backward compatibility
@@ -362,8 +379,9 @@ exports.remove = async (req, res) => {
     }
 
     // 删除文件
-    if (fs.existsSync(rows[0].file_path)) {
-      fs.unlinkSync(rows[0].file_path)
+    const resolvedPath = resolveFilePath(rows[0].file_path)
+    if (resolvedPath && fs.existsSync(resolvedPath)) {
+      fs.unlinkSync(resolvedPath)
     }
 
     await pool.query('DELETE FROM usage_stats WHERE script_id = ?', [req.params.id])
@@ -429,8 +447,9 @@ exports.userjs = async (req, res) => {
 
     // 读取脚本代码
     let code = ''
-    if (script.file_path && fs.existsSync(script.file_path)) {
-      code = fs.readFileSync(script.file_path, 'utf-8')
+    const injectPath = resolveFilePath(script.file_path)
+    if (injectPath && fs.existsSync(injectPath)) {
+      code = fs.readFileSync(injectPath, 'utf-8')
     }
 
     // 如果代码已包含 ==UserScript== 块，直接输出
@@ -474,14 +493,15 @@ exports.download = async (req, res) => {
     }
 
     const script = rows[0]
-    if (!fs.existsSync(script.file_path)) {
+    const downloadPath = resolveFilePath(script.file_path)
+    if (!downloadPath || !fs.existsSync(downloadPath)) {
       return res.status(404).json(error('脚本文件不存在', 404))
     }
 
     // 更新下载次数
     await pool.query('UPDATE scripts SET download_count = download_count + 1 WHERE id = ?', [script.id])
 
-    res.download(script.file_path, `${script.name}.js`)
+    res.download(downloadPath, `${script.name}.js`)
   } catch (err) {
     res.status(500).json(error(err.message))
   }
@@ -557,8 +577,9 @@ exports.injectData = async (req, res) => {
       code = modules.map(m => m.code).join('\n\n');
     } else {
       const [fullRows] = await pool.query('SELECT file_path FROM scripts WHERE id = ?', [script.id]);
-      if (fullRows[0]?.file_path && fs.existsSync(fullRows[0].file_path)) {
-        code = fs.readFileSync(fullRows[0].file_path, 'utf-8');
+      const injectDataPath = resolveFilePath(fullRows[0]?.file_path)
+      if (injectDataPath && fs.existsSync(injectDataPath)) {
+        code = fs.readFileSync(injectDataPath, 'utf-8');
       }
     }
 

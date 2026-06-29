@@ -434,6 +434,7 @@ function updateAgentStepCard(card, step, toolName, toolArgs, status) {
   const nameMap = {
     search_tools: '搜索工具',
     read_page_content: '读取页面',
+    inject_js: '注入JS代码',
     finish_task: '任务完成',
   }
 
@@ -442,6 +443,9 @@ function updateAgentStepCard(card, step, toolName, toolArgs, status) {
   if (toolName.startsWith('inject_script_')) {
     icon = '\uD83D\uDE80'
     displayName = toolArgs?.scriptName || '注入脚本'
+  } else if (toolName === 'inject_js') {
+    icon = '\uD83D\uDD27'
+    displayName = toolArgs?.description || '注入JS代码'
   }
 
   const statusIcon = status === 'running' ? '\u23F3' : status === 'searching' ? '\uD83D\uDD0D' : ''
@@ -802,3 +806,26 @@ async function handleFloatingAction(action) {
       break
   }
 }
+
+// ============ inject_js 回调通知 ============
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (msg.type === 'injectCallbackNotification') {
+    const data = msg.data || {}
+    const action = data.action || '未知操作'
+    const message = data.message || ''
+    const callbackText = `[回调通知] ${action}${message ? ': ' + message : ''}`
+    // 在聊天界面插入系统通知消息
+    const div = document.createElement('div')
+    div.className = 'message ai-msg'
+    div.innerHTML = `
+      <div class="msg-avatar"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg></div>
+      <div class="msg-body">
+        <div class="msg-name">脚本回调</div>
+        <div class="msg-bubble msg-markdown">${renderMarkdown(callbackText)}</div>
+      </div>
+    `
+    chatMessages.appendChild(div)
+    chatMessages.scrollTop = chatMessages.scrollHeight
+    sendResponse({ ok: true })
+  }
+})

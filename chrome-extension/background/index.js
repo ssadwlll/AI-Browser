@@ -75,6 +75,33 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return false
   }
 
+  // 接收 inject_js 注入脚本的回调反馈
+  if (msg.type === 'injectCallback') {
+    const callbackData = msg.data || {}
+    const tabUrl = msg.tabUrl || ''
+    console.log('[AI Browser] 收到注入脚本回调:', callbackData, 'from:', tabUrl)
+    // 保存到 storage，sidepanel 可读取并展示
+    chrome.storage.local.get('injectCallbacks', (result) => {
+      const callbacks = result.injectCallbacks || []
+      callbacks.push({
+        ...callbackData,
+        tabUrl,
+        timestamp: Date.now(),
+      })
+      // 只保留最近20条
+      if (callbacks.length > 20) callbacks.splice(0, callbacks.length - 20)
+      chrome.storage.local.set({ injectCallbacks: callbacks })
+    })
+    // 通过 sidepanel 端口通知（如果有活跃连接）
+    chrome.runtime.sendMessage({
+      type: 'injectCallbackNotification',
+      data: callbackData,
+      tabUrl,
+    }).catch(() => {})  // 忽略没有接收者的错误
+    sendResponse({ ok: true })
+    return false
+  }
+
   return false
 })
 

@@ -3,7 +3,8 @@ export class AgentService {
   constructor(configService, toolService) {
     this.configService = configService
     this.toolService = toolService
-    this.MAX_ITERATIONS = 12
+    this.MAX_AI_REQUESTS = 15    // AI API 请求次数上限（每次请求可执行多个工具）
+    this.MAX_TOOL_CALLS = 30     // 工具调用总次数上限（防止本地工具无限调用）
     this.TIMEOUT_MS = 120000
   }
 
@@ -139,6 +140,22 @@ export class AgentService {
             timeout: { type: 'number', description: '最长等待毫秒数，默认5000。简单页面用3000，复杂SPA页面用8000。' },
           },
           required: ['selector'],
+        },
+      },
+    })
+
+    tools.push({
+      type: 'function',
+      function: {
+        name: 'inject_js',
+        description: '向当前页面注入并执行自定义JavaScript代码。支持异步操作（定时器、观察器等）。注入的代码可通过 window.postMessage({ type: "AI_BROWSER_CALLBACK", data: {...} }, "*") 向AI回调反馈结果。适用场景：定时监控元素变化、自动刷新检测、持续观察页面状态等需要后台运行的任务。',
+        parameters: {
+          type: 'object',
+          properties: {
+            code: { type: 'string', description: '要注入的JavaScript代码字符串。最后一条表达式或return值将作为返回结果。如需回调反馈，使用 window.postMessage({ type: "AI_BROWSER_CALLBACK", data: { action: "...", message: "..." } }, "*")' },
+            description: { type: 'string', description: '简短描述这段代码的功能（如"定时检查按钮是否可点击"），用于日志记录' },
+          },
+          required: ['code'],
         },
       },
     })
@@ -374,13 +391,12 @@ export class AgentService {
 
   async run(port, userMessage, chatHistory) {
     const startTime = Date.now()
-    let iteration = 0
+    let aiRequestCount = 0      // AI API 请求次数（每次 while 循环 +1）
+    let totalToolCalls = 0      // 工具调用总次数（含本地工具，防止无限调用）
     let searchResults = []
     const executedTools = []
-    const toolCallCount = {}
-    let injectFailCount = 0  // 连续注入失败计数（跨不同 inject_script_N）
-    let stuckCount = 0       // 连续 DOM 无变化计数（提取到相同页面内容）
-    let lastPageContent = null // 上一次 extract_content 的内容哈希
+    let consecutiveFailCount = 0  // 连续无进展计数（工具失败或结果无变化时+1，有进展时重置为0）
+    const MAX_CONSECUTIVE_FAILS = 5 // 连续无进展上限
 
     // 清理 chatHistory 中的自定义字段，避免 API 拒绝
     const cleanHistory = (chatHistory || []).map(m => {
@@ -403,13 +419,16 @@ export class AgentService {
 10. 使用 get_element_info 获取元素详细信息（位置、属性、可见性等）
 11. 使用 wait_for_element 等待页面元素加载完成（navigate/click/fill_input submit后必须调用）
 12. 使用 take_screenshot 截取页面可视区域截图
-13. 使用 inject_script_* 系列函数注入执行脚本到页面
-14. 使用 finish_task 结束任务并汇报结果
+13. 使用 inject_js 向页面注入自定义JavaScript代码（支持定时器、观察器等异步操作）
+14. 使用 inject_script_* 系列函数执行工具库中的脚本
+15. 使用 finish_task 结束任务并汇报结果
 
 工作流程：
 - 收到用户需求后，先用 search_tools 搜索相关工具
 - **搜索技巧**：使用简短核心词（2-4字），多个词用空格分隔。搜索支持中文智能分词和模糊匹配，语序不同也能搜到。例如用户要"最新热点新闻"→搜"新闻 热点"；用户要"采集小红书"→搜"小红书"。如果首次搜不到，换同义词重试（如"爬虫"→"采集"）。
 - **搜不到专用工具时**：改用 navigate_to_url + DOM工具（extract_content/fill_input/click_element）直接操作页面完成需求。例如：用户要搜"温州一日游"，navigate_to_url 打开搜索URL，然后用 extract_content 采集结果
+- **需要注入自定义JS时**：使用 inject_js 工具。例如用户要求"定时刷新检查按钮状态"、"自动监控页面变化"、"定时点击"等需要后台持续运行的任务，用 inject_js 注入包含 setInterval/setTimeout 的代码
+- **inject_js 回调机制**：注入的代码如需向AI反馈结果，使用 window.postMessage({ type: "AI_BROWSER_CALLBACK", data: { action: "描述动作", message: "反馈消息" } }, "*")。AI会在聊天界面收到回调通知
 - 如果需求是页面操作（如提取内容、点击、填表），直接使用DOM工具，无需搜索
 - **重要：页面导航/提交后必须等待加载**：navigate_to_url 之后 → wait_for_element 等待目标元素出现 → extract_content 提取。fill_input(submit=true) 之后 → wait_for_element 等待结果元素出现 → 再提取。直接提取会拿到旧页面内容
 - **wait_for_element 选择器技巧**：选一个页面加载后必然会出现的特征元素。搜索结果页用 .search-result 或 [class*="result"]，文章页用 article 或 .content，列表页用 [class*="item"] 或 li
@@ -425,13 +444,28 @@ export class AgentService {
 
     try { port.postMessage({ type: 'agentStart' }) } catch {}
 
-    while (iteration < this.MAX_ITERATIONS) {
+    // port 存活检测：postMessage 抛异常说明 port 已断开
+    let portAlive = true
+    const safePost = (msg) => {
+      if (!portAlive) return
+      try {
+        port.postMessage(msg)
+      } catch {
+        portAlive = false
+      }
+    }
+
+    while (aiRequestCount < this.MAX_AI_REQUESTS && portAlive) {
       if (Date.now() - startTime > this.TIMEOUT_MS) {
-        try { port.postMessage({ type: 'agentError', error: 'Agent执行超时' }) } catch {}
+        safePost({ type: 'agentError', error: 'Agent执行超时' })
+        return
+      }
+      if (totalToolCalls >= this.MAX_TOOL_CALLS) {
+        safePost({ type: 'agentError', error: '工具调用次数超限，请简化任务重试' })
         return
       }
 
-      iteration++
+      aiRequestCount++
 
       const tools = this.buildToolDefinitions(userMessage, searchResults)
 
@@ -454,15 +488,38 @@ export class AgentService {
         const headers = { 'Content-Type': 'application/json' }
         if (config.apiKey) headers['Authorization'] = `Bearer ${config.apiKey}`
 
-        const res = await fetch(url, {
-          method: 'POST',
-          headers,
-          body: JSON.stringify(body),
-        })
+        // API 请求重试机制：429限流、5xx临时错误重试，4xx错误不重试
+        const MAX_API_RETRIES = 2
+        let res, lastError
+        for (let attempt = 0; attempt <= MAX_API_RETRIES; attempt++) {
+          try {
+            res = await fetch(url, {
+              method: 'POST',
+              headers,
+              body: JSON.stringify(body),
+            })
+            if (res.ok || (res.status >= 400 && res.status < 500 && res.status !== 429)) {
+              break  // 成功 或 4xx非限流错误（如401鉴权失败、400参数错误）不重试
+            }
+            // 429 或 5xx → 等待后重试
+            if (attempt < MAX_API_RETRIES) {
+              const waitMs = (attempt + 1) * 1000  // 1s, 2s
+              console.warn(`[Agent] API返回 ${res.status}，${waitMs}ms后重试 (${attempt + 1}/${MAX_API_RETRIES})`)
+              await new Promise(r => setTimeout(r, waitMs))
+            }
+          } catch (e) {
+            lastError = e
+            if (attempt < MAX_API_RETRIES) {
+              const waitMs = (attempt + 1) * 1000
+              console.warn(`[Agent] API请求异常: ${e.message}，${waitMs}ms后重试 (${attempt + 1}/${MAX_API_RETRIES})`)
+              await new Promise(r => setTimeout(r, waitMs))
+            }
+          }
+        }
 
-        if (!res.ok) {
-          const text = await res.text()
-          try { port.postMessage({ type: 'agentError', error: `AI API错误: ${res.status}` }) } catch {}
+        if (!res || !res.ok) {
+          const errStatus = res?.status || '网络错误'
+          safePost({ type: 'agentError', error: `AI API错误: ${errStatus}${lastError ? ' (' + lastError.message + ')' : ''}` })
           return
         }
 
@@ -471,260 +528,320 @@ export class AgentService {
         const msg = choice?.message
 
         if (!msg) {
-          try { port.postMessage({ type: 'agentError', error: 'AI返回为空' }) } catch {}
+          safePost({ type: 'agentError', error: 'AI返回为空' })
           return
         }
 
         if (msg.tool_calls && msg.tool_calls.length > 0) {
           console.log('[Agent] tool_calls:', msg.tool_calls.map(t => t.function.name).join(', '))
-          const toolCall = msg.tool_calls[0]
-          const funcName = toolCall.function.name
-          let funcArgs = {}
-          try { funcArgs = JSON.parse(toolCall.function.arguments || '{}') } catch {}
 
-          // 循环检测
-          toolCallCount[funcName] = (toolCallCount[funcName] || 0) + 1
-          const lastExecuted = executedTools[executedTools.length - 1]
-          if (toolCallCount[funcName] >= 3 && lastExecuted && !lastExecuted.result?.ok) {
-            console.warn('[Agent] 检测到重复失败:', funcName, '强制结束')
-            const stopMsg = `任务无法完成：工具 "${funcName}" 已连续失败${toolCallCount[funcName]}次，可能是工具配置有问题。`
-            for (const char of stopMsg) {
-              try { port.postMessage({ type: 'streamChunk', content: char }) } catch {}
-              await new Promise(r => setTimeout(r, 10))
-            }
-            try { port.postMessage({ type: 'streamDone' }) } catch {}
-            return
-          }
-          if (toolCallCount[funcName] >= 5) {
-            console.warn('[Agent] 检测到重复循环:', funcName, '强制结束')
-            const stopMsg = `任务已尝试"${funcName}" ${toolCallCount[funcName]}次，为避免死循环自动结束。请简化任务重试。`
-            for (const char of stopMsg) {
-              try { port.postMessage({ type: 'streamChunk', content: char }) } catch {}
-              await new Promise(r => setTimeout(r, 10))
-            }
-            try { port.postMessage({ type: 'streamDone' }) } catch {}
-            return
-          }
-          // 全局注入失败检测：不同 inject_script_N 连续失败也触发
-          if (funcName.startsWith('inject_script_')) {
-            injectFailCount++
-            if (injectFailCount >= 3) {
-              console.warn('[Agent] 检测到连续注入失败:', injectFailCount, '次，强制结束')
-              const stopMsg = `已连续尝试${injectFailCount}个脚本均失败，可能是工具库脚本有问题或当前页面不兼容。请检查后重试。`
-              for (const char of stopMsg) {
-                try { port.postMessage({ type: 'streamChunk', content: char }) } catch {}
-                await new Promise(r => setTimeout(r, 10))
-              }
-              try { port.postMessage({ type: 'streamDone' }) } catch {}
-              return
-            }
-          } else {
-            injectFailCount = 0  // 非注入工具调用，重置计数
-          }
+          // 推送 assistant 消息（包含所有 tool_calls）
+          messages.push({ role: 'assistant', content: null, tool_calls: msg.tool_calls })
 
-          try {
-            port.postMessage({
+          // 逐个执行 tool calls（串行执行，因为很多操作依赖同一标签页状态）
+          for (const toolCall of msg.tool_calls) {
+            if (!portAlive) return
+            if (totalToolCalls >= this.MAX_TOOL_CALLS) break
+
+            const funcName = toolCall.function.name
+            let funcArgs = {}
+            try { funcArgs = JSON.parse(toolCall.function.arguments || '{}') } catch {}
+
+            totalToolCalls++
+
+            // 无进展检测：在工具执行后判断是否有进展（见下方 result 判断）
+
+            safePost({
               type: 'agentStep',
-              step: iteration,
+              step: totalToolCalls,
               toolName: funcName,
               toolArgs: funcArgs,
             })
-          } catch {}
 
-          messages.push({ role: 'assistant', content: null, tool_calls: [toolCall] })
-
-          let toolResult
-          if (funcName === 'finish_task') {
-            console.log('[Agent] finish_task, summary:', funcArgs.summary)
-            const summary = funcArgs.summary || '任务已完成'
-            try { port.postMessage({ type: 'agentStepResult', step: iteration, result: summary, done: true }) } catch {}
-            for (const char of summary) {
-              try { port.postMessage({ type: 'streamChunk', content: char }) } catch {}
-              await new Promise(r => setTimeout(r, 15))
-            }
-            if (executedTools.length > 0) {
-              const resultsText = '\n\n---\n### 工具执行结果\n' + executedTools.map((t, i) => {
-                let display = ''
-                try {
-                  const parsed = typeof t.result === 'string' ? JSON.parse(t.result) : t.result
-                  if (parsed?.ok && parsed?.result) {
-                    display = typeof parsed.result === 'string' ? parsed.result : JSON.stringify(parsed.result, null, 2)
-                  } else if (parsed?.error) {
-                    display = '错误: ' + parsed.error
-                  } else {
-                    display = JSON.stringify(parsed, null, 2)
-                  }
-                } catch {
-                  display = String(t.result || '')
-                }
-                return (i + 1) + '. **' + t.name + '**\n' + display
-              }).join('\n\n')
-              for (const char of resultsText) {
-                try { port.postMessage({ type: 'streamChunk', content: char }) } catch {}
-                await new Promise(r => setTimeout(r, 5))
+            let toolResult
+            if (funcName === 'finish_task') {
+              console.log('[Agent] finish_task, summary:', funcArgs.summary)
+              const summary = funcArgs.summary || '任务已完成'
+              safePost({ type: 'agentStepResult', step: totalToolCalls, result: summary, done: true })
+              for (const char of summary) {
+                safePost({ type: 'streamChunk', content: char })
+                if (!portAlive) return
+                await new Promise(r => setTimeout(r, 15))
               }
-            }
-            try { port.postMessage({ type: 'streamDone' }) } catch {}
-            return
-          } else if (funcName === 'search_tools') {
-            const query = funcArgs.query || userMessage
-            try { port.postMessage({ type: 'agentStep', step: iteration, toolName: 'search_tools', toolArgs: { query }, status: 'searching' }) } catch {}
-            searchResults = await this.toolService.searchScripts(query)
-            if (searchResults.length === 0) {
+              if (executedTools.length > 0) {
+                const resultsText = '\n\n---\n### 工具执行结果\n' + executedTools.map((t, i) => {
+                  let display = ''
+                  try {
+                    const parsed = typeof t.result === 'string' ? JSON.parse(t.result) : t.result
+                    if (parsed?.ok && parsed?.result) {
+                      display = typeof parsed.result === 'string' ? parsed.result : JSON.stringify(parsed.result, null, 2)
+                    } else if (parsed?.error) {
+                      display = '错误: ' + parsed.error
+                    } else {
+                      display = JSON.stringify(parsed, null, 2)
+                    }
+                  } catch {
+                    display = String(t.result || '')
+                  }
+                  return (i + 1) + '. **' + t.name + '**\n' + display
+                }).join('\n\n')
+                for (const char of resultsText) {
+                  safePost({ type: 'streamChunk', content: char })
+                  if (!portAlive) return
+                  await new Promise(r => setTimeout(r, 5))
+                }
+              }
+              safePost({ type: 'streamDone' })
+              return
+            } else if (funcName === 'search_tools') {
+              const query = funcArgs.query || userMessage
+              safePost({ type: 'agentStep', step: totalToolCalls, toolName: 'search_tools', toolArgs: { query }, status: 'searching' })
+              searchResults = await this.toolService.searchScripts(query)
+              if (searchResults.length === 0) {
+                toolResult = JSON.stringify({
+                  ok: true,
+                  result: `未找到与"${query}"匹配的专用工具。请改用 navigate_to_url + DOM工具（extract_content/fill_input/click_element）直接在页面上操作完成需求。不要再调用 search_tools。`,
+                })
+              } else {
+                toolResult = JSON.stringify(searchResults.slice(0, 5).map(t => ({
+                  id: t.id, name: t.name, description: t.description,
+                  toolType: t.toolType, toolConfig: t.toolConfig ? '已配置' : '未配置',
+                })))
+              }
+              executedTools.push({ name: 'search_tools', result: { ok: searchResults.length > 0, count: searchResults.length } })
+              safePost({ type: 'agentSearchResult', results: searchResults.slice(0, 5) })
+            } else if (funcName === 'read_page_content') {
+              const pageData = await this.toolService.getPageContent()
               toolResult = JSON.stringify({
                 ok: true,
-                result: `未找到与"${query}"匹配的专用工具。请改用 navigate_to_url + DOM工具（extract_content/fill_input/click_element）直接在页面上操作完成需求。不要再调用 search_tools。`,
+                title: pageData?.title || '',
+                url: pageData?.url || '',
+                content: (pageData?.content || '').slice(0, 3000),
               })
-            } else {
-              toolResult = JSON.stringify(searchResults.slice(0, 5).map(t => ({
-                id: t.id, name: t.name, description: t.description,
-                toolType: t.toolType, toolConfig: t.toolConfig ? '已配置' : '未配置',
-              })))
-            }
-            executedTools.push({ name: 'search_tools', result: { ok: searchResults.length > 0, count: searchResults.length } })
-            try { port.postMessage({ type: 'agentSearchResult', results: searchResults.slice(0, 5) }) } catch {}
-          } else if (funcName === 'read_page_content') {
-            const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
-            const pageData = await this.toolService.getPageContent()
-            toolResult = JSON.stringify({
-              title: pageData?.title || '',
-              url: pageData?.url || '',
-              content: (pageData?.content || '').slice(0, 3000),
-            })
-          } else if (funcName.startsWith('inject_script_')) {
-            const scriptId = parseInt(funcName.replace('inject_script_', ''))
-            if (!scriptId || isNaN(scriptId)) {
-              toolResult = JSON.stringify({ ok: false, error: '无效的脚本ID' })
-            } else {
-              const tool = searchResults.find(t => t.id === scriptId) || { id: scriptId, name: '脚本#' + scriptId, toolType: 'js', toolConfig: {} }
-              const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
-              try { port.postMessage({ type: 'agentStep', step: iteration, toolName: funcName, toolArgs: { scriptId, scriptName: tool.name }, status: 'running' }) } catch {}
-              const execResult = await this.toolService.executeTool(tool, tab?.id)
-              toolResult = JSON.stringify(execResult)
-              executedTools.push({ name: tool.name || funcName, result: execResult })
-            }
-          } else if (funcName === 'navigate_to_url') {
-            const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
-            if (!tab?.id) {
-              toolResult = JSON.stringify({ ok: false, error: '无法获取当前标签页' })
-            } else {
-              try { port.postMessage({ type: 'agentStep', step: iteration, toolName: funcName, toolArgs: funcArgs, status: 'running' }) } catch {}
-              await chrome.tabs.update(tab.id, { url: funcArgs.url })
-              toolResult = JSON.stringify({ ok: true, result: `已导航到: ${funcArgs.url}` })
-              executedTools.push({ name: funcName, result: { ok: true, result: funcArgs.url } })
-            }
-          } else if (funcName === 'go_back') {
-            const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
-            if (!tab?.id) {
-              toolResult = JSON.stringify({ ok: false, error: '无法获取当前标签页' })
-            } else {
-              try { port.postMessage({ type: 'agentStep', step: iteration, toolName: funcName, status: 'running' }) } catch {}
-              try {
-                await chrome.tabs.goBack(tab.id)
-                toolResult = JSON.stringify({ ok: true, result: '已返回上一页' })
-              } catch (e) {
-                toolResult = JSON.stringify({ ok: false, error: '无更多历史记录: ' + e.message })
-              }
-              executedTools.push({ name: funcName, result: toolResult })
-            }
-          } else if (funcName === 'take_screenshot') {
-            const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
-            if (!tab?.id) {
-              toolResult = JSON.stringify({ ok: false, error: '无法获取当前标签页' })
-            } else {
-              try { port.postMessage({ type: 'agentStep', step: iteration, toolName: funcName, status: 'running' }) } catch {}
-              try {
-                const quality = funcArgs.quality || 80
-                const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'jpeg', quality })
-                const base64Len = dataUrl?.length || 0
-                // AI 只需要摘要不传 base64，完整数据通过 agentStepResult 传给 UI
-                toolResult = JSON.stringify({ ok: true, result: `截图成功，图片大小约${Math.round(base64Len / 1024)}KB` })
-                executedTools.push({ name: funcName, result: { ok: true, result: `截图大小约${Math.round(base64Len / 1024)}KB`, screenshot: dataUrl } })
-              } catch (e) {
-                toolResult = JSON.stringify({ ok: false, error: '截图失败: ' + e.message })
-                executedTools.push({ name: funcName, result: { ok: false, error: e.message } })
-              }
-            }
-          } else if (funcName === 'extract_content' || funcName === 'click_element' || funcName === 'fill_input' || funcName === 'scroll_page' || funcName === 'get_element_info' || funcName === 'wait_for_element' || funcName === 'press_key') {
-            const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
-            if (!tab?.id) {
-              toolResult = JSON.stringify({ ok: false, error: '无法获取当前标签页' })
-            } else {
-              try { port.postMessage({ type: 'agentStep', step: iteration, toolName: funcName, toolArgs: funcArgs, status: 'running' }) } catch {}
-              const domResult = await this.executeDOMTool(tab.id, funcName, funcArgs)
-              toolResult = JSON.stringify(domResult)
-              executedTools.push({ name: funcName, result: domResult })
-
-              // 检测页面无变化（被弹窗阻塞等场景）
-              if (funcName === 'extract_content' || funcName === 'get_element_info' || funcName === 'read_page_content') {
-                const contentHash = toolResult.slice(0, 500)
-                if (lastPageContent && contentHash === lastPageContent) {
-                  stuckCount++
-                  console.warn('[Agent] 页面无变化 #' + stuckCount + '（可能被弹窗阻塞）')
-                } else {
-                  stuckCount = 0
-                  lastPageContent = contentHash
-                }
-                if (stuckCount >= 3) {
-                  console.warn('[Agent] 页面连续3次无变化，强制结束（可能被登录弹窗阻塞）')
-                  const stopMsg = '操作无法继续：连续多次提取页面内容无变化，页面可能被登录弹窗或验证机制阻塞。请先手动处理弹窗后再试。'
-                  for (const char of stopMsg) {
-                    try { port.postMessage({ type: 'streamChunk', content: char }) } catch {}
-                    await new Promise(r => setTimeout(r, 10))
-                  }
-                  try { port.postMessage({ type: 'streamDone' }) } catch {}
-                  return
-                }
+            } else if (funcName.startsWith('inject_script_')) {
+              const scriptId = parseInt(funcName.replace('inject_script_', ''))
+              if (!scriptId || isNaN(scriptId)) {
+                toolResult = JSON.stringify({ ok: false, error: '无效的脚本ID' })
               } else {
-                // 非提取类 DOM 操作，重置 stuck 计数（说明 AI 在尝试改变页面）
-                stuckCount = 0
+                const tool = searchResults.find(t => t.id === scriptId) || { id: scriptId, name: '脚本#' + scriptId, toolType: 'js', toolConfig: {} }
+                const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
+                safePost({ type: 'agentStep', step: totalToolCalls, toolName: funcName, toolArgs: { scriptId, scriptName: tool.name }, status: 'running' })
+                const execResult = await this.toolService.executeTool(tool, tab?.id)
+                toolResult = JSON.stringify(execResult)
+                executedTools.push({ name: tool.name || funcName, result: execResult })
               }
+            } else if (funcName === 'inject_js') {
+              const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
+              if (!tab?.id) {
+                toolResult = JSON.stringify({ ok: false, error: '无法获取当前标签页' })
+              } else {
+                safePost({ type: 'agentStep', step: totalToolCalls, toolName: funcName, toolArgs: { description: funcArgs.description || '自定义JS注入' }, status: 'running' })
+                const jsCode = funcArgs.code || ''
+                if (!jsCode.trim()) {
+                  toolResult = JSON.stringify({ ok: false, error: '代码不能为空' })
+                } else {
+                  try {
+                    const results = await chrome.scripting.executeScript({
+                      target: { tabId: tab.id },
+                      func: (scriptCode) => {
+                        try {
+                          const fn = new Function('config', scriptCode)
+                          const result = fn({})
+                          return { ok: true, result: result !== undefined ? String(result).slice(0, 2000) : '代码已注入执行（无返回值）' }
+                        } catch (e) {
+                          return { ok: false, error: e.message }
+                        }
+                      },
+                      args: [jsCode],
+                      world: 'MAIN',
+                    })
+                    const result = results[0]?.result
+                    if (!result.ok) {
+                      toolResult = JSON.stringify({ ok: false, error: result.error })
+                    } else {
+                      toolResult = JSON.stringify({ ok: true, result: result.result })
+                      executedTools.push({ name: funcArgs.description || 'inject_js', result: { ok: true, result: result.result } })
+                    }
+                  } catch (e) {
+                    toolResult = JSON.stringify({ ok: false, error: '注入失败: ' + e.message })
+                  }
+                }
+              }
+            } else if (funcName === 'navigate_to_url') {
+              const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
+              if (!tab?.id) {
+                toolResult = JSON.stringify({ ok: false, error: '无法获取当前标签页' })
+              } else {
+                safePost({ type: 'agentStep', step: totalToolCalls, toolName: funcName, toolArgs: funcArgs, status: 'running' })
+                await chrome.tabs.update(tab.id, { url: funcArgs.url })
+                toolResult = JSON.stringify({ ok: true, result: `已导航到: ${funcArgs.url}` })
+                executedTools.push({ name: funcName, result: { ok: true, result: funcArgs.url } })
+              }
+            } else if (funcName === 'go_back') {
+              const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
+              if (!tab?.id) {
+                toolResult = JSON.stringify({ ok: false, error: '无法获取当前标签页' })
+              } else {
+                safePost({ type: 'agentStep', step: totalToolCalls, toolName: funcName, status: 'running' })
+                try {
+                  await chrome.tabs.goBack(tab.id)
+                  toolResult = JSON.stringify({ ok: true, result: '已返回上一页' })
+                } catch (e) {
+                  toolResult = JSON.stringify({ ok: false, error: '无更多历史记录: ' + e.message })
+                }
+                executedTools.push({ name: funcName, result: toolResult })
+              }
+            } else if (funcName === 'take_screenshot') {
+              const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
+              if (!tab?.id) {
+                toolResult = JSON.stringify({ ok: false, error: '无法获取当前标签页' })
+              } else {
+                safePost({ type: 'agentStep', step: totalToolCalls, toolName: funcName, status: 'running' })
+                try {
+                  const quality = funcArgs.quality || 80
+                  const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'jpeg', quality })
+                  const base64Len = dataUrl?.length || 0
+                  toolResult = JSON.stringify({ ok: true, result: `截图成功，图片大小约${Math.round(base64Len / 1024)}KB` })
+                  executedTools.push({ name: funcName, result: { ok: true, result: `截图大小约${Math.round(base64Len / 1024)}KB`, screenshot: dataUrl } })
+                } catch (e) {
+                  toolResult = JSON.stringify({ ok: false, error: '截图失败: ' + e.message })
+                  executedTools.push({ name: funcName, result: { ok: false, error: e.message } })
+                }
+              }
+            } else if (funcName === 'extract_content' || funcName === 'click_element' || funcName === 'fill_input' || funcName === 'scroll_page' || funcName === 'get_element_info' || funcName === 'wait_for_element' || funcName === 'press_key') {
+              const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
+              if (!tab?.id) {
+                toolResult = JSON.stringify({ ok: false, error: '无法获取当前标签页' })
+              } else {
+                safePost({ type: 'agentStep', step: totalToolCalls, toolName: funcName, toolArgs: funcArgs, status: 'running' })
+                const domResult = await this.executeDOMTool(tab.id, funcName, funcArgs)
+                toolResult = JSON.stringify(domResult)
+                executedTools.push({ name: funcName, result: domResult })
+              }
+            } else {
+              toolResult = JSON.stringify({ ok: false, error: `未知工具: ${funcName}` })
             }
-          } else {
-            toolResult = JSON.stringify({ ok: false, error: `未知工具: ${funcName}` })
-          }
 
-          try {
-            port.postMessage({
+            // ===== 统一无进展检测 =====
+            // 判断工具执行是否有进展：基于结构化字段，不依赖字符串匹配
+            let hasProgress = false
+            try {
+              const parsed = JSON.parse(toolResult)
+              // 明确失败 → 无进展
+              if (parsed?.ok === false) {
+                hasProgress = false
+              }
+              // 导航类工具不重置计数（导航成功不等于任务有进展，只是改变了位置）
+              else if (funcName === 'navigate_to_url' || funcName === 'go_back') {
+                hasProgress = false
+              }
+              // search_tools 搜到结果 = 有进展，搜不到 = 无进展
+              else if (funcName === 'search_tools') {
+                hasProgress = searchResults.length > 0
+              }
+              // ok=true 或 无ok字段但有有效内容 → 有进展
+              else if (parsed?.ok === true || parsed?.ok === undefined) {
+                const hasContent = parsed?.result !== undefined && String(parsed.result).length > 0
+                  || parsed?.content !== undefined && String(parsed.content).length > 0
+                  || parsed?.title !== undefined
+                hasProgress = hasContent && !parsed?.error
+              }
+            } catch {
+              // JSON 解析失败 → 无进展
+            }
+
+            if (hasProgress) {
+              if (consecutiveFailCount > 0) {
+                console.log('[Agent] 恢复进展，重置无进展计数 (was:', consecutiveFailCount, ')')
+              }
+              consecutiveFailCount = 0
+            } else {
+              consecutiveFailCount++
+              console.warn('[Agent] 无进展 #' + consecutiveFailCount, funcName, toolResult?.slice(0, 100))
+            }
+
+            if (consecutiveFailCount >= MAX_CONSECUTIVE_FAILS) {
+              console.warn('[Agent] 连续', consecutiveFailCount, '次无进展，强制结束')
+              const stopMsg = `任务无法继续：已连续${consecutiveFailCount}次操作无进展（工具失败或结果未变化），可能页面被阻塞或任务超出能力范围。请调整后重试。`
+              for (const char of stopMsg) {
+                safePost({ type: 'streamChunk', content: char })
+                if (!portAlive) return
+                await new Promise(r => setTimeout(r, 10))
+              }
+              safePost({ type: 'streamDone' })
+              return
+            }
+
+            safePost({
               type: 'agentStepResult',
-              step: iteration,
+              step: totalToolCalls,
               toolName: funcName,
               result: toolResult,
               done: false,
             })
-          } catch {}
 
-          const MAX_TOOL_RESULT_LEN = 2000
-          let truncatedResult = toolResult
-          if (toolResult && toolResult.length > MAX_TOOL_RESULT_LEN) {
-            truncatedResult = toolResult.slice(0, MAX_TOOL_RESULT_LEN) + `\n...(结果过长已截断，共${toolResult.length}字符)`
+            // 截断过长的工具结果
+            const MAX_TOOL_RESULT_LEN = 2000
+            let truncatedResult = toolResult
+            if (toolResult && toolResult.length > MAX_TOOL_RESULT_LEN) {
+              truncatedResult = toolResult.slice(0, MAX_TOOL_RESULT_LEN) + `\n...(结果过长已截断，共${toolResult.length}字符)`
+            }
+            messages.push({
+              role: 'tool',
+              tool_call_id: toolCall.id,
+              content: truncatedResult,
+            })
+
+            await new Promise(r => setTimeout(r, 200))
           }
-          messages.push({
-            role: 'tool',
-            tool_call_id: toolCall.id,
-            content: truncatedResult,
-          })
 
-          await new Promise(r => setTimeout(r, 200))
+          // 防止 messages 上下文无限膨胀：按完整分组裁剪，避免切断 assistant+tool 配对
+          const MAX_MESSAGES = 30
+          if (messages.length > MAX_MESSAGES) {
+            messages.splice(1, messages.length - MAX_MESSAGES)
+            // 修复：截断可能切在 assistant(tool_calls) 和它的 tool results 中间
+            // 清理孤立的 tool 消息（没有对应 assistant 的）
+            while (messages.length > 1 && messages[1].role === 'tool') {
+              messages.splice(1, 1)
+            }
+            // 清理不完整的 assistant+tool 分组（assistant 声明了 tool_calls 但 tool results 不足）
+            if (messages.length > 1 && messages[1]?.role === 'assistant' && messages[1]?.tool_calls?.length > 0) {
+              const expected = messages[1].tool_calls.length
+              let actual = 0
+              for (let i = 2; i < messages.length && messages[i].role === 'tool'; i++) {
+                actual++
+              }
+              if (actual < expected) {
+                messages.splice(1, 1)  // 删除不完整的 assistant
+                while (messages.length > 1 && messages[1].role === 'tool') {
+                  messages.splice(1, 1)  // 清理残留的 tool 消息
+                }
+              }
+            }
+          }
         } else {
           console.log('[Agent] 纯文本回复（无tool_calls）:', (msg.content || '').slice(0, 80))
           const content = msg.content || ''
           if (content) {
             for (const char of content) {
-              try { port.postMessage({ type: 'streamChunk', content: char }) } catch {}
+              try { safePost({ type: 'streamChunk', content: char }) } catch {}
               await new Promise(r => setTimeout(r, 15))
             }
-            try { port.postMessage({ type: 'streamDone' }) } catch {}
-            return
+          } else {
+            // AI 返回空内容且不调用工具，视为异常，直接结束
+            console.warn('[Agent] AI返回空内容且无工具调用，强制结束')
+            safePost({ type: 'streamChunk', content: 'AI未返回有效响应，请重试。' })
           }
+          safePost({ type: 'streamDone' })
+          return
         }
       } catch (e) {
         console.error('[AgentService] iteration error:', e)
-        try { port.postMessage({ type: 'agentError', error: e.message }) } catch {}
+        safePost({ type: 'agentError', error: e.message })
         return
       }
     }
 
-    try { port.postMessage({ type: 'agentError', error: 'Agent达到最大迭代次数，请简化任务重试' }) } catch {}
+    safePost({ type: 'agentError', error: 'Agent达到最大请求次数，请简化任务重试' })
   }
 }
