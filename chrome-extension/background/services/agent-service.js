@@ -492,7 +492,11 @@ P1 输出规范：
 
       aiRequestCount++
 
+      // 告知UI正在思考
+      this.postToUI(tabId, { type: 'agentStatus', text: `思考中... (第${aiRequestCount}轮)` })
+
       const tools = this.buildToolDefinitions(userMessage, searchResults)
+      console.log(`[Agent] 第${aiRequestCount}轮API请求, tools:${tools.length}个, 已搜到${searchResults.length}个脚本`)
 
       const config = await this.configService.getAIConfig()
       const auth = await this.configService.getAppAuth()
@@ -592,6 +596,7 @@ P1 输出规范：
         const data = await res.json()
         const choice = data.choices?.[0]
         const msg = choice?.message
+        console.log(`[Agent] 第${aiRequestCount}轮响应:`, msg?.tool_calls?.length ? `tool_calls:${msg.tool_calls.length}` : (msg?.content ? `text:${msg.content.slice(0,60)}` : 'empty'))
 
         if (!msg) {
           this.postToUI(tabId, { type: 'agentError', error: 'AI返回为空' })
