@@ -115,6 +115,8 @@ document.getElementById('agentNavBtn').addEventListener('click', toggleAgentMode
 // 返回按钮
 document.getElementById('backToChatBtn').addEventListener('click', () => showView('chatView'))
 document.getElementById('backFromScriptsBtn').addEventListener('click', () => showView('chatView'))
+document.getElementById('backFromDrawBtn').addEventListener('click', () => showView('chatView'))
+document.getElementById('backFromVideoBtn').addEventListener('click', () => showView('chatView'))
 
 // 新建对话（输入区按钮）
 document.getElementById('newChatBtn').addEventListener('click', startNewChat)

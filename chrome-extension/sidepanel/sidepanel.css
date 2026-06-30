@@ -319,3 +319,9 @@ body{font-family:var(--font-sans);background:var(--bg-white);color:var(--text-pr
 ::-webkit-scrollbar-track{background:transparent}
 ::-webkit-scrollbar-thumb{background:var(--text-quaternary);border-radius:2px}
 ::-webkit-scrollbar-thumb:hover{background:var(--text-tertiary)}
+
+/* ============ 占位视图（预留功能） ============ */
+.placeholder-view{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;color:var(--text-quaternary);gap:12px;padding:32px}
+.placeholder-view .placeholder-icon{opacity:0.4}
+.placeholder-view .placeholder-text{font-size:var(--fs-lg);font-weight:600;color:var(--text-secondary)}
+.placeholder-view .placeholder-desc{font-size:var(--fs-body);color:var(--text-quaternary)}
