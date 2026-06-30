@@ -26,13 +26,17 @@ class EmbeddingService {
   async _doInit() {
     try {
       console.log('[Embedding] 加载本地模型: all-MiniLM-L6-v2 (纯 Node.js)')
-      const { pipeline } = await import('@xenova/transformers')
+      const { pipeline, env } = await import('@xenova/transformers')
+      
+      // 设置本地模型目录，指向 models/ 父目录
+      env.localModelPath = path.join(__dirname, '..', 'models')
+      env.allowRemoteModels = false
       
       // 通过 local_files_only 强制从本地加载
       this.pipeline = await pipeline(
         'feature-extraction',
-        MODEL_PATH,
-        { local_files_only: false }  // 允许补充下载缺失文件（如tokenizer配置）
+        'all-MiniLM-L6-v2',
+        { local_files_only: true }
       )
       
       console.log(`[Embedding] 模型就绪, 维度: ${this.embeddingDim}`)
