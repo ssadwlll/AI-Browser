@@ -1,8 +1,9 @@
 // ============ AgentService ============
 export class AgentService {
-  constructor(configService, toolService) {
+  constructor(configService, toolService, pageService) {
     this.configService = configService
     this.toolService = toolService
+    this.pageService = pageService
     this.MAX_AI_REQUESTS = 15    // AI API 请求次数上限（每次请求可执行多个工具）
     this.MAX_TOOL_CALLS = 30     // 工具调用总次数上限（防止本地工具无限调用）
     this.TIMEOUT_MS = 120000
