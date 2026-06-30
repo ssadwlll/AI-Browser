@@ -1784,7 +1784,7 @@ export class AgentService {
 
                 this.postToUI(tabId, { type: 'agentStep', step: totalToolCalls, toolName: funcName, toolArgs: { scriptId, scriptName: tool.name }, status: 'running' })
                 const execStart = Date.now()
-                const execResult = await this.toolService.executeTool(tool, targetTab.id)
+                const execResult = await this.toolService.executeTool(tool, targetTab.id, funcArgs)
                 const execDuration = Date.now() - execStart
                 toolResult = JSON.stringify(execResult)
                 executedTools.push({ name: tool.name || funcName, result: execResult })

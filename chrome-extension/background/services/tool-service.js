@@ -54,7 +54,7 @@ export class ToolService {
     return null
   }
 
-  async executeTool(tool, tabId) {
+  async executeTool(tool, tabId, funcArgs) {
     console.log('[ToolService] executeTool:', tool.id, tool.name, 'type:', tool.toolType)
     const injectData = await this.fetchInjectData(tool.id)
     if (!injectData?.code) {
@@ -68,10 +68,10 @@ export class ToolService {
 
     if (toolType === 'api' && toolConfig.apiEndpoint) {
       console.log('[ToolService] API调用:', toolConfig.apiEndpoint, toolConfig.apiMethod || 'GET')
-      return await this.executeAPITool(toolConfig, tool.name)
+      return await this.executeAPITool(toolConfig, tool.name, funcArgs)
     }
 
-    return await this.executeJSTool(injectData.code, toolConfig, tabId, tool.name)
+    return await this.executeJSTool(injectData.code, toolConfig, tabId, tool.name, funcArgs)
   }
 
   async executeJSTool(code, toolConfig, tabId, toolName) {
@@ -105,8 +105,8 @@ export class ToolService {
     }
   }
 
-  async executeAPITool(toolConfig, toolName) {
-    let { apiEndpoint, apiMethod = 'GET', apiHeaders = {}, apiBody } = toolConfig
+  async executeAPITool(toolConfig, toolName, funcArgs) {
+    let { apiEndpoint, apiMethod = 'GET', apiHeaders = {}, apiBody, requireAuth } = toolConfig
     try {
       if (apiEndpoint && (apiEndpoint.startsWith('/') || !apiEndpoint.startsWith('http'))) {
         const config = await this.configService.getSyncConfig()
@@ -115,13 +115,29 @@ export class ToolService {
           // 规范化拼接：base + apiEndpoint（确保恰好一个 / 分隔）
           apiEndpoint = base + '/' + apiEndpoint.replace(/^\/+/, '')
         }
+        // 相对路径自动签名认证
+        if (requireAuth !== false) {
+          const auth = await this.configService.getAppAuth()
+          if (auth.appKey && auth.appSecret) {
+            const authHeaders = await this.configService.generateAuthHeaders(auth.appKey, auth.appSecret)
+            apiHeaders = { ...apiHeaders, ...authHeaders }
+          }
+        }
+      }
+      // 动态参数合并：funcArgs 合并到 apiBody
+      let finalBody = apiBody || {}
+      if (typeof finalBody === 'string') {
+        try { finalBody = JSON.parse(finalBody) } catch { finalBody = {} }
+      }
+      if (funcArgs && typeof funcArgs === 'object') {
+        finalBody = { ...finalBody, ...funcArgs }
       }
       const fetchOptions = {
         method: apiMethod,
         headers: { 'Content-Type': 'application/json', ...apiHeaders },
       }
-      if (apiMethod !== 'GET' && apiBody) {
-        fetchOptions.body = typeof apiBody === 'string' ? apiBody : JSON.stringify(apiBody)
+      if (apiMethod !== 'GET' && Object.keys(finalBody).length > 0) {
+        fetchOptions.body = JSON.stringify(finalBody)
       }
       const res = await fetch(apiEndpoint, fetchOptions)
       console.log('[ToolService] API响应状态:', res.status, res.statusText)
