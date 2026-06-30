@@ -101,8 +101,10 @@ exports.search = async (req, res) => {
       const placeholders = ids.map(() => '?').join(',')
       const [dbRows] = await pool.query(
         `SELECT s.id, s.name, s.description, s.tool_type, s.tool_config,
-                s.url_pattern, s.category_id,
-                c.name as category_name
+                s.url_pattern, s.category_id, s.metadata, s.precheck,
+                c.name as category_name,
+                (SELECT COUNT(*) FROM script_memories m WHERE m.script_id = s.id AND m.success = 1) as memory_success,
+                (SELECT COUNT(*) FROM script_memories m WHERE m.script_id = s.id) as memory_total
          FROM scripts s
          LEFT JOIN categories c ON s.category_id = c.id
          WHERE s.id IN (${placeholders})`,
@@ -127,6 +129,10 @@ exports.search = async (req, res) => {
       toolConfig: safeParse(r.tool_config),
       urlPattern: r.url_pattern,
       category: r.category_name || '',
+      metadata: safeParse(r.metadata),
+      precheck: r.precheck || '',
+      memorySuccess: r.memory_success,
+      memoryTotal: r.memory_total,
     }))
 
     res.json(success(tools))
@@ -156,8 +162,10 @@ async function likeSearch(raw, limit) {
 
   let [rows] = await pool.query(
     `SELECT s.id, s.name, s.description, s.tool_type, s.tool_config,
-            s.url_pattern, s.category_id,
-            c.name as category_name
+            s.url_pattern, s.category_id, s.metadata, s.precheck,
+            c.name as category_name,
+            (SELECT COUNT(*) FROM script_memories m WHERE m.script_id = s.id AND m.success = 1) as memory_success,
+            (SELECT COUNT(*) FROM script_memories m WHERE m.script_id = s.id) as memory_total
      FROM scripts s
      LEFT JOIN categories c ON s.category_id = c.id
      WHERE s.status = 'published'
@@ -177,8 +185,10 @@ async function likeSearch(raw, limit) {
       for (const ch of chars) charParams.push(`%${ch}%`, `%${ch}%`, `%${ch}%`)
       const [fallbackRows] = await pool.query(
         `SELECT s.id, s.name, s.description, s.tool_type, s.tool_config,
-                s.url_pattern, s.category_id,
-                c.name as category_name
+                s.url_pattern, s.category_id, s.metadata, s.precheck,
+                c.name as category_name,
+                (SELECT COUNT(*) FROM script_memories m WHERE m.script_id = s.id AND m.success = 1) as memory_success,
+                (SELECT COUNT(*) FROM script_memories m WHERE m.script_id = s.id) as memory_total
          FROM scripts s
          LEFT JOIN categories c ON s.category_id = c.id
          WHERE s.status = 'published'
@@ -239,9 +249,11 @@ exports.detail = async (req, res) => {
     try {
       script.params_schema = safeParse(script.params_schema) || []
       script.params_data = safeParse(script.params_data) || {}
+      script.metadata = safeParse(script.metadata) || {}
     } catch (e) {
       script.params_schema = []
       script.params_data = {}
+      script.metadata = {}
     }
     res.json(success(script))
   } catch (err) {
@@ -256,7 +268,7 @@ exports.create = async (req, res) => {
       return res.status(400).json(error('请上传脚本文件', 400))
     }
 
-    const { name, description, category_id, version, url_pattern, icon, params_schema, params_data, modules, tool_type, tool_config } = req.body
+    const { name, description, category_id, version, url_pattern, icon, params_schema, params_data, modules, tool_type, tool_config, metadata, precheck } = req.body
     if (!name || !category_id) {
       // 删除已上传的文件
       fs.unlinkSync(req.file.path)
@@ -268,9 +280,15 @@ exports.create = async (req, res) => {
     const meta = parseScriptMeta(fileContent)
     const scriptName = name || meta.name || req.file.originalname.replace('.js', '')
 
+    // 解析 metadata JSON
+    let parsedMeta = null
+    if (metadata) {
+      try { parsedMeta = typeof metadata === 'string' ? JSON.parse(metadata) : metadata } catch {}
+    }
+
     const [result] = await pool.query(
-      `INSERT INTO scripts (name, description, category_id, version, author_id, file_path, file_size, icon, url_pattern, params_schema, params_data, tool_type, tool_config, status)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'published')`,
+      `INSERT INTO scripts (name, description, category_id, version, author_id, file_path, file_size, icon, url_pattern, params_schema, params_data, tool_type, tool_config, metadata, precheck, status)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'published')`,
       [
         scriptName,
         description || meta.description || '',
@@ -285,6 +303,8 @@ exports.create = async (req, res) => {
         params_data ? JSON.stringify(typeof params_data === 'string' ? JSON.parse(params_data) : params_data) : null,
         tool_type || 'js',
         tool_config ? JSON.stringify(typeof tool_config === 'string' ? JSON.parse(tool_config) : tool_config) : null,
+        parsedMeta ? JSON.stringify(parsedMeta) : null,
+        precheck || null,
       ],
     )
 
@@ -326,7 +346,7 @@ exports.create = async (req, res) => {
 // 更新脚本
 exports.update = async (req, res) => {
   try {
-    const { name, description, category_id, version, url_pattern, icon, status, code, params_schema, params_data, modules, tool_type, tool_config } = req.body
+    const { name, description, category_id, version, url_pattern, icon, status, code, params_schema, params_data, modules, tool_type, tool_config, metadata, precheck } = req.body
     const fields = []
     const params = []
 
@@ -339,6 +359,8 @@ exports.update = async (req, res) => {
     if (status) { fields.push('status = ?'); params.push(status) }
     if (tool_type) { fields.push('tool_type = ?'); params.push(tool_type) }
     if (tool_config !== undefined) { fields.push('tool_config = ?'); params.push(JSON.stringify(typeof tool_config === 'string' ? JSON.parse(tool_config) : tool_config)) }
+    if (metadata !== undefined) { fields.push('metadata = ?'); params.push(typeof metadata === 'string' ? metadata : JSON.stringify(metadata)) }
+    if (precheck !== undefined) { fields.push('precheck = ?'); params.push(precheck || null) }
     if (params_schema !== undefined) { fields.push('params_schema = ?'); params.push(JSON.stringify(typeof params_schema === 'string' ? JSON.parse(params_schema) : params_schema)) }
     if (params_data !== undefined) { fields.push('params_data = ?'); params.push(JSON.stringify(typeof params_data === 'string' ? JSON.parse(params_data) : params_data)) }
 

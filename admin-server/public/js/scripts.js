@@ -214,6 +214,19 @@ function toggleCodeEdit() {
     document.getElementById('codeEditToolConfigGroup').style.display = (currentCodeScript.tool_type === 'api') ? '' : 'none';
   }
 
+  // P0: 填充结构化元数据
+  const meta = currentCodeScript.metadata || {};
+  document.getElementById('codeEditTriggers').value = (meta.triggers || []).join(', ');
+  document.getElementById('codeEditPlatforms').value = (meta.platforms || []).join(', ');
+  document.getElementById('codeEditRequiresLogin').value = meta.requires_login ? 'true' : 'false';
+  document.getElementById('codeEditSuccessCriteria').value = meta.success_criteria || '';
+  document.getElementById('codeEditKnownLimits').value = meta.known_limits || '';
+  const pag = meta.pagination || {};
+  document.getElementById('codeEditPaginationStrategy').value = pag.strategy || 'scroll';
+  document.getElementById('codeEditMaxPages').value = pag.maxPages || 20;
+  // P1: 执行前检查
+  document.getElementById('codeEditPrecheck').value = currentCodeScript.precheck || '';
+
   // 切换显示
   document.getElementById('codeViewWrap').classList.add('hidden');
   document.getElementById('codeEditWrap').classList.remove('hidden');
@@ -255,6 +268,20 @@ async function saveScriptCode() {
   errEl.style.display = 'none';
 
   try {
+    // P0: 收集结构化元数据
+    const metadata = {
+      triggers: document.getElementById('codeEditTriggers').value.split(/[,，]/).map(s => s.trim()).filter(Boolean),
+      platforms: document.getElementById('codeEditPlatforms').value.split(/[,，]/).map(s => s.trim()).filter(Boolean),
+      requires_login: document.getElementById('codeEditRequiresLogin').value === 'true',
+      success_criteria: document.getElementById('codeEditSuccessCriteria').value.trim(),
+      known_limits: document.getElementById('codeEditKnownLimits').value.trim(),
+      pagination: {
+        strategy: document.getElementById('codeEditPaginationStrategy').value,
+        maxPages: parseInt(document.getElementById('codeEditMaxPages').value) || 20,
+      },
+    };
+    const precheck = document.getElementById('codeEditPrecheck').value.trim();
+
     const body = {
       code,
       name,
@@ -265,7 +292,9 @@ async function saveScriptCode() {
       params_data: JSON.stringify(currentParamsData),
       tool_type,
       tool_config: tool_config ? JSON.stringify(tool_config) : null,
-      modules: currentModules.map(m => ({ name: m.name, code: m.code, load_order: m.load_order }))
+      modules: currentModules.map(m => ({ name: m.name, code: m.code, load_order: m.load_order })),
+      metadata: JSON.stringify(metadata),
+      precheck: precheck || null,
     };
     const res = await api('PUT', '/api/scripts/' + currentCodeScript.id, body);
     if (res.success) {

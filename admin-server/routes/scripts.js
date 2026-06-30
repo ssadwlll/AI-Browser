@@ -1,5 +1,6 @@
 const router = require('express').Router()
 const ctrl = require('../controllers/scriptController')
+const memCtrl = require('../controllers/memoryController')
 const auth = require('../middleware/auth')
 const optionalAuth = require('../middleware/optionalAuth')
 const upload = require('../middleware/upload')
@@ -16,5 +17,8 @@ router.put('/:id', auth, ctrl.update)
 router.delete('/:id', auth, ctrl.remove)
 router.get('/:id/download', auth, ctrl.download)
 router.post('/:id/stats', auth, ctrl.reportStats)
+// P3: 经验记忆
+router.post('/:id/memories', optionalAuth, memCtrl.record)
+router.get('/:id/memories', auth, memCtrl.list)
 
 module.exports = router

@@ -37,6 +37,11 @@
   },
   "content_scripts": [
     {
+      "js": ["content/network-capture.js"],
+      "matches": ["<all_urls>"],
+      "run_at": "document_start"
+    },
+    {
       "js": ["content/index.js"],
       "css": ["content/content.css"],
       "matches": ["<all_urls>"],

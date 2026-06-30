@@ -39,6 +39,24 @@ export class AgentService {
       },
     })
 
+    // P2: Network Capture
+    tools.push({
+      type: 'function',
+      function: {
+        name: 'capture_network',
+        description: '获取页面XHR/Fetch请求响应列表，用于发现API数据源',
+        parameters: {
+          type: 'object',
+          properties: {
+            url: { type: 'string', description: '按URL过滤（可选）' },
+            status: { type: 'string', enum: ['ok', 'error'], description: '按状态过滤' },
+            limit: { type: 'number', description: '返回条数，默认10' },
+          },
+          required: [],
+        },
+      },
+    })
+
     tools.push({
       type: 'function',
       function: {
@@ -105,14 +123,32 @@ export class AgentService {
       },
     })
 
-    // 搜索结果中的工具脚本（最多4个，累积不覆盖）
-    for (const s of (searchResults || []).slice(0, 4)) {
+    // 搜索结果中的工具脚本（最多6个，累积不覆盖）
+    for (const s of (searchResults || []).slice(0, 6)) {
       const tc = s.toolConfig || {}
+      const meta = s.metadata || {}
+      // 拼接增强描述：基础描述 + 触发词 + 分页约束 + 平台限制
+      let desc = (tc.toolDescription || s.description || `执行: ${s.name}`).slice(0, 80)
+      // P0: 注入 metadata 信息
+      if (meta.triggers && meta.triggers.length > 0) desc += ` [触发:${meta.triggers.slice(0,3).join(',')}]`
+      if (meta.requires_login) desc += ' [需登录]'
+      // P4: 分页约束
+      if (meta.pagination && meta.pagination.strategy !== 'none') {
+        desc += ` [分页:${meta.pagination.strategy},≤${meta.pagination.maxPages||20}次]`
+      }
+      // P1: precheck 标记
+      const hasPrecheck = !!(s.precheck && s.precheck.trim())
+      if (hasPrecheck) desc += ' [有前置检查]'
+      // P3: 经验记忆提示
+      if (s.memorySuccess !== undefined) {
+        desc += ` [记忆:${s.memorySuccess}/${s.memoryTotal}次成功]`
+      }
+
       tools.push({
         type: 'function',
         function: {
           name: `inject_script_${s.id}`,
-          description: (tc.toolDescription || s.description || `执行: ${s.name}`).slice(0, 80),
+          description: desc,
           parameters: tc.parameters || { type: 'object', properties: {}, required: [] },
         },
       })
@@ -254,7 +290,31 @@ export class AgentService {
     }
   }
 
-  // ===== Plan B: 入口方法，管理 Port 绑定 =====
+  // P3: 记录脚本执行经验记忆（异步，不阻塞主流程）
+  async _recordMemory(scriptId, success, durationMs, errorMessage, resultSummary) {
+    const config = await this.configService.getSyncConfig()
+    if (!config?.serverUrl) return
+    try {
+      const auth = await this.configService.getAppAuth()
+      const authHeaders = await this.configService.generateAuthHeaders(auth.appKey, auth.appSecret)
+      await fetch(`${config.serverUrl}/api/scripts/${scriptId}/memories`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders },
+        body: JSON.stringify({
+          scriptId,
+          sessionId: null,
+          ok: success,
+          durationMs,
+          errorMessage: (errorMessage || '').slice(0, 500),
+          resultSummary: (resultSummary || '').slice(0, 200),
+        }),
+      })
+    } catch (e) {
+      // memory 记录失败不影响主流程
+    }
+  }
+
+  // Plan B: 入口方法，管理 Port 绑定 =====
   async startAgent(port, userMessage, chatHistory) {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
     const tabId = tab?.id
@@ -396,6 +456,17 @@ export class AgentService {
 限制：
 - 不能即时编写JS代码注入页面，只能通过search_tools搜索并执行工具库中已有的脚本
 - 如果用户需求需要自定义代码，用finish_task告知用户"该功能需要开发对应脚本后上传到工具库"
+
+P4 分页规范：
+- 注入脚本会自动执行，你只需调用一次inject_script即可
+- 如果工具描述含 [分页:scroll,≤N次]，工具会自动滚动翻页，无需重复调用
+- 如果工具描述含 [分页:url-page,≤N次]，工具会自动URL分页
+- 不要自己循环调用inject_script来翻页，工具内有内置分页逻辑
+
+P1 输出规范：
+- 用自然语言整理工具返回的结果，禁止输出原始JSON
+- 如果结果数据较多，列出要点即可
+- 如果工具返回错误，分析原因并用finish_task告知用户
 
 工作流程：
 1. 先用search_tools搜相关工具，搜不到则用DOM工具直接操作
@@ -553,6 +624,24 @@ export class AgentService {
 
             let toolResult
             if (funcName === 'finish_task') {
+              // ... (existing finish_task handler)
+            } else if (funcName === 'capture_network') {
+              const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
+              const filter = { url: funcArgs.url, status: funcArgs.status, limit: funcArgs.limit || 10 }
+              try {
+                const [captureResult] = await chrome.scripting.executeScript({
+                  target: { tabId: tab?.id },
+                  func: (filter) => {
+                    if (!window.__aiBrowserGetCaptured) return { ok: false, error: '网络捕获未就绪，请刷新页面' }
+                    return { ok: true, result: window.__aiBrowserGetCaptured(filter) }
+                  },
+                  args: [filter],
+                })
+                toolResult = JSON.stringify(captureResult?.result || { ok: false, error: '无数据' })
+              } catch (e) {
+                toolResult = JSON.stringify({ ok: false, error: e.message })
+              }
+            } else if (funcName === 'search_tools') {
               console.log('[Agent] finish_task, summary:', funcArgs.summary)
               const summary = funcArgs.summary || '任务已完成'
               this.postToUI(tabId, { type: 'agentStepResult', step: totalToolCalls, result: summary, done: true })
@@ -629,12 +718,50 @@ export class AgentService {
               if (!scriptId || isNaN(scriptId)) {
                 toolResult = JSON.stringify({ ok: false, error: '无效的脚本ID' })
               } else {
-                const tool = searchResults.find(t => t.id === scriptId) || { id: scriptId, name: '脚本#' + scriptId, toolType: 'js', toolConfig: {} }
+                const tool = searchResults.find(t => t.id === scriptId) || { id: scriptId, name: '脚本#' + scriptId, toolType: 'js', toolConfig: {}, metadata: {}, precheck: '' }
                 const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
+
+                // P1: 执行前检查
+                if (tool.precheck && tool.precheck.trim()) {
+                  this.postToUI(tabId, { type: 'agentStep', step: totalToolCalls, toolName: funcName, toolArgs: { check: 'precheck' }, status: 'running' })
+                  try {
+                    const [precheckResult] = await chrome.scripting.executeScript({
+                      target: { tabId: tab?.id },
+                      func: (code) => {
+                        try {
+                          const fn = new Function(code)
+                          const r = fn()
+                          return { ok: true, result: r }
+                        } catch (e) { return { ok: false, error: e.message } }
+                      },
+                      args: [tool.precheck],
+                    })
+                    const pr = precheckResult?.result
+                    if (pr && !pr.ok && pr.result?.ok === false) {
+                      toolResult = JSON.stringify({ ok: false, error: `前置检查失败: ${pr.result.reason || pr.result.error || '未知原因'}` })
+                      executedTools.push({ name: `${funcName}(precheck失败)`, result: toolResult })
+                      // 记录失败记忆
+                      this._recordMemory(scriptId, false, 0, toolResult, '').catch(() => {})
+                      this.postToUI(tabId, { type: 'agentStepResult', step: totalToolCalls, toolName: funcName, result: toolResult, done: false })
+                      messages.push({ role: 'tool', tool_call_id: toolCall.id, content: toolResult })
+                      continue
+                    }
+                  } catch (e) {
+                    // precheck 执行异常，继续执行脚本（precheck 不阻塞）
+                    console.warn('[Agent] precheck 执行异常，继续执行:', e.message)
+                  }
+                }
+
                 this.postToUI(tabId, { type: 'agentStep', step: totalToolCalls, toolName: funcName, toolArgs: { scriptId, scriptName: tool.name }, status: 'running' })
+                const execStart = Date.now()
                 const execResult = await this.toolService.executeTool(tool, tab?.id)
+                const execDuration = Date.now() - execStart
                 toolResult = JSON.stringify(execResult)
                 executedTools.push({ name: tool.name || funcName, result: execResult })
+                // P3: 记录经验记忆
+                const memOk = execResult?.ok === true
+                const memSummary = typeof execResult?.result === 'string' ? execResult.result.slice(0, 200) : JSON.stringify(execResult).slice(0, 200)
+                this._recordMemory(scriptId, memOk, execDuration, memOk ? '' : (execResult?.error || ''), memSummary).catch(() => {})
               }
             } else if (funcName === 'extract_content' || funcName === 'click_element' || funcName === 'fill_input' || funcName === 'wait_for_element') {
               const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })

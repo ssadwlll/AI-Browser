@@ -25,6 +25,10 @@ export class ToolService {
           toolType: t.toolType || 'js',
           toolConfig: t.toolConfig || {},
           urlPattern: t.urlPattern,
+          metadata: t.metadata || {},
+          precheck: t.precheck || '',
+          memorySuccess: t.memorySuccess,
+          memoryTotal: t.memoryTotal,
         }))
       }
     } catch (e) {

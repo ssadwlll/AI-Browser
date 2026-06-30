@@ -1,18 +1,20 @@
 // ============ EmbeddingService ============
-// 调用本地 Python embedding 服务 (Qwen3-Embedding-0.6B)
-// Python 服务需先启动：python services/embedding_server.py --port 9091
-// 维度 1024，lasttoken pooling，CPU 推理
+// 纯 Node.js 推理，使用 @xenova/transformers + all-MiniLM-L6-v2 (384维)
+// 模型文件位于 models/all-MiniLM-L6-v2/
 // 向量存储在 scripts.vector 字段中（JSON格式）
 
+const path = require('path')
 const pool = require('../config/db')
 
-const EMBEDDING_URL = process.env.EMBEDDING_URL || 'http://127.0.0.1:9091'
+// 模型本地路径
+const MODEL_PATH = path.join(__dirname, '..', 'models', 'all-MiniLM-L6-v2')
 
 class EmbeddingService {
   constructor() {
     this.ready = false
-    this.embeddingDim = 1024
+    this.embeddingDim = 384
     this.initPromise = null
+    this.pipeline = null
   }
 
   async init() {
@@ -23,23 +25,21 @@ class EmbeddingService {
 
   async _doInit() {
     try {
-      console.log('[Embedding] 等待 Python embedding 服务就绪...')
-      for (let i = 0; i < 60; i++) {
-        try {
-          const res = await fetch(`${EMBEDDING_URL}/health`)
-          if (res.ok) {
-            const data = await res.json()
-            console.log(`[Embedding] 服务已就绪: ${data.model}`)
-            // 扫描并补全缺失向量
-            await this.buildMissingVectors()
-            this.ready = true
-            return
-          }
-        } catch { /* 服务还没启动 */ }
-        await new Promise(r => setTimeout(r, 1000))
-      }
-      console.warn('[Embedding] 等待超时，将回退到 LIKE 搜索')
-      this.ready = false
+      console.log('[Embedding] 加载本地模型: all-MiniLM-L6-v2 (纯 Node.js)')
+      const { pipeline } = await import('@xenova/transformers')
+      
+      // 通过 local_files_only 强制从本地加载
+      this.pipeline = await pipeline(
+        'feature-extraction',
+        MODEL_PATH,
+        { local_files_only: false }  // 允许补充下载缺失文件（如tokenizer配置）
+      )
+      
+      console.log(`[Embedding] 模型就绪, 维度: ${this.embeddingDim}`)
+      
+      // 扫描并补全缺失向量
+      await this.buildMissingVectors()
+      this.ready = true
     } catch (e) {
       console.warn('[Embedding] 初始化失败，将回退到 LIKE 搜索:', e.message)
       this.ready = false
@@ -52,7 +52,7 @@ class EmbeddingService {
   async buildMissingVectors() {
     try {
       const [rows] = await pool.query(
-        `SELECT id, name, description FROM scripts
+        `SELECT id, name, description, metadata FROM scripts
          WHERE status = 'published' AND vector IS NULL
          ORDER BY id`
       )
@@ -61,10 +61,16 @@ class EmbeddingService {
         return
       }
       console.log(`[Embedding] 发现有 ${rows.length} 个脚本缺少向量，开始生成...`)
-      const texts = rows.map(r => `${r.name} ${r.description || ''}`.trim())
+      const texts = rows.map(r => {
+        let metaTriggers = ''
+        try {
+          const m = typeof r.metadata === 'string' ? JSON.parse(r.metadata) : (r.metadata || {})
+          if (m.triggers && Array.isArray(m.triggers)) metaTriggers = m.triggers.join(' ')
+        } catch {}
+        return `${r.name} ${r.description || ''} ${metaTriggers}`.trim()
+      })
       const vectors = await this._batchEmbed(texts)
 
-      // 逐条更新
       for (let i = 0; i < rows.length; i++) {
         await pool.query(
           'UPDATE scripts SET vector = ?, vector_updated_at = NOW() WHERE id = ?',
@@ -78,17 +84,24 @@ class EmbeddingService {
   }
 
   /**
-   * 为单个脚本生成向量（用于新增/更新后异步调用）
+   * 为单个脚本生成向量
    */
   async generateVector(scriptId) {
     if (!this.ready) return
     try {
       const [rows] = await pool.query(
-        'SELECT id, name, description FROM scripts WHERE id = ?',
+        'SELECT id, name, description, metadata FROM scripts WHERE id = ?',
         [scriptId]
       )
       if (rows.length === 0) return
-      const text = `${rows[0].name} ${rows[0].description || ''}`.trim()
+      const metaTriggers = (() => {
+        try {
+          const m = typeof rows[0].metadata === 'string' ? JSON.parse(rows[0].metadata) : (rows[0].metadata || {})
+          if (m.triggers && Array.isArray(m.triggers)) return m.triggers.join(' ')
+        } catch {}
+        return ''
+      })()
+      const text = `${rows[0].name} ${rows[0].description || ''} ${metaTriggers}`.trim()
       if (!text) return
 
       const vector = await this.embed(text)
@@ -102,19 +115,14 @@ class EmbeddingService {
   }
 
   async _batchEmbed(texts) {
-    try {
-      const res = await fetch(`${EMBEDDING_URL}/embed`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ texts }),
-      })
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      const data = await res.json()
-      if (data.error) throw new Error(data.error)
-      return data.embeddings
-    } catch (e) {
-      throw new Error(`Embedding API 调用失败: ${e.message}`)
-    }
+    // all-MiniLM-L6-v2 的 pipeline 返回 [batch, seq, dim] tensor
+    // 我们做 mean pooling 取平均
+    const outputs = await this.pipeline(texts, {
+      pooling: 'mean',
+      normalize: true,
+    })
+    // outputs 是 Tensor 数组，每个是 [seq_len, dim]
+    return Array.from(outputs).map(t => Array.from(t.data))
   }
 
   async embed(text) {
@@ -133,31 +141,36 @@ class EmbeddingService {
     return dot / (Math.sqrt(normA) * Math.sqrt(normB))
   }
 
-  /**
-   * 关键词匹配分（精确匹配 boost）
-   * 弥补向量搜索对精确名称/别名匹配的盲区
-   */
-  _keywordScore(query, name, description) {
+  _keywordScore(query, name, description, metadata) {
     const q = query.toLowerCase()
     const n = (name || '').toLowerCase()
     const d = (description || '').toLowerCase()
-
-    if (n === q) return 1.0          // 完全匹配名称
-    if (n.includes(q)) return 0.6    // 名称包含搜索词
-    if (d.includes(q)) return 0.3    // 描述包含搜索词
+    // 精确匹配 name
+    if (n === q) return 1.0
+    if (n.includes(q)) return 0.6
+    if (d.includes(q)) return 0.3
+    // P0: 加权 metadata.triggers 关键词
+    if (metadata && metadata.triggers && Array.isArray(metadata.triggers)) {
+      for (const t of metadata.triggers) {
+        if (typeof t === 'string' && t.toLowerCase().includes(q)) return 0.5
+      }
+      // 查询词包含 trigger
+      for (const t of metadata.triggers) {
+        if (typeof t === 'string' && q.includes(t.toLowerCase())) return 0.45
+      }
+    }
     return 0
   }
 
   /**
-   * 混合搜索：向量相似度 70% + 关键词匹配 30%
+   * 混合搜索：向量相似度 70% + 关键词匹配 30%（含 triggers 加权）
    */
   async search(query, topK = 5) {
     if (!this.ready) return null
 
     try {
-      // 从数据库加载所有已发布且有向量的脚本
       const [rows] = await pool.query(
-        `SELECT id, name, description, vector FROM scripts
+        `SELECT id, name, description, vector, metadata FROM scripts
          WHERE status = 'published' AND vector IS NOT NULL`
       )
       if (rows.length === 0) return null
@@ -165,25 +178,16 @@ class EmbeddingService {
       const queryVector = await this.embed(query)
       const scored = rows.map(row => {
         let vec
-        try {
-          vec = JSON.parse(row.vector)
-        } catch {
-          return { id: row.id, name: row.name, description: row.description, score: 0 }
-        }
+        try { vec = JSON.parse(row.vector) } catch { return { id: row.id, name: row.name, description: row.description, score: 0 } }
         const vectorScore = this.cosineSimilarity(queryVector, vec)
-        const kwScore = this._keywordScore(query, row.name, row.description)
-        // 混合：向量 0.7 + 关键词 0.3
+        let metaParsed = null
+        try { metaParsed = typeof row.metadata === 'string' ? JSON.parse(row.metadata) : row.metadata } catch {}
+        const kwScore = this._keywordScore(query, row.name, row.description, metaParsed)
         const finalScore = vectorScore * 0.7 + kwScore * 0.3
-        return {
-          id: row.id,
-          name: row.name,
-          description: row.description,
-          score: finalScore,
-        }
+        return { id: row.id, name: row.name, description: row.description, score: finalScore }
       })
 
       scored.sort((a, b) => b.score - a.score)
-      // 过滤阈值：最终分 ≥ 0.2（原来纯向量的 0.3 × 0.7 ≈ 0.21）
       return scored.filter(s => s.score >= 0.2).slice(0, topK)
     } catch (e) {
       console.warn('[Embedding] 搜索失败:', e.message)
@@ -192,5 +196,4 @@ class EmbeddingService {
   }
 }
 
-// 单例
 module.exports = new EmbeddingService()

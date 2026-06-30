@@ -46,6 +46,7 @@ app.use('/api/ai-models', aiModelRoutes)
 app.use('/api/ai-proxy', aiProxyRoutes)
 app.use('/api/ai-call-logs', aiCallLogRoutes)
 app.use('/api/attachments', require('./routes/attachments'))
+app.use('/api/forge', require('./routes/forge'))
 
 // 静态文件 — 管理后台前端资源（CSS/JS）和上传的附件
 app.use(express.static(path.join(__dirname, 'public')))
@@ -109,64 +110,14 @@ app.get('/', (req, res) => {
 // 全局错误处理
 app.use(errorHandler)
 
-// ============ 启动 Python Embedding 服务 ============
-const { spawn } = require('child_process')
-const EMBEDDING_PORT = process.env.EMBEDDING_PORT || 9091
-let embeddingProcess = null
-
+// ============ 启动 Embedding 服务 (纯 Node.js) ============
 const embeddingService = require('./services/embeddingService')
-
-function startEmbeddingServer() {
-  const pyScript = path.join(__dirname, 'services', 'embedding_server.py')
-  if (!fs.existsSync(pyScript)) {
-    console.warn('[Admin Server] embedding_server.py 不存在，跳过语义搜索')
-    return
-  }
-  console.log(`[Admin Server] 启动 Python embedding 服务 (端口 ${EMBEDDING_PORT})...`)
-  embeddingProcess = spawn('python', [pyScript, '--port', String(EMBEDDING_PORT)], {
-    stdio: ['ignore', 'pipe', 'pipe'],
-    windowsHide: true,
-  })
-  embeddingProcess.stdout.on('data', (data) => {
-    console.log(`[Embedding/Python] ${data.toString().trim()}`)
-  })
-  embeddingProcess.stderr.on('data', (data) => {
-    console.warn(`[Embedding/Python] ${data.toString().trim()}`)
-  })
-  embeddingProcess.on('close', (code) => {
-    console.log(`[Embedding] Python 进程退出, 退出码: ${code}`)
-    embeddingProcess = null
-  })
-  embeddingProcess.on('error', (err) => {
-    console.warn('[Embedding] Python 进程启动失败:', err.message)
-    embeddingProcess = null
-  })
-}
-
-function stopEmbeddingServer() {
-  if (embeddingProcess) {
-    console.log('[Admin Server] 停止 Python embedding 服务...')
-    embeddingProcess.kill('SIGTERM')
-    embeddingProcess = null
-  }
-}
 
 // ============ 启动服务器 ============
 app.listen(PORT, async () => {
   console.log(`[Admin Server] 运行在 http://localhost:${PORT}`)
   console.log(`[Admin Server] 健康检查: http://localhost:${PORT}/api/health`)
 
-  // 先启动 Python embedding 服务，再初始化 Node.js embedding 客户端
-  startEmbeddingServer()
+  // 异步初始化 embedding（不阻塞服务启动）
   embeddingService.init().catch(e => console.warn('[Admin Server] Embedding 初始化跳过:', e.message))
-})
-
-// 优雅退出
-process.on('SIGINT', () => {
-  stopEmbeddingServer()
-  process.exit(0)
-})
-process.on('SIGTERM', () => {
-  stopEmbeddingServer()
-  process.exit(0)
 })

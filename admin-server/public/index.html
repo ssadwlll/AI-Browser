@@ -62,6 +62,9 @@
       <div class="nav-item" data-page="attachments" onclick="switchPage('attachments')">
         <span class="icon">📎</span> 附件管理
       </div>
+      <div class="nav-item" data-page="forge" onclick="switchPage('forge')">
+        <span class="icon">🔨</span> 脚本工坊
+      </div>
     </div>
     <div class="sidebar-footer">
       <div class="user-info" id="sidebarUser">admin</div>
@@ -299,6 +302,54 @@
       </div>
     </div>
 
+    <!-- ===== P5: 脚本工坊 (Skill Forge) ===== -->
+    <div id="page-forge" class="page">
+      <div class="page-header"><h2>🔨 脚本工坊</h2><span style="font-size:13px;color:var(--text2)">分析网页结构，AI 自动生成采集脚本</span></div>
+      <div class="card">
+        <div style="display:flex;gap:8px;align-items:flex-end">
+          <div class="form-group" style="flex:1;margin:0">
+            <label>目标页面 URL</label>
+            <input type="text" id="forgeUrl" placeholder="https://example.com/page" style="font-size:14px">
+          </div>
+          <div class="form-group" style="margin:0">
+            <label>所属分类</label>
+            <select id="forgeCategory" style="font-size:13px">
+              <option value="">请选择</option>
+            </select>
+          </div>
+          <div style="margin-bottom:0;align-self:flex-end">
+            <button class="btn btn-primary" id="forgeAnalyzeBtn" onclick="analyzePageForForge()">分析并生成脚本</button>
+          </div>
+        </div>
+        <div id="forgeError" class="error-msg" style="display:none;margin-top:8px"></div>
+      </div>
+
+      <div id="forgeResult" class="card hidden">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+          <h3 style="margin:0" id="forgePageTitle">页面分析</h3>
+          <button class="btn btn-success btn-sm" id="forgeSaveBtn" onclick="saveForgedScript()" style="display:none">💾 保存到工具库</button>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
+          <div>
+            <div style="font-size:12px;font-weight:600;margin-bottom:4px;color:var(--text2)">检测到的选择器</div>
+            <div id="forgeSelectors" style="min-height:24px"></div>
+          </div>
+          <div>
+            <div style="font-size:12px;font-weight:600;margin-bottom:4px;color:var(--text2)">页面链接样本</div>
+            <div id="forgeLinks" style="min-height:24px"></div>
+          </div>
+          <div style="grid-column:span 2">
+            <div style="font-size:12px;font-weight:600;margin-bottom:4px;color:var(--text2)">页面内容样本</div>
+            <div id="forgeItems" style="min-height:24px;max-height:200px;overflow-y:auto;border:1px solid var(--border);border-radius:4px;padding:8px;background:var(--bg)"></div>
+          </div>
+        </div>
+        <div style="font-size:12px;font-weight:600;margin-bottom:4px;color:var(--text2)">元数据预览</div>
+        <div id="forgeMetaPreview" style="font-size:13px;padding:8px;background:var(--bg);border-radius:4px;margin-bottom:12px"></div>
+        <div style="font-weight:600;margin-bottom:8px">生成的脚本代码</div>
+        <pre class="code-view" id="forgeCode" style="max-height:400px"></pre>
+      </div>
+    </div>
+
   </div>
 </div>
 
@@ -379,6 +430,21 @@
       <div class="form-group"><label>工具类型</label><select id="codeEditToolType"><option value="js">JS注入</option><option value="api">API调用</option></select></div>
       <div class="form-group" id="codeEditToolConfigGroup" style="display:none"><label>API工具配置 (JSON)</label><textarea id="codeEditToolConfig" rows="4"></textarea></div>
       <div class="form-group"><label>版本</label><input type="text" id="codeEditVersion"></div>
+      <!-- P0: 结构化元数据 -->
+      <details style="margin-top:8px" id="codeEditMetaDetails">
+        <summary style="cursor:pointer;font-weight:600;font-size:14px;color:var(--primary)">结构化元数据 (搜索优化)</summary>
+        <div style="padding:8px 0;display:grid;grid-template-columns:1fr 1fr;gap:8px">
+          <div class="form-group" style="margin:0"><label style="font-size:12px">触发关键词 (逗号分隔)</label><input type="text" id="codeEditTriggers" placeholder="新闻,热点,热搜" style="font-size:12px"></div>
+          <div class="form-group" style="margin:0"><label style="font-size:12px">目标平台 (逗号分隔URL)</label><input type="text" id="codeEditPlatforms" placeholder="weibo.com,baidu.com" style="font-size:12px"></div>
+          <div class="form-group" style="margin:0"><label style="font-size:12px">需要登录</label><select id="codeEditRequiresLogin" style="font-size:12px"><option value="false">否</option><option value="true">是</option></select></div>
+          <div class="form-group" style="margin:0"><label style="font-size:12px">成功标准</label><input type="text" id="codeEditSuccessCriteria" placeholder="返回10条以上数据" style="font-size:12px"></div>
+          <div class="form-group" style="margin:0;grid-column:span 2"><label style="font-size:12px">已知限制</label><input type="text" id="codeEditKnownLimits" placeholder="仅支持PC版页面" style="font-size:12px"></div>
+          <div class="form-group" style="margin:0"><label style="font-size:12px">分页策略</label><select id="codeEditPaginationStrategy" style="font-size:12px"><option value="scroll">滚动加载</option><option value="url-page">URL分页</option><option value="none">无分页</option></select></div>
+          <div class="form-group" style="margin:0"><label style="font-size:12px">分页上限(次)</label><input type="number" id="codeEditMaxPages" value="20" style="font-size:12px"></div>
+          <!-- P1: 执行前检查 -->
+          <div class="form-group" style="margin:0;grid-column:span 2"><label style="font-size:12px">执行前检查 JS <span style="color:var(--text2);font-weight:400">(返回 {ok:true} 或 {ok:false,reason:'...'})</span></label><textarea id="codeEditPrecheck" rows="3" style="font-size:12px;font-family:monospace" placeholder="var h1=document.querySelector('h1'); return h1?{ok:true}:{ok:false,reason:'页面未加载完成'}"></textarea></div>
+        </div>
+      </details>
     </div>
     <div id="codeViewWrap"><pre class="code-view" id="codeView"></pre></div>
     <div id="codeEditWrap" class="hidden"><textarea class="code-edit" id="codeEditArea" spellcheck="false"></textarea></div>
@@ -501,6 +567,7 @@
 <script src="js/aimodels.js"></script>
 <script src="js/aicalllogs.js"></script>
 <script src="js/attachments.js"></script>
+<script src="js/forge.js"></script>
 <script src="js/auth.js"></script>
 
 <script>
@@ -521,6 +588,7 @@ function switchPage(page) {
   if (page === 'aimodels') loadAIModels();
   if (page === 'aicalllogs') initAICallLogs();
   if (page === 'attachments') loadAttachments(1);
+  if (page === 'forge') loadForgePage();
 }
 
 async function loadDashboard() {
