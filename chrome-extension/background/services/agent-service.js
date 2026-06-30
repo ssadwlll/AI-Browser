@@ -624,24 +624,6 @@ P1 输出规范：
 
             let toolResult
             if (funcName === 'finish_task') {
-              // ... (existing finish_task handler)
-            } else if (funcName === 'capture_network') {
-              const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
-              const filter = { url: funcArgs.url, status: funcArgs.status, limit: funcArgs.limit || 10 }
-              try {
-                const [captureResult] = await chrome.scripting.executeScript({
-                  target: { tabId: tab?.id },
-                  func: (filter) => {
-                    if (!window.__aiBrowserGetCaptured) return { ok: false, error: '网络捕获未就绪，请刷新页面' }
-                    return { ok: true, result: window.__aiBrowserGetCaptured(filter) }
-                  },
-                  args: [filter],
-                })
-                toolResult = JSON.stringify(captureResult?.result || { ok: false, error: '无数据' })
-              } catch (e) {
-                toolResult = JSON.stringify({ ok: false, error: e.message })
-              }
-            } else if (funcName === 'search_tools') {
               console.log('[Agent] finish_task, summary:', funcArgs.summary)
               const summary = funcArgs.summary || '任务已完成'
               this.postToUI(tabId, { type: 'agentStepResult', step: totalToolCalls, result: summary, done: true })
@@ -672,7 +654,6 @@ P1 输出规范：
                 }
               }
               this.postToUI(tabId, { type: 'streamDone' })
-              // 统一写入 chatHistory storage（唯一写入入口）
               const fullContent = summary + (executedTools.length > 0 ? resultsText : '')
               const toolResults = executedTools.map(t => ({
                 name: t.name,
@@ -680,6 +661,22 @@ P1 输出规范：
               }))
               await this._saveToChatHistoryStorage(tabId, fullContent, toolResults)
               return
+            } else if (funcName === 'capture_network') {
+              const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
+              const filter = { url: funcArgs.url, status: funcArgs.status, limit: funcArgs.limit || 10 }
+              try {
+                const [captureResult] = await chrome.scripting.executeScript({
+                  target: { tabId: tab?.id },
+                  func: (filter) => {
+                    if (!window.__aiBrowserGetCaptured) return { ok: false, error: '网络捕获未就绪，请刷新页面' }
+                    return { ok: true, result: window.__aiBrowserGetCaptured(filter) }
+                  },
+                  args: [filter],
+                })
+                toolResult = JSON.stringify(captureResult?.result || { ok: false, error: '无数据' })
+              } catch (e) {
+                toolResult = JSON.stringify({ ok: false, error: e.message })
+              }
             } else if (funcName === 'search_tools') {
               const query = funcArgs.query || userMessage
               this.postToUI(tabId, { type: 'agentStep', step: totalToolCalls, toolName: 'search_tools', toolArgs: { query }, status: 'searching' })
