@@ -455,17 +455,12 @@ export class AgentService {
   }
 
   async executeDOMTool(tabId, toolName, args) {
-    // 共享选择器解析函数：支持 :contains("text") 伪选择器
-    const qsa = (sel) => {
-      const m = sel.match(/^(.*):contains\("([^"]*)"\)(.*)$/)
-      if (!m) return document.querySelectorAll(sel)
-      const clean = (m[1] + m[3]).trim() || '*'
-      const text = m[2].toLowerCase()
-      return [...document.querySelectorAll(clean)].filter(el => (el.textContent || '').toLowerCase().includes(text))
-    }
+    // 注意：chrome.scripting.executeScript 会序列化 func，闭包变量会丢失
+    // 所以每个工具函数必须自包含 qsa 定义（不能依赖外层闭包）
     const funcs = {
 
       extract_content: (selector, multiple, limit, attributes) => {
+        const qsa=(s)=>{const m=s.match(/^(.*):contains\("([^"]*)"\)(.*)$/);if(!m)return document.querySelectorAll(s);const c=(m[1]+m[3]).trim()||'*';const t=m[2].toLowerCase();return[...document.querySelectorAll(c)].filter(e=>(e.textContent||'').toLowerCase().includes(t))}
         const els = qsa(selector)
         // 兼容字符串和数组格式的 attributes 参数
         const attrList = (() => {
@@ -523,6 +518,7 @@ export class AgentService {
       },
 
       click_element: (selector, index) => {
+        const qsa=(s)=>{const m=s.match(/^(.*):contains\("([^"]*)"\)(.*)$/);if(!m)return document.querySelectorAll(s);const c=(m[1]+m[3]).trim()||'*';const t=m[2].toLowerCase();return[...document.querySelectorAll(c)].filter(e=>(e.textContent||'').toLowerCase().includes(t))}
         const els = qsa(selector)
         const el = els[index || 0]
         if (!el) return '元素未找到: ' + selector
@@ -540,6 +536,7 @@ export class AgentService {
       },
 
       fill_input: (selector, value, submit) => {
+        const qsa=(s)=>{const m=s.match(/^(.*):contains\("([^"]*)"\)(.*)$/);if(!m)return document.querySelectorAll(s);const c=(m[1]+m[3]).trim()||'*';const t=m[2].toLowerCase();return[...document.querySelectorAll(c)].filter(e=>(e.textContent||'').toLowerCase().includes(t))}
         const els = qsa(selector)
         const el = els[0]
         if (!el) return '输入框未找到: ' + selector
@@ -566,6 +563,7 @@ export class AgentService {
       },
 
       wait_for_element: (selector, timeout) => {
+        const qsa=(s)=>{const m=s.match(/^(.*):contains\("([^"]*)"\)(.*)$/);if(!m)return document.querySelectorAll(s);const c=(m[1]+m[3]).trim()||'*';const t=m[2].toLowerCase();return[...document.querySelectorAll(c)].filter(e=>(e.textContent||'').toLowerCase().includes(t))}
         return new Promise((resolve) => {
           const start = Date.now()
           const max = timeout || 5000
@@ -635,6 +633,7 @@ export class AgentService {
       },
 
       get_element_info: (selector, limit, attributes) => {
+        const qsa=(s)=>{const m=s.match(/^(.*):contains\("([^"]*)"\)(.*)$/);if(!m)return document.querySelectorAll(s);const c=(m[1]+m[3]).trim()||'*';const t=m[2].toLowerCase();return[...document.querySelectorAll(c)].filter(e=>(e.textContent||'').toLowerCase().includes(t))}
         const els = qsa(selector)
         const max = Math.min(els.length, limit || 5)
         const attrList = attributes ? attributes.split(',').map(a => a.trim()).filter(Boolean) : null
@@ -673,6 +672,7 @@ export class AgentService {
       },
 
       hover_element: (selector, index) => {
+        const qsa=(s)=>{const m=s.match(/^(.*):contains\("([^"]*)"\)(.*)$/);if(!m)return document.querySelectorAll(s);const c=(m[1]+m[3]).trim()||'*';const t=m[2].toLowerCase();return[...document.querySelectorAll(c)].filter(e=>(e.textContent||'').toLowerCase().includes(t))}
         const els = qsa(selector)
         const el = els[index || 0]
         if (!el) return { ok: false, error: '元素未找到: ' + selector }
@@ -683,6 +683,7 @@ export class AgentService {
       },
 
       select_dropdown: (selector, value, by) => {
+        const qsa=(s)=>{const m=s.match(/^(.*):contains\("([^"]*)"\)(.*)$/);if(!m)return document.querySelectorAll(s);const c=(m[1]+m[3]).trim()||'*';const t=m[2].toLowerCase();return[...document.querySelectorAll(c)].filter(e=>(e.textContent||'').toLowerCase().includes(t))}
         const els = qsa(selector)
         const el = els[0]
         if (!el || el.tagName !== 'SELECT') return { ok: false, error: '未找到<select>元素: ' + selector }
