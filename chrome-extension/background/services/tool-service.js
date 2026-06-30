@@ -98,6 +98,9 @@ export class ToolService {
       }
       return { ok: true, result: result.result }
     } catch (e) {
+      if (e.message?.includes('Cannot access a chrome:// URL') || e.message?.includes('Cannot access contents of url')) {
+        return { ok: false, error: '当前页面为系统页面，无法注入脚本。请用finish_task告知用户：请在普通网页上执行此操作。' }
+      }
       return { ok: false, error: e.message }
     }
   }
@@ -109,7 +112,8 @@ export class ToolService {
         const config = await this.configService.getSyncConfig()
         if (config.serverUrl) {
           const base = config.serverUrl.replace(/\/+$/, '')
-          apiEndpoint = base + (apiEndpoint.startsWith('/') ? '' : '/') + apiEndpoint
+          // 规范化拼接：base + apiEndpoint（确保恰好一个 / 分隔）
+          apiEndpoint = base + '/' + apiEndpoint.replace(/^\/+/, '')
         }
       }
       const fetchOptions = {

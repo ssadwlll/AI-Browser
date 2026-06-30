@@ -5,12 +5,35 @@
 ;(function() {
   'use strict'
   if (location.protocol === 'chrome-extension:') return
-  if (window.__aiBrowserNetworkCapture) return
-  window.__aiBrowserNetworkCapture = true
 
   const MAX_BODY = 8000     // 单次响应截断上限
   const MAX_REQUESTS = 200  // 总请求缓存上限
-  const captured = []
+
+  // 复用已有的 captured 数组（防止扩展重载后丢失）
+  const captured = window.__aiBrowserCapturedData || []
+  window.__aiBrowserCapturedData = captured
+
+  // 暴露查询接口（始终可用，不受防重复守卫影响）
+  window.__aiBrowserGetCaptured = function(filter) {
+    let results = captured.slice()
+    if (filter?.url) {
+      const f = filter.url.toLowerCase()
+      results = results.filter(r => r.url.toLowerCase().includes(f))
+    }
+    if (filter?.method) {
+      results = results.filter(r => r.method === filter.method.toUpperCase())
+    }
+    if (filter?.status) {
+      if (filter.status === 'ok') results = results.filter(r => r.status >= 200 && r.status < 300)
+      else if (filter.status === 'error') results = results.filter(r => r.status === 0 || r.status >= 400)
+    }
+    if (filter?.limit) results = results.slice(-filter.limit)
+    return results
+  }
+
+  // 防重复注入（只对拦截器生效，查询接口始终可用）
+  if (window.__aiBrowserNetworkCapture) return
+  window.__aiBrowserNetworkCapture = true
 
   function safeSend(msg) {
     try {
@@ -102,21 +125,4 @@
     return origSend.apply(this, arguments)
   }
 
-  // ===== 暴露给 Agent 的接口 =====
-  window.__aiBrowserGetCaptured = function(filter) {
-    let results = captured.slice()
-    if (filter?.url) {
-      const f = filter.url.toLowerCase()
-      results = results.filter(r => r.url.toLowerCase().includes(f))
-    }
-    if (filter?.method) {
-      results = results.filter(r => r.method === filter.method.toUpperCase())
-    }
-    if (filter?.status) {
-      if (filter.status === 'ok') results = results.filter(r => r.status >= 200 && r.status < 300)
-      else if (filter.status === 'error') results = results.filter(r => r.status === 0 || r.status >= 400)
-    }
-    if (filter?.limit) results = results.slice(-filter.limit)
-    return results
-  }
 })()

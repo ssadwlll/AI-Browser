@@ -289,6 +289,75 @@ const chatMessages = document.getElementById('chatMessages')
 const chatInput = document.getElementById('chatInput')
 const sendBtn = document.getElementById('sendBtn')
 
+// ===== Debug Log 面板 =====
+let _debugLogWindow = null
+let _debugLogReady = false     // 外部窗口就绪标志
+let _debugLogQueue = []        // 就绪前的消息队列
+let _debugLogFlushTimer = null // 定时刷新队列
+
+function appendDebugLog(label, detail, level) {
+  // 转发到外部 Log 窗口
+  if (_debugLogWindow && !_debugLogWindow.closed) {
+    const msg = { type: 'agentDebug', label, detail }
+    if (_debugLogReady) {
+      try { _debugLogWindow.postMessage(msg, '*') } catch {}
+    } else {
+      _debugLogQueue.push(msg)
+      // 每 500ms 重试发送（等待窗口加载完成）
+      if (!_debugLogFlushTimer) {
+        _debugLogFlushTimer = setInterval(() => {
+          if (_debugLogReady && _debugLogQueue.length > 0) {
+            for (const m of _debugLogQueue) {
+              try { _debugLogWindow.postMessage(m, '*') } catch {}
+            }
+            _debugLogQueue = []
+            clearInterval(_debugLogFlushTimer)
+            _debugLogFlushTimer = null
+          }
+        }, 500)
+      }
+    }
+  }
+}
+// 打开外部 Log 窗口
+function openDebugLogWindow() {
+  // 仅调试模式开启时才弹出
+  const debugToggle = document.getElementById('agentDebugToggle')
+  if (!debugToggle || !debugToggle.classList.contains('on')) return
+  if (_debugLogWindow && !_debugLogWindow.closed) {
+    _debugLogWindow.focus()
+    return
+  }
+  _debugLogReady = false
+  _debugLogQueue = []
+  _debugLogWindow = window.open(
+    chrome.runtime.getURL('sidepanel/debug-log-viewer.html'),
+    'debugLogPopup',
+    'width=800,height=700,left=100,top=50,menubar=no,toolbar=no,location=no,status=no'
+  )
+}
+// 接收外部窗口的就绪信号
+window.addEventListener('message', (e) => {
+  if (e.data?.type === 'debugLogReady') {
+    _debugLogReady = true
+    // 立即刷新队列
+    if (_debugLogQueue.length > 0) {
+      for (const m of _debugLogQueue) {
+        try { _debugLogWindow.postMessage(m, '*') } catch {}
+      }
+      _debugLogQueue = []
+    }
+    if (_debugLogFlushTimer) {
+      clearInterval(_debugLogFlushTimer)
+      _debugLogFlushTimer = null
+    }
+  }
+})
+
+document.getElementById('floatDebugLogBtn')?.addEventListener('click', () => {
+  openDebugLogWindow()
+})
+
 function renderMarkdown(text) {
   if (!text) return ''
 
@@ -315,9 +384,14 @@ function renderMarkdown(text) {
   html = html.replace(/^## (.+)$/gm, '<h2>$1</h2>')
   html = html.replace(/^# (.+)$/gm, '<h1>$1</h1>')
 
-  // 链接 [text](url)
-  html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g,
-    '<a href="$2" target="_blank" rel="noopener">$1</a>')
+  // 链接 [text](url) — 过滤 javascript: 等危险协议防 XSS
+  html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_, text, url) => {
+    const safeUrl = url.trim().toLowerCase()
+    if (safeUrl.startsWith('javascript:') || safeUrl.startsWith('data:') || safeUrl.startsWith('vbscript:')) {
+      return text
+    }
+    return `<a href="${url}" target="_blank" rel="noopener">${text}</a>`
+  })
 
   // 无序列表（合并连续的 <li>）
   html = html.replace(/^[-*] (.+)$/gm, '<li>$1</li>')
@@ -591,6 +665,87 @@ async function loadAgentMode() {
   agentMode = false
   const btn = document.getElementById('agentNavBtn')
   if (btn) btn.classList.remove('active')
+
+  // 关闭后重连：检查 SW 中是否有正在运行的 Agent
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
+    const resp = await chrome.runtime.sendMessage({ type: 'checkAgentStatus', tabId: tab?.id })
+    if (resp?.agentRunning) {
+      console.log('[SidePanel] 检测到运行中的 Agent，自动重连')
+      agentMode = true
+      if (btn) btn.classList.add('active')
+      chrome.storage.local.set({ agentMode: true })
+
+      currentPort = chrome.runtime.connect({ name: 'agent-stream' })
+
+      // 先注册消息监听器，再发送 agentAttach（避免回放消息比监听器先到达）
+      const card = addAgentStepCard()
+      card.querySelector('.agent-step-title').textContent = 'Agent 重连中...'
+      let streamDiv = null
+      let fullContent = ''
+      let toolResults = []
+      currentPort.onMessage.addListener((msg) => {
+        if (msg.type === 'agentStart') {
+          card.querySelector('.agent-step-title').textContent = 'Agent 已启动，分析需求中...'
+          openDebugLogWindow()
+        } else if (msg.type === 'agentStatus') {
+          card.querySelector('.agent-step-title').textContent = msg.text || '处理中...'
+        } else if (msg.type === 'agentStep') {
+          updateAgentStepCard(card, msg.step, msg.toolName, msg.toolArgs, msg.status || 'running')
+        } else if (msg.type === 'agentSearchResult') {
+          const results = msg.results || []
+          const body = card.querySelector('.agent-step-body')
+          body.innerHTML = results.length > 0
+            ? '找到 ' + results.length + ' 个工具：<br>' + results.map(r => '  - ' + r.name + ': ' + (r.description || '')).join('<br>')
+            : '未找到匹配的工具'
+          chatMessages.scrollTop = chatMessages.scrollHeight
+        } else if (msg.type === 'agentStepResult') {
+          if (msg.toolName === 'search_tools') return
+          const body = card.querySelector('.agent-step-body')
+          let displayResult = msg.result || ''
+          try {
+            const parsed = JSON.parse(displayResult)
+            if (parsed.ok === false && parsed.error) {
+              displayResult = '执行失败：' + parsed.error
+            } else if (parsed.ok && parsed.result) {
+              if (typeof parsed.result === 'string') displayResult = parsed.result
+              else if (Array.isArray(parsed.result)) displayResult = parsed.result.map((item, i) => `${i + 1}. ${typeof item === 'string' ? item : item.name || item.title || JSON.stringify(item)}`).join('\n')
+              else displayResult = JSON.stringify(parsed.result, null, 2)
+            }
+          } catch {}
+          body.textContent = displayResult
+          const title = card.querySelector('.agent-step-title')
+          if (title) title.innerHTML = title.innerHTML.replace('\u23F3', '\u2705')
+          chatMessages.scrollTop = chatMessages.scrollHeight
+        } else if (msg.type === 'agentDebug') {
+          const level = String(msg.label || '').includes('触发') ? 'warn' : String(msg.label || '').includes('终止') ? 'error' : 'info'
+          appendDebugLog(msg.label || 'debug', msg.detail || '', level)
+        } else if (msg.type === 'streamChunk') {
+          if (!streamDiv) { streamDiv = addStreamingMessage(); fullContent = '' }
+          fullContent += msg.content
+          updateStreamingMessage(streamDiv, fullContent)
+          chatMessages.scrollTop = chatMessages.scrollHeight
+        } else if (msg.type === 'streamDone') {
+          if (streamDiv) {
+            agentMode = false
+            if (btn) btn.classList.remove('active')
+            chrome.storage.local.remove('agentMode')
+          }
+        } else if (msg.type === 'agentError') {
+          card.querySelector('.agent-step-title').textContent = '错误'
+          card.querySelector('.agent-step-body').textContent = msg.error
+          agentMode = false
+          if (btn) btn.classList.remove('active')
+          chrome.storage.local.remove('agentMode')
+        }
+      })
+
+      // 监听器已就位，现在发送 agentAttach（后台会回放缓冲消息）
+      currentPort.postMessage({ type: 'agentAttach' })
+    }
+  } catch (e) {
+    console.log('[SidePanel] Agent 状态查询失败（可能 SW 未就绪）')
+  }
 }
 
 function addAgentStepCard() {
@@ -616,13 +771,19 @@ function formatToolArgs(toolName, toolArgs) {
     case 'read_page_content':
       return '读取当前页面的标题和正文'
     case 'extract_content':
-      return `提取元素：${a.selector || ''}${a.multiple ? '（提取所有）' : ''}`
+      return `提取元素：${a.selector || ''}${a.multiple ? '（提取所有）' : ''}${Array.isArray(a.attributes) && a.attributes.length ? ' [属性:' + a.attributes.join(',') + ']' : ''}`
     case 'click_element':
       return `点击元素：${a.selector || ''}`
     case 'fill_input':
       return `填写内容：${a.selector || ''} = "${a.value || ''}"${a.submit ? '（回车提交）' : ''}`
     case 'wait_for_element':
       return `等待元素出现：${a.selector || ''}`
+    case 'save_as_file':
+      return `保存为文件：${a.filename || ''}${a.mimeType ? ' (' + a.mimeType + ')' : ''}`
+    case 'navigate_to':
+      return `导航到：${a.url || ''}`
+    case 'go_back':
+      return '返回上一页'
     case 'finish_task':
       return a.summary || '任务完成'
     default:
@@ -639,7 +800,6 @@ function formatToolArgs(toolName, toolArgs) {
 const TOOL_META = {
   search_tools:    { name: '搜索工具', icon: '\uD83D\uDD0D' },
   read_page_content: { name: '读取页面', icon: '\u26A1' },
-  extract_content: { name: '提取内容', icon: '\u26A1' },
   click_element:   { name: '点击元素', icon: '\u26A1' },
   fill_input:      { name: '填写输入', icon: '\u26A1' },
   wait_for_element:{ name: '等待加载', icon: '\u26A1' },
@@ -675,27 +835,11 @@ async function runAgent(userText, pageContext) {
     if (!chrome.runtime?.id) { finishStreaming('扩展已重载，请重新打开侧边栏'); return }
     currentPort = chrome.runtime.connect({ name: 'agent-stream' })
 
-    // Agent 模式 PDF 附件处理
-    let agentUserMessage = pageContext ? userText + pageContext : userText
-    if (attachedPdf && attachedPdf.text) {
-      const pagesInfo = attachedPdf.pages ? `（共 ${Array.isArray(attachedPdf.pages) ? attachedPdf.pages.length : attachedPdf.pages} 页）` : ''
-      agentUserMessage = `【PDF 文档：${attachedPdf.name}${pagesInfo}】\n${attachedPdf.text}\n\n【以上为 PDF 内容，请据此回答以下问题】\n${agentUserMessage}`
-    }
-    // 发送后清除附件
-    if (attachedPdf) {
-      attachedPdf = null
-      renderAttachmentPreview()
-    }
-
-    currentPort.postMessage({
-      type: 'agentStart',
-      userMessage: agentUserMessage,
-      chatHistory,
-    })
-
+    // 先注册消息监听器，再发送 agentStart（避免响应比监听器先到达）
     currentPort.onMessage.addListener((msg) => {
       if (msg.type === 'agentStart') {
         card.querySelector('.agent-step-title').textContent = 'Agent 已启动，分析需求中...'
+        openDebugLogWindow()
       } else if (msg.type === 'agentStatus') {
         card.querySelector('.agent-step-title').textContent = msg.text || '处理中...'
       } else if (msg.type === 'agentStep') {
@@ -727,7 +871,6 @@ async function runAgent(userText, pageContext) {
           } else if (parsed.content !== undefined) {
             displayResult = typeof parsed.content === 'string' ? parsed.content : JSON.stringify(parsed.content)
           } else if (Array.isArray(parsed)) {
-            // 纯数组结果（如搜索结果）
             displayResult = parsed.map((item, i) => `${i + 1}. ${item.name || item.title || (typeof item === 'string' ? item : JSON.stringify(item))}`).join('\n')
           } else if (typeof parsed === 'string') {
             displayResult = parsed
@@ -747,17 +890,19 @@ async function runAgent(userText, pageContext) {
           card.querySelector('.agent-step-icon').textContent = '\u2705'
           card.querySelector('.agent-step-title').textContent = '任务完成'
         }
+      } else if (msg.type === 'agentDebug') {
+        const level = String(msg.label || '').includes('触发') ? 'warn' : String(msg.label || '').includes('终止') ? 'error' : 'info'
+        appendDebugLog(msg.label || 'debug', msg.detail || '', level)
       } else if (msg.type === 'streamChunk') {
         fullContent += msg.content
         updateStreamingMessage(streamDiv, fullContent)
       } else if (msg.type === 'streamDone') {
-        // 更新内存中的聊天记录（Agent 负责写入 storage）
         const agentRecord = { role: 'assistant', content: fullContent }
         if (toolResults.length > 0) {
           agentRecord.toolCalls = toolResults.map(t => ({ name: t.name, summary: String(t.result).slice(0, 200) }))
         }
         chatHistory.push(agentRecord)
-        recentlyStreamedContent = fullContent  // 标记已流式显示，防止 storage.onChanged 重复添加
+        recentlyStreamedContent = fullContent
         setTimeout(() => { recentlyStreamedContent = '' }, 1000)
         isStreaming = false
         sendBtn.disabled = false
@@ -777,6 +922,26 @@ async function runAgent(userText, pageContext) {
       isStreaming = false
       sendBtn.disabled = false
       currentPort = null
+    })
+
+    // Agent 模式 PDF 附件处理
+    let agentUserMessage = pageContext ? userText + pageContext : userText
+    if (attachedPdf && attachedPdf.text) {
+      const pagesInfo = attachedPdf.pages ? `（共 ${Array.isArray(attachedPdf.pages) ? attachedPdf.pages.length : attachedPdf.pages} 页）` : ''
+      agentUserMessage = `【PDF 文档：${attachedPdf.name}${pagesInfo}】\n${attachedPdf.text}\n\n【以上为 PDF 内容，请据此回答以下问题】\n${agentUserMessage}`
+    }
+    // 发送后清除附件（包括图片和 PDF）
+    if (attachedPdf || attachedImage) {
+      attachedPdf = null
+      attachedImage = null
+      renderAttachmentPreview()
+    }
+
+    // 监听器已就位，现在发送 agentStart
+    currentPort.postMessage({
+      type: 'agentStart',
+      userMessage: agentUserMessage,
+      chatHistory,
     })
   } catch (e) {
     updateStreamingMessage(streamDiv, '\u274C ' + e.message)
@@ -847,6 +1012,7 @@ async function loadSettings() {
   const aiConfig = await callService('configService', 'getAIConfig')
   const syncConfig = await callService('configService', 'getSyncConfig')
   const selectionEnabled = await callService('configService', 'getSelectionToolsEnabled')
+  const agentConfig = await callService('configService', 'getAgentConfig')
 
   // 服务端连接
   document.getElementById('syncServerUrl').value = syncConfig.serverUrl || ''
@@ -861,6 +1027,17 @@ async function loadSettings() {
 
   const toggle = document.getElementById('selectionToolsToggle')
   toggle.classList.toggle('on', selectionEnabled !== false)
+
+  // Agent 配置
+  const agentRounds = agentConfig.maxRounds || 15
+  document.getElementById('agentMaxRounds').value = agentRounds
+  document.getElementById('agentRoundsValue').textContent = agentRounds
+  // 调试模式
+  const debugToggle = document.getElementById('agentDebugToggle')
+  if (debugToggle) {
+    debugToggle.classList.toggle('on', agentConfig.debug === true)
+    debugToggle.onclick = () => debugToggle.classList.toggle('on')
+  }
 }
 
 /**
@@ -1070,6 +1247,11 @@ document.getElementById('aiTemperature').addEventListener('input', function() {
   document.getElementById('tempValue').textContent = this.value
 })
 
+// Agent 轮次滑条实时显示值
+document.getElementById('agentMaxRounds').addEventListener('input', function() {
+  document.getElementById('agentRoundsValue').textContent = this.value
+})
+
 document.getElementById('selectionToolsToggle').addEventListener('click', function() {
   this.classList.toggle('on')
 })
@@ -1106,6 +1288,10 @@ document.getElementById('saveSettingsBtn').addEventListener('click', async () =>
     })
     await callService('configService', 'saveSelectionToolsEnabled',
       document.getElementById('selectionToolsToggle').classList.contains('on'))
+    await callService('configService', 'saveAgentConfig', {
+      maxRounds: parseInt(document.getElementById('agentMaxRounds').value) || 30,
+      debug: document.getElementById('agentDebugToggle').classList.contains('on'),
+    })
 
     // 保存后刷新模型列表（用户可能刚填好 appKey/appSecret）
     await loadModelSelect(currentSelectedModelId)
@@ -1330,7 +1516,11 @@ function closePreviewModal() {
 
 function openImagePreview(src) {
   const modal = ensurePreviewModal()
-  modal.innerHTML = `<img src="${src}" alt="预览图片">`
+  const img = document.createElement('img')
+  img.src = src
+  img.alt = '预览图片'
+  modal.innerHTML = ''
+  modal.appendChild(img)
   modal.classList.add('show')
 }
 
@@ -1501,7 +1691,6 @@ async function loadChatHistory() {
   // 立即恢复未发送附件
   loadAttachmentsFromStorage()
 })()
-
 // 初始化模型选择列表（读取已保存的模型并选中）；模型加载后 updateModelInfo 会按视觉能力清空图片
 ;(async () => {
   try {
@@ -1559,8 +1748,20 @@ chrome.storage.onChanged.addListener((changes, area) => {
         if (newMsgs.length > 0) {
           console.log('[SidePanel] storage.onChanged: 检测到', newMsgs.length, '条新消息（来自 Agent）')
           chatHistory = newHistory
-          // 如果 streaming 正在进行或刚完成，不重复添加 UI（streaming div 已显示）
-          if (!isStreaming && !recentlyStreamedContent) {
+          // 清理 streaming 状态（端口可能已断，需先清理再决定是否补充 UI）
+          if (isStreaming) {
+            isStreaming = false
+            sendBtn.disabled = false
+            currentPort = null
+          }
+          // 只有当 streamDone 未通过 port 送达时（recentlyStreamedContent 为空），才补充 UI
+          if (!recentlyStreamedContent) {
+            // 移除残留的 streaming typing 动画 div（端口断开导致 streamChunk 未送达）
+            const typingIndicators = chatMessages.querySelectorAll('.typing-indicator')
+            typingIndicators.forEach(el => {
+              const msgDiv = el.closest('.message')
+              if (msgDiv) msgDiv.remove()
+            })
             for (const msg of newMsgs) {
               if (msg.role === 'assistant' && msg.toolCalls && msg.toolCalls.length > 0) {
                 const card = document.createElement('div')
@@ -1579,12 +1780,6 @@ chrome.storage.onChanged.addListener((changes, area) => {
               }
               addMessage(msg.role, msg.content, msg.attachments)
             }
-          }
-          // 如果正在 streaming 状态（isStreaming=true），说明 Agent 刚完成
-          if (isStreaming) {
-            isStreaming = false
-            sendBtn.disabled = false
-            currentPort = null
           }
         }
       }

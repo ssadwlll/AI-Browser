@@ -97,9 +97,10 @@ async function loadSettings() {
   const syncConfig = await callService('configService', 'getSyncConfig')
   const selEnabled = await callService('configService', 'getSelectionToolsEnabled')
 
-  document.getElementById('aiModel').value = aiConfig.model || ''
   document.getElementById('serverUrl').value = syncConfig.serverUrl || ''
-  document.getElementById('syncInterval').value = syncConfig.syncInterval || 30
+  document.getElementById('syncAppKey').value = syncConfig.appKey || ''
+  document.getElementById('syncAppSecret').value = syncConfig.appSecret || ''
+  document.getElementById('aiModel').value = aiConfig.model || ''
   document.getElementById('selectionToggle').classList.toggle('on', selEnabled !== false)
 }
 
@@ -111,9 +112,13 @@ document.getElementById('saveConfigBtn').addEventListener('click', async () => {
   await callService('configService', 'saveAIConfig', {
     model: document.getElementById('aiModel').value.trim(),
   })
+  // 保留 syncInterval（UI 中已移除该字段，从旧配置继承）
+  const oldSync = await callService('configService', 'getSyncConfig')
   await callService('configService', 'saveSyncConfig', {
     serverUrl: document.getElementById('serverUrl').value.trim(),
-    syncInterval: parseInt(document.getElementById('syncInterval').value) || 30,
+    appKey: document.getElementById('syncAppKey').value.trim(),
+    appSecret: document.getElementById('syncAppSecret').value.trim(),
+    syncInterval: oldSync.syncInterval || 30,
     enabled: true,
   })
   await callService('configService', 'saveSelectionToolsEnabled',

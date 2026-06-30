@@ -121,6 +121,27 @@ export class ConfigService {
     await chrome.storage.local.set({ selectionToolsEnabled: enabled })
   }
 
+  async getAgentConfig() {
+    const data = await chrome.storage.local.get('agentConfig')
+    return {
+      maxRounds: 15,
+      maxConsecutiveFails: 5,
+      maxLowValue: 3,
+      maxIdleText: 2,
+      explorationLimit: 5,
+      enableJudge: true,
+      enablePlanning: true,
+      debug: false,
+      ...(data.agentConfig || {}),
+    }
+  }
+
+  async saveAgentConfig(config) {
+    const merged = { ...(await this.getAgentConfig()), ...config }
+    await chrome.storage.local.set({ agentConfig: merged })
+    return merged
+  }
+
   /**
    * 获取 AppKey/AppSecret 认证信息
    */

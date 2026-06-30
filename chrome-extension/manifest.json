@@ -43,7 +43,6 @@
     },
     {
       "js": ["content/index.js"],
-      "css": ["content/content.css"],
       "matches": ["<all_urls>"],
       "run_at": "document_idle"
     }

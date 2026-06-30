@@ -4,27 +4,14 @@
 ;(async function() {
   'use strict'
 
-  // 避免在扩展自身页面（sidepanel/popup/options等）注入浮动按钮
+  // 避免在扩展自身页面（sidepanel/popup/options等）注入
   if (location.protocol === 'chrome-extension:') return
 
   // 避免重复注入
   if (window.__aiBrowserContentLoaded) return
   window.__aiBrowserContentLoaded = true
 
-  console.log('[AI Browser] content script v4 已加载, URL:', location.href)
-
-  // 安全通信：在扩展上下文有效时缓存 sidepanel URL
-  let CACHED_SIDEPANEL_URL = null
-  let ICON_URL = null
-  try {
-    if (chrome.runtime?.id) {
-      CACHED_SIDEPANEL_URL = chrome.runtime.getURL('sidepanel/sidepanel.html')
-      ICON_URL = chrome.runtime.getURL('icons/icon.png')
-    }
-  } catch (e) {
-    CACHED_SIDEPANEL_URL = null
-    ICON_URL = null
-  }
+  console.log('[AI Browser] content script v5 已加载, URL:', location.href)
 
   // 安全的 chrome.runtime.sendMessage 封装
   function safeSendMessage(msg) {
@@ -35,8 +22,6 @@
   }
 
   let config = { selectionToolsEnabled: true }
-  let fabHost = null
-  let fabShadow = null
   try {
     config = await chrome.storage.local.get([
       'aiConfig', 'syncConfig', 'selectionToolsEnabled'
@@ -45,26 +30,23 @@
     console.warn('[AI Browser] 读取 storage 配置失败:', e.message)
   }
 
+  // 初始化页面助手浮动按钮
+  initPageAssistant()
+
   // 初始化划词工具栏
   if (config.selectionToolsEnabled !== false) {
     initSelectionToolbar()
   }
-
-  // 初始化页面助手浮动按钮
-  initPageAssistant()
 
   // 初始化智能表单填充
   initFormFill()
 
   // 监听来自 background 的消息
   chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
-    if (msg.type === 'selectionAction') {
-      handleSelectionAction(msg.action, msg.text)
-    }
     if (msg.type === 'extractPageContent') {
       const content = extractPageContent()
       sendResponse({ ok: true, data: content })
-      return true  // 保持消息通道开放以支持异步
+      return true
     }
     sendResponse({ ok: true })
   })
@@ -133,7 +115,7 @@
 
       shadow.innerHTML = `
         <style>
-          .toolbar{position:fixed;z-index:2147483600;background:#fff;border:1px solid rgba(79,89,102,0.10);border-radius:10px;padding:6px;display:flex;gap:2px;box-shadow:0 4px 16px rgba(0,0,0,0.10),0 2px 8px rgba(0,0,0,0.04);font-family:'Inter','SF Pro Display',-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC',sans-serif;animation:toolbarIn .2s cubic-bezier(.4,0,.2,1)}
+          .toolbar{position:fixed;z-index:10000;background:#fff;border:1px solid rgba(79,89,102,0.10);border-radius:10px;padding:6px;display:flex;gap:2px;box-shadow:0 4px 16px rgba(0,0,0,0.10),0 2px 8px rgba(0,0,0,0.04);font-family:'Inter','SF Pro Display',-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC',sans-serif;animation:toolbarIn .2s cubic-bezier(.4,0,.2,1)}
           @keyframes toolbarIn{from{opacity:0;transform:translateY(4px) scale(.96)}to{opacity:1;transform:translateY(0) scale(1)}}
           .toolbar button{background:none;border:none;padding:7px 12px;border-radius:7px;cursor:pointer;font-size:12px;font-weight:500;color:#1a1a2e;white-space:nowrap;transition:all .2s}
           .toolbar button:hover{background:rgba(104,65,234,0.08);color:#6841ea}
@@ -173,6 +155,9 @@
 
   // ---- 页面助手浮动按钮组 ----
   function initPageAssistant() {
+    // 避免重复注入
+    if (document.getElementById('ai-browser-assistant-host')) return
+
     const host = document.createElement('div')
     host.id = 'ai-browser-assistant-host'
     const shadow = host.attachShadow({ mode: 'closed' })
@@ -197,13 +182,13 @@
 
     shadow.innerHTML = `
       <style>
-        .fab-group{position:fixed;bottom:60px;right:0;z-index:2147483601;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;display:flex;flex-direction:column;gap:6px;align-items:flex-end}
-        .fab-pill,.fab-icon{display:flex;flex-direction:row;align-items:center;cursor:pointer;gap:6px;height:36px;background:#fff;border:1px solid rgba(79,89,102,0.12);box-shadow:0 2px 12px rgba(0,0,0,0.08);border-radius:18px 0 0 18px;border-right:none;transition:background-color .2s,width .3s ease,padding .3s ease}
+        .fab-group{position:fixed;bottom:60px;right:0;z-index:2147483646;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;display:flex;flex-direction:column;gap:6px;align-items:flex-end;pointer-events:none}
+        .fab-pill,.fab-icon{display:flex;flex-direction:row;align-items:center;cursor:pointer;gap:6px;height:36px;background:#fff;border:1px solid rgba(79,89,102,0.12);box-shadow:0 2px 12px rgba(0,0,0,0.08);border-radius:18px 0 0 18px;border-right:none;transition:background-color .2s,width .3s ease,padding .3s ease,transform .15s ease;pointer-events:auto}
         .fab-pill{padding:0 12px 0 8px}
         .fab-icon{width:36px;padding:0 0 0 8px;justify-content:flex-start;overflow:hidden;white-space:nowrap}
         .fab-icon:hover{width:auto;padding:0 12px 0 8px}
         .fab-pill:hover,.fab-icon:hover{background:rgba(104,65,234,0.06)}
-        .fab-pill:active,.fab-icon:active{background:rgba(104,65,234,0.12)}
+        .fab-pill:active,.fab-icon:active{background:rgba(104,65,234,0.12);transform:scale(.96)}
         .fab-brand{background:linear-gradient(135deg,#b059f8,#6841ea);border:none;box-shadow:0 2px 16px rgba(104,65,234,0.3)}
         .fab-brand:hover{background:linear-gradient(135deg,#c070ff,#7b52f0)}
         .fab-brand .label{color:#fff}
@@ -213,149 +198,80 @@
         .fab-pill:hover .label{color:#6841ea}
         .fab-icon .label{opacity:0;transition:opacity .2s}
         .fab-icon:hover .label{opacity:1;color:#6841ea}
+        .fab-toast{position:fixed;bottom:110px;right:16px;z-index:2147483646;background:#333;color:#fff;font-size:12px;padding:6px 14px;border-radius:6px;pointer-events:none;opacity:0;transition:opacity .3s ease;white-space:nowrap;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif}
+        .fab-toast.show{opacity:1}
       </style>
       <div class="fab-group">
         ${btnsHTML}
       </div>
+      <div class="fab-toast"></div>
     `
+
+    const toast = shadow.querySelector('.fab-toast')
+    let toastTimer = null
+
+    function showToast(text, duration = 2500) {
+      toast.textContent = text
+      toast.classList.add('show')
+      clearTimeout(toastTimer)
+      toastTimer = setTimeout(() => toast.classList.remove('show'), duration)
+    }
+
+    let contextInvalidated = false
 
     shadow.querySelectorAll('[data-action]').forEach(el => {
       el.addEventListener('click', () => {
+        if (contextInvalidated) {
+          showToast('扩展已更新，请刷新页面后使用')
+          return
+        }
         try {
           const action = el.dataset.action
+          // AI 按钮预留功能点
           if (action === 'ai') {
-            // AI 按钮：切换 iframe 浮层
-            if (isSidebarVisible()) {
-              closeFloatingSidebar()
-            } else {
-              openFloatingSidebar()
-            }
-          } else {
-            // 其它按钮：设定 action 并打开 iframe
-            chrome.storage.local.set({ floatingToolAction: action }).catch(() => {})
-            openFloatingSidebar()
+            showToast('AI 功能开发中，敬请期待')
+            return
           }
+
+          // 视觉反馈：短暂缩放
+          el.style.transform = 'scale(0.92)'
+          setTimeout(() => { el.style.transform = '' }, 150)
+
+          // 先存储 action，确保即使 sidePanel 打开失败也能在手动打开时读取
+          chrome.storage.local.set({ floatingToolAction: action }).catch(() => {})
+
+          // 请求后台打开 sidePanel
+          chrome.runtime.sendMessage({ type: 'toggleSidebar', action }).then(resp => {
+            if (!resp?.ok) {
+              showToast('请点击浏览器工具栏的扩展图标打开面板')
+            }
+          }).catch(() => {
+            // 扩展上下文可能失效，action 已存储，用户可手动打开
+          })
         } catch (e) {
+          if (e.message?.includes('Extension context invalidated') || e.message?.includes('context invalidated')) {
+            contextInvalidated = true
+            showToast('扩展已更新，请刷新页面后使用', 4000)
+          }
           console.warn('[AI Browser] 浮动按钮点击异常:', e.message)
         }
       })
     })
 
     document.body.appendChild(host)
-    // 保存引用，方便打开侧边栏时调整浮动按钮位置
-    // closed shadow root 无法通过 host.shadowRoot 访问，必须直接保存引用
-    fabHost = host
-    fabShadow = shadow
-  }
 
-  // ---- 浮动侧边栏（iframe 叠层） ----
-  let floatingSidebar = null
-
-  function isSidebarVisible() {
-    return !!(floatingSidebar
-      && document.body.contains(floatingSidebar)
-      && floatingSidebar.style.display !== 'none')
-  }
-
-  const SIDEBAR_MIN_WIDTH = 360
-  const SIDEBAR_MAX_WIDTH = 800
-  let sidebarWidth = 500
-
-  function openFloatingSidebar() {
-    // 已存在：直接显示
-    if (floatingSidebar && document.body.contains(floatingSidebar)) {
-      floatingSidebar.style.display = ''
-      shiftFabGroup(sidebarWidth)
-      return
-    }
-    if (floatingSidebar) floatingSidebar = null
-
-    if (!CACHED_SIDEPANEL_URL) {
-      console.warn('[AI Browser] 无法打开侧边栏：扩展上下文已失效，请刷新页面')
-      return
-    }
-
-    const host = document.createElement('div')
-    host.id = 'ai-browser-sidebar-host'
-    const shadow = host.attachShadow({ mode: 'closed' })
-
-    shadow.innerHTML = `
-      <style>
-        .sidebar{position:fixed;top:0;right:0;width:${sidebarWidth}px;height:100vh;z-index:2147483599;background:#fff;border-left:1px solid #e2e8f0;box-shadow:-4px 0 12px rgba(0,0,0,0.1);display:flex;flex-direction:column;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif}
-        .sidebar-resize-handle{position:absolute;top:0;left:-3px;width:6px;height:100%;cursor:col-resize;z-index:10;transition:background-color .15s}
-        .sidebar-resize-handle:hover,.sidebar-resize-handle:active{background:rgba(104,65,234,0.3)}
-        .sidebar-header{display:flex;align-items:center;gap:8px;height:44px;padding:0 16px;background:linear-gradient(135deg,#b059f8,#fff);flex-shrink:0}
-        .sidebar-header-icon{width:24px;height:24px;flex-shrink:0}
-        .sidebar-header-icon img{width:24px;height:24px;display:block}
-        .sidebar-header-title{font-size:14px;font-weight:600;color:#fff}
-        .sidebar iframe{flex:1;width:100%;border:none}
-      </style>
-      <div class="sidebar" id="sidebarRoot">
-        <div class="sidebar-resize-handle" id="resizeHandle"></div>
-        <div class="sidebar-header">
-          <span class="sidebar-header-icon">
-            <img src="${ICON_URL}" alt="AI Browser" />
-          </span>
-          <span class="sidebar-header-title">AI Browser</span>
-        </div>
-        <iframe src="${CACHED_SIDEPANEL_URL}" allow="clipboard-write"></iframe>
-      </div>
-    `
-
-    // 拖拽调整侧边栏宽度
-    const sidebarEl = shadow.getElementById('sidebarRoot')
-    const handleEl = shadow.getElementById('resizeHandle')
-    let isResizing = false
-    let startX = 0
-    let startWidth = 0
-
-    handleEl.addEventListener('mousedown', (e) => {
-      isResizing = true
-      startX = e.clientX
-      startWidth = sidebarEl.offsetWidth
-      document.body.style.cursor = 'col-resize'
-      document.body.style.userSelect = 'none'
-      e.preventDefault()
+    // DOM 守护：如果 host 被页面脚本意外移除，重新注入
+    const guardian = new MutationObserver(() => {
+      if (!document.getElementById('ai-browser-assistant-host') && document.body) {
+        guardian.disconnect()
+        console.log('[AI Browser] 浮动按钮被移除，重新注入')
+        initPageAssistant()
+      }
     })
-
-    document.addEventListener('mousemove', (e) => {
-      if (!isResizing) return
-      const diff = startX - e.clientX
-      const newWidth = Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, startWidth + diff))
-      sidebarEl.style.width = newWidth + 'px'
-      sidebarWidth = newWidth
-      shiftFabGroup(newWidth)
-    })
-
-    document.addEventListener('mouseup', () => {
-      if (!isResizing) return
-      isResizing = false
-      document.body.style.cursor = ''
-      document.body.style.userSelect = ''
-    })
-
-    document.body.appendChild(host)
-    floatingSidebar = host
-    shiftFabGroup(sidebarWidth)
+    guardian.observe(document.body, { childList: true })
   }
 
-  function closeFloatingSidebar() {
-    if (floatingSidebar) {
-      floatingSidebar.style.display = 'none'
-    }
-    // 恢复浮动按钮到右侧边缘
-    shiftFabGroup(0)
-  }
-
-  function shiftFabGroup(offsetRight) {
-    if (!fabShadow) return
-    const group = fabShadow.querySelector('.fab-group')
-    if (group) {
-      group.style.right = offsetRight + 'px'
-    }
-  }
-
-  // ---- 划词动作处理 ----
+  // ---- 划词动作处理（通过原生 sidePanel）----
   function handleSelectionAction(action, text) {
     const prompts = {
       explain: '请解释以下内容：\n\n',
@@ -365,8 +281,9 @@
     }
     const prompt = prompts[action] || '请分析以下内容：\n\n'
     const fullMessage = prompt + text
+    // 存储待发送消息，并打开原生 sidePanel
     chrome.storage.local.set({ pendingMessage: fullMessage }).catch(() => {})
-    openFloatingSidebar()
+    safeSendMessage({ type: 'toggleSidebar', action })
   }
 
   // ---- 页面内容提取 ----
@@ -379,11 +296,9 @@
       wordCount: 0,
     }
 
-    // 提取 meta description
     const metaDesc = document.querySelector('meta[name="description"]')
     if (metaDesc) result.description = metaDesc.content || ''
 
-    // 尝试从主流阅读容器提取正文
     const selectors = [
       'article', 'main', '[role="main"]',
       '.article-content', '.post-content', '.entry-content',
@@ -398,14 +313,11 @@
       if (mainEl) break
     }
 
-    // 如果找不到主内容区，回退到 body
     if (!mainEl) mainEl = document.body
 
-    // 清理并提取文本
     result.content = cleanTextContent(mainEl)
     result.wordCount = result.content.length
 
-    // 截断过长的内容（避免超出 AI token 限制）
     const MAX_LENGTH = 12000
     if (result.content.length > MAX_LENGTH) {
       result.content = result.content.slice(0, MAX_LENGTH) + '\n\n[...内容已截断，共' + result.wordCount + '字]'
@@ -415,10 +327,8 @@
   }
 
   function cleanTextContent(el) {
-    // 克隆节点避免修改原始 DOM
     const clone = el.cloneNode(true)
 
-    // 移除不需要的元素
     const removeSelectors = [
       'script', 'style', 'noscript', 'iframe', 'svg',
       'nav', 'header', 'footer',
@@ -432,7 +342,6 @@
       clone.querySelectorAll(sel).forEach(e => e.remove())
     })
 
-    // 提取文本，保留段落结构
     const blocks = []
     const walk = (node) => {
       if (node.nodeType === Node.TEXT_NODE) {
@@ -448,7 +357,6 @@
     }
     walk(clone)
 
-    // 合并并清理多余空白
     return blocks.join(' ')
       .replace(/\n{3,}/g, '\n\n')
       .replace(/  +/g, ' ')
@@ -458,18 +366,14 @@
   // ============ 智能表单填充 ============
 
   function initFormFill() {
-    // 定时扫描表单（处理 SPA / 动态加载的表单）
     const formButtons = new WeakMap()
 
     function scanForms() {
       const forms = document.querySelectorAll('form')
       forms.forEach(form => {
-        // 已经注入过按钮则跳过
         if (formButtons.has(form)) return
-        // 跳过太小的表单、搜索栏
         const inputs = form.querySelectorAll('input:not([type="hidden"]):not([type="submit"]):not([type="button"]):not([type="image"]), select, textarea')
         if (inputs.length < 2) return
-        // 跳过纯搜索框
         const searchTypes = ['search', 'q', 'query', 'keyword']
         if (inputs.length <= 2 &&
             [...inputs].every(el => searchTypes.includes(el.name?.toLowerCase()) || searchTypes.includes(el.id?.toLowerCase()))) {
@@ -480,7 +384,6 @@
     }
 
     function injectFormButton(form) {
-      // 创建按钮宿主
       const host = document.createElement('div')
       host.style.cssText = 'display:inline-block;margin-left:10px;vertical-align:middle'
 
@@ -508,7 +411,6 @@
         try {
           const fields = analyzeFormFields(form)
 
-          // 发送到 background 让 AI 生成填充数据
           const response = await new Promise((resolve) => {
             chrome.runtime.sendMessage({
               type: 'formFillRequest',
@@ -520,7 +422,6 @@
 
           if (response?.ok && response.mapping) {
             fillFormFields(form, fields, response.mapping)
-            // 成功反馈
             highlightForm(form)
           } else {
             const errMsg = response?.error || 'AI 填充失败'
@@ -536,7 +437,6 @@
         }
       })
 
-      // 把按钮插入 form 的 submit 按钮前（或表单末尾）
       const submitBtn = form.querySelector('button[type="submit"], input[type="submit"]')
       if (submitBtn) {
         submitBtn.insertAdjacentElement('beforebegin', host)
@@ -547,10 +447,8 @@
       formButtons.set(form, true)
     }
 
-    // 初始扫描
     scanForms()
 
-    // 使用 MutationObserver 检测新增表单
     const observer = new MutationObserver(() => {
       scanForms()
     })
@@ -566,7 +464,6 @@
 
   function analyzeFormFields(form) {
     const fields = []
-    // 收集所有输入元素
     const inputs = form.querySelectorAll('input:not([type="submit"]):not([type="button"]):not([type="image"]):not([type="hidden"]), select, textarea')
     inputs.forEach((el, idx) => {
       const field = {
@@ -576,21 +473,17 @@
         placeholder: el.placeholder || '',
         required: el.required || false,
       }
-      // 尝试寻找 label
       if (el.id) {
         const label = document.querySelector(`label[for="${el.id}"]`)
         if (label) field.label = label.textContent.trim()
       }
       if (!field.label) {
-        // 查找最近的临近文本
         const prevText = findAdjacentLabel(el)
         if (prevText) field.label = prevText
       }
-      // 提取 select 的选项
       if (el.tagName === 'SELECT') {
         field.options = [...el.options].map(o => o.textContent.trim()).filter(o => o)
       }
-      // 对于 radio/checkbox，收集同组 value
       if (el.type === 'radio' || el.type === 'checkbox') {
         if (el.name) {
           const groupValues = [...form.querySelectorAll(`input[name="${el.name}"], input[name="$${el.name}"]`)].map(r => r.value).filter(v => v)
@@ -603,41 +496,33 @@
   }
 
   function findAdjacentLabel(el) {
-    // 查找前一个兄弟的文本
     let prev = el.previousElementSibling
-    if (prev) {
+    let count = 0
+    while (prev && count < 3) {
+      if (prev.tagName === 'LABEL') return prev.textContent.trim()
       const text = prev.textContent?.trim()
-      if (text && text.length <= 50) return text
+      if (text && text.length < 50) return text
+      prev = prev.previousElementSibling
+      count++
     }
-    // 查找父元素内的 label
-    const parent = el.closest('label, .form-group, .form-item, .field, .input-group, td, .ant-form-item, .el-form-item')
-    if (parent) {
-      const labelEl = parent.querySelector('label, .label, .title, .field-label')
-      if (labelEl) {
-        const text = labelEl.textContent?.trim()
-        if (text && text.length <= 50) return text.replace(/[*:：\s]+$/, '')
-      }
-    }
+    const parent = el.parentElement
+    if (parent?.tagName === 'LABEL') return parent.textContent.trim()
     return null
   }
 
   function fillFormFields(form, fields, mapping) {
-    const inputs = form.querySelectorAll('input:not([type="submit"]):not([type="button"]):not([type="image"]):not([type="hidden"]), select, textarea')
-    const inputArr = [...inputs]
-
-    for (const [idx, value] of Object.entries(mapping)) {
-      const i = parseInt(idx)
-      const el = inputArr[i]
+    for (const [key, value] of Object.entries(mapping)) {
+      const idx = parseInt(key)
+      if (isNaN(idx) || idx >= fields.length) continue
+      const el = form.querySelectorAll('input:not([type="submit"]):not([type="button"]):not([type="image"]):not([type="hidden"]), select, textarea')[idx]
       if (!el) continue
-
       try {
         if (el.tagName === 'SELECT') {
-          // 尝试精确匹配或部分匹配
-          const options = [...el.options]
-          const match = options.find(o => o.textContent.trim() === value) ||
-                        options.find(o => o.textContent.trim().includes(value)) ||
-                        (el.value === '' ? options[Math.min(i, options.length - 1)] : null)
-          if (match) el.value = match.value
+          // 在 option 列表中查找匹配项（文本包含 value），取其 option.value 赋值
+          const optionEls = [...el.options]
+          const matchOpt = optionEls.find(o => o.textContent.trim().includes(value)) ||
+                           (el.value === '' ? optionEls[Math.min(idx, optionEls.length - 1)] : null)
+          if (matchOpt) el.value = matchOpt.value
         } else if (el.type === 'radio') {
           const radio = form.querySelector(`input[name="${el.name}"][value="${value}"]`) ||
                         form.querySelector(`input[name="$${el.name}"][value="${value}"]`)
@@ -645,7 +530,6 @@
         } else if (el.type === 'checkbox') {
           el.checked = ['true', 'yes', '是', '1'].includes(String(value).toLowerCase())
         } else {
-          // 原生设置值（支持 React/Vue）
           const nativeInputValueSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set
           const nativeTextareaSetter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set
           if (el.tagName === 'TEXTAREA' && nativeTextareaSetter) {
@@ -655,7 +539,6 @@
           } else {
             el.value = value
           }
-          // 触发事件以通知框架
           el.dispatchEvent(new Event('input', { bubbles: true }))
           el.dispatchEvent(new Event('change', { bubbles: true }))
         }

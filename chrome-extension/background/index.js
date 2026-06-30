@@ -34,7 +34,7 @@ const scriptService = new ScriptService(configService)
 const sidebarService = new SidebarService()
 const pageService = new PageService(scriptService)
 const toolService = new ToolService(configService)
-const agentService = new AgentService(configService, toolService, pageService)
+const agentService = new AgentService(configService, toolService, pageService, scriptService)
 
 const services = {
   configService,
@@ -75,7 +75,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return false
   }
 
-  // 浮动按钮 toggle 原生 sidePanel：弹出/关闭，而非新建/销毁
+  // 浮动按钮点击：始终尝试打开原生 sidePanel（不追踪 isOpen 状态，因为用户可能通过原生 X 关闭导致状态不同步）
   if (msg.type === 'toggleSidebar') {
     const tabId = sender.tab?.id
     const action = msg.action
@@ -86,31 +86,14 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       return false
     }
     ;(async () => {
-      const key = `sidePanelOpen_${tabId}`
-      const result = await chrome.storage.local.get(key)
-      const isOpen = result[key]
-      console.log('[Background] toggleSidebar: 当前状态 isOpen=', isOpen)
-      if (isOpen) {
-        // 当前已打开 → 关闭
-        await sidebarService.close(tabId)
-        await chrome.storage.local.set({ [key]: false })
-        console.log('[Background] toggleSidebar: 已关闭')
-        sendResponse({ ok: true, opened: false })
-      } else {
-        // 当前已关闭 → 打开
-        const success = await sidebarService.open(tabId)
-        console.log('[Background] toggleSidebar: open 结果=', success)
-        if (success) {
-          await chrome.storage.local.set({ [key]: true })
-          // 传递 action 给 sidepanel，让它启动后切换到对应视图
-          if (action) {
-            await chrome.storage.local.set({ floatingToolAction: action })
-          }
-          sendResponse({ ok: true, opened: true })
-        } else {
-          sendResponse({ ok: false, error: '打开侧边栏失败（手势丢失），请用浏览器工具栏的扩展图标打开' })
-        }
+      // 先存储 action（无论 open 成功与否，sidepanel 手动打开时都能读取）
+      if (action) {
+        await chrome.storage.local.set({ floatingToolAction: action })
       }
+      // 尝试打开 sidePanel
+      const success = await sidebarService.open(tabId)
+      console.log('[Background] toggleSidebar: open 结果=', success)
+      sendResponse({ ok: success, opened: success })
     })()
     return true  // 异步响应
   }
@@ -148,6 +131,14 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return true
   }
 
+  // Agent 导航后，content script / sidePanel 查询是否有活跃 Agent
+  if (msg.type === 'checkAgentStatus') {
+    const tabId = msg.tabId || sender.tab?.id
+    const running = tabId ? agentService.isRunning(tabId) : false
+    sendResponse({ agentRunning: running })
+    return false
+  }
+
   return false
 })
 
@@ -164,10 +155,20 @@ chrome.runtime.onConnect.addListener((port) => {
     })
   }
   if (port.name === 'agent-stream') {
+    let attached = false
     port.onMessage.addListener(async (msg) => {
       if (msg.type === 'agentStart') {
-        // Plan B: 不传 port 给 run，而是通过 startAgent 管理
+        attached = true
         await agentService.startAgent(port, msg.userMessage, msg.chatHistory)
+      }
+      if (msg.type === 'agentAttach') {
+        attached = true
+        const tabs = await chrome.tabs.query({ active: true, currentWindow: true })
+        const tabId = tabs[0]?.id
+        if (tabId && agentService.isRunning(tabId)) {
+          agentService.attachPort(tabId, port)
+          console.log('[Background] Agent 重连成功, tabId:', tabId)
+        }
       }
     })
     port.onDisconnect.addListener(() => {

@@ -102,38 +102,21 @@ body{width:360px;min-height:420px;max-height:520px;font-family:var(--font-sans);
 <div id="page-settings" class="page">
   <div class="content">
     <div class="config-group">
-      <label>AI 服务商</label>
-      <select id="aiProvider">
-        <option value="ollama">Ollama (本地)</option>
-        <option value="openai">OpenAI</option>
-        <option value="qwen">通义千问</option>
-        <option value="custom">自定义</option>
-      </select>
-    </div>
-    <div class="config-group">
-      <label>API 地址</label>
-      <input type="text" id="aiBaseUrl" placeholder="http://localhost:11434/v1">
-    </div>
-    <div class="config-group">
-      <label>API Key</label>
-      <input type="password" id="aiApiKey" placeholder="可选">
-    </div>
-    <div class="config-group">
-      <label>模型</label>
-      <input type="text" id="aiModel" placeholder="qwen2.5:7b">
-    </div>
-    <hr style="border:none;border-top:1px solid var(--border);margin:16px 0">
-    <div class="config-group">
       <label>管理后台地址</label>
       <input type="text" id="serverUrl" placeholder="http://localhost:3001">
     </div>
     <div class="config-group">
-      <label>API Token</label>
-      <input type="password" id="token" placeholder="从管理后台获取">
+      <label>AppKey</label>
+      <input type="text" id="syncAppKey" placeholder="输入AppKey">
     </div>
     <div class="config-group">
-      <label>同步间隔（分钟）</label>
-      <input type="number" id="syncInterval" value="30" min="5" max="1440">
+      <label>AppSecret</label>
+      <input type="password" id="syncAppSecret" placeholder="输入AppSecret">
+    </div>
+    <hr style="border:none;border-top:1px solid var(--border);margin:16px 0">
+    <div class="config-group">
+      <label>模型</label>
+      <input type="text" id="aiModel" placeholder="deepseek-chat">
     </div>
     <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px">
       <label style="font-size:12px;font-weight:600">启用划词工具栏</label>
@@ -143,6 +126,6 @@ body{width:360px;min-height:420px;max-height:520px;font-family:var(--font-sans);
   </div>
 </div>
 <div class="status-bar" id="statusBar">就绪</div>
-<script type="module" src="popup.js"></script>
+<script src="popup.js"></script>
 </body>
 </html>

@@ -15,15 +15,17 @@ export class ScriptService {
 
   async syncScripts() {
     const config = await this.configService.getSyncConfig()
-    if (!config.serverUrl || !config.token) {
-      console.warn('[ScriptService] 未配置服务器地址或Token')
-      await chrome.storage.local.set({ syncError: '未配置服务器地址或Token' })
+    if (!config.serverUrl) {
+      console.warn('[ScriptService] 未配置服务器地址')
+      await chrome.storage.local.set({ syncError: '未配置服务器地址' })
       return { ok: false, error: '未配置' }
     }
 
     try {
+      const auth = await this.configService.getAppAuth()
+      const authHeaders = await this.configService.generateAuthHeaders(auth.appKey, auth.appSecret)
       const res = await fetch(`${config.serverUrl}/api/scripts?pageSize=100`, {
-        headers: { Authorization: `Bearer ${config.token}` },
+        headers: authHeaders,
       })
       if (!res.ok) {
         const text = await res.text()
