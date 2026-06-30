@@ -10,6 +10,7 @@ const MSG_TYPES = {
 let chatHistory = []
 let isStreaming = false
 let currentPort = null
+let recentlyStreamedContent = '' // 防止 storage.onChanged 重复添加 streaming 内容
 let agentMode = false      // Agent 自主决策模式
 let agentStepCards = []    // Agent 步骤卡片
 let currentModelInfo = null     // 当前选中模型的能力信息
@@ -533,6 +534,8 @@ async function sendMessage(text) {
           return
         }
         chatHistory.push({ role: 'assistant', content: fullContent })
+        recentlyStreamedContent = fullContent
+        setTimeout(() => { recentlyStreamedContent = '' }, 1000)
         callService('storageService', 'saveChatHistory', chatHistory)
         isStreaming = false
         sendBtn.disabled = false
@@ -547,6 +550,8 @@ async function sendMessage(text) {
 
     currentPort.onDisconnect.addListener(() => {
       console.log('[SidePanel] Agent port 断开')
+      if (fullContent) recentlyStreamedContent = fullContent
+      setTimeout(() => { recentlyStreamedContent = '' }, 1000)
       isStreaming = false
       sendBtn.disabled = false
       currentPort = null
@@ -752,6 +757,8 @@ async function runAgent(userText, pageContext) {
           agentRecord.toolCalls = toolResults.map(t => ({ name: t.name, summary: String(t.result).slice(0, 200) }))
         }
         chatHistory.push(agentRecord)
+        recentlyStreamedContent = fullContent  // 标记已流式显示，防止 storage.onChanged 重复添加
+        setTimeout(() => { recentlyStreamedContent = '' }, 1000)
         isStreaming = false
         sendBtn.disabled = false
         currentPort = null
@@ -1552,23 +1559,26 @@ chrome.storage.onChanged.addListener((changes, area) => {
         if (newMsgs.length > 0) {
           console.log('[SidePanel] storage.onChanged: 检测到', newMsgs.length, '条新消息（来自 Agent）')
           chatHistory = newHistory
-          for (const msg of newMsgs) {
-            if (msg.role === 'assistant' && msg.toolCalls && msg.toolCalls.length > 0) {
-              const card = document.createElement('div')
-              card.className = 'agent-step-card history'
-              const toolList = msg.toolCalls.map((t, i) =>
-                `<div class="agent-history-step"><span class="step-num">${i + 1}.</span> ${escapeHtml(t.name)}</div>`
-              ).join('')
-              card.innerHTML = `
-                <div class="agent-step-header">
-                  <span class="agent-step-icon">&#x2705;</span>
-                  <span class="agent-step-title">Agent 已执行 ${msg.toolCalls.length} 个步骤</span>
-                </div>
-                <div class="agent-step-body">${toolList}</div>
-              `
-              chatMessages.appendChild(card)
+          // 如果 streaming 正在进行或刚完成，不重复添加 UI（streaming div 已显示）
+          if (!isStreaming && !recentlyStreamedContent) {
+            for (const msg of newMsgs) {
+              if (msg.role === 'assistant' && msg.toolCalls && msg.toolCalls.length > 0) {
+                const card = document.createElement('div')
+                card.className = 'agent-step-card history'
+                const toolList = msg.toolCalls.map((t, i) =>
+                  `<div class="agent-history-step"><span class="step-num">${i + 1}.</span> ${escapeHtml(t.name)}</div>`
+                ).join('')
+                card.innerHTML = `
+                  <div class="agent-step-header">
+                    <span class="agent-step-icon">&#x2705;</span>
+                    <span class="agent-step-title">Agent 已执行 ${msg.toolCalls.length} 个步骤</span>
+                  </div>
+                  <div class="agent-step-body">${toolList}</div>
+                `
+                chatMessages.appendChild(card)
+              }
+              addMessage(msg.role, msg.content, msg.attachments)
             }
-            addMessage(msg.role, msg.content, msg.attachments)
           }
           // 如果正在 streaming 状态（isStreaming=true），说明 Agent 刚完成
           if (isStreaming) {
