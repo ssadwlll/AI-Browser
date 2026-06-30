@@ -1,11 +1,22 @@
 // AI Browser Chrome Extension - Popup Logic
 
 async function callService(service, method, ...args) {
-  const res = await chrome.runtime.sendMessage({
-    type: 'callService', service, method, args,
-  })
-  if (res?.error) throw new Error(res.error)
-  return res?.data
+  if (!chrome.runtime?.id) {
+    console.warn('[Popup] Extension context invalidated')
+    throw new Error('扩展已重载，请重新打开弹窗')
+  }
+  try {
+    const res = await chrome.runtime.sendMessage({
+      type: 'callService', service, method, args,
+    })
+    if (res?.error) throw new Error(res.error)
+    return res?.data
+  } catch (e) {
+    if (e.message?.includes('Extension context invalidated') || e.message?.includes('Could not establish connection')) {
+      throw new Error('扩展已重载，请重新打开弹窗')
+    }
+    throw e
+  }
 }
 
 // Tab 切换

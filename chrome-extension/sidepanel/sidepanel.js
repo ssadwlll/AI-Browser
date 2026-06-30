@@ -81,12 +81,25 @@ function loadAttachmentsFromStorage() {
 
 // ============ RPC 调用 ============
 async function callService(service, method, ...args) {
-  const res = await chrome.runtime.sendMessage({
-    type: MSG_TYPES.CALL_SERVICE,
-    service, method, args,
-  })
-  if (res?.error) throw new Error(res.error)
-  return res?.data
+  // 扩展被重载/更新后，sidepanel 的连接会失效
+  if (!chrome.runtime?.id) {
+    console.warn('[RPC] Extension context invalidated, cannot call', service, method)
+    throw new Error('扩展上下文已失效，请关闭侧边栏后重新打开')
+  }
+  try {
+    const res = await chrome.runtime.sendMessage({
+      type: MSG_TYPES.CALL_SERVICE,
+      service, method, args,
+    })
+    if (res?.error) throw new Error(res.error)
+    return res?.data
+  } catch (e) {
+    if (e.message?.includes('Extension context invalidated') || e.message?.includes('Could not establish connection')) {
+      console.warn('[RPC] 扩展已重载，请重新打开侧边栏')
+      throw new Error('扩展已重载，请关闭侧边栏后重新打开')
+    }
+    throw e
+  }
 }
 
 // ============ 视图切换 ============
@@ -496,6 +509,7 @@ async function sendMessage(text) {
       messagesForAI = chatHistory
     }
 
+    if (!chrome.runtime?.id) { finishStreaming('扩展已重载，请重新打开侧边栏'); return }
     currentPort = chrome.runtime.connect({ name: 'ai-stream' })
     currentPort.postMessage({
       type: 'streamStart',
@@ -653,6 +667,7 @@ async function runAgent(userText, pageContext) {
   const toolResults = [] // 收集工具执行结果，streamDone时一并存入历史
 
   try {
+    if (!chrome.runtime?.id) { finishStreaming('扩展已重载，请重新打开侧边栏'); return }
     currentPort = chrome.runtime.connect({ name: 'agent-stream' })
 
     // Agent 模式 PDF 附件处理
