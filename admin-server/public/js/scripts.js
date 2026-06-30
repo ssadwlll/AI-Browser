@@ -31,6 +31,7 @@ async function loadScripts(page) {
           <td>${fmtDate(s.updated_at)}</td>
           <td>
             <button class="btn-icon" onclick="viewScriptCode(${s.id})" title="查看代码">📄</button>
+            <button class="btn-icon" onclick="editScriptMeta(${s.id})" title="编辑代码和元数据" style="color:var(--primary)">✏️</button>
             <button class="btn-icon" onclick="previewScript(${s.id})" title="预览">👁</button>
             <button class="btn-icon" onclick="installToTampermonkey(${s.id})" title="安装到油猴" style="color:#76b900">🧩</button>
             <button class="btn-icon" onclick="downloadScript(${s.id})" title="下载">⬇</button>
@@ -192,6 +193,37 @@ async function viewScriptCode(id) {
     document.getElementById('modulesSection').style.display = 'block';
     renderParamsSection(currentParamsSchema, currentParamsData);
     renderModulesSection(currentModules);
+  } catch(e) {
+    toast('网络错误: ' + e.message, 'error');
+  }
+}
+
+// ============ 一键编辑（直接进入编辑模式，含元数据） ============
+async function editScriptMeta(id) {
+  // 先加载脚本详情
+  try {
+    const res = await api('GET', '/api/scripts/' + id);
+    if (!res.success) { toast('获取脚本详情失败', 'error'); return; }
+    currentCodeScript = res.data;
+    isCodeEditing = false;
+
+    document.getElementById('codeModalTitle').textContent = '编辑脚本 - ' + currentCodeScript.name;
+    document.getElementById('codeModalError').style.display = 'none';
+    document.getElementById('codeView').textContent = currentCodeScript.code || '// 此脚本文件为空';
+
+    // 初始化参数和模块
+    currentParamsSchema = currentCodeScript.params_schema || [];
+    currentParamsData = currentCodeScript.params_data || {};
+    currentModules = currentCodeScript.modules || [];
+    document.getElementById('paramsSection').style.display = 'block';
+    document.getElementById('modulesSection').style.display = 'block';
+    renderParamsSection(currentParamsSchema, currentParamsData);
+    renderModulesSection(currentModules);
+
+    document.getElementById('codeModal').classList.remove('hidden');
+
+    // 直接切到编辑模式
+    toggleCodeEdit();
   } catch(e) {
     toast('网络错误: ' + e.message, 'error');
   }
