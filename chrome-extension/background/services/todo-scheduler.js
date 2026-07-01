@@ -71,28 +71,32 @@ export class TodoScheduler {
 
     return `请根据用户需求创建分阶段待办列表。
 
-=== 三阶段父待办模板 ===
+=== 三阶段说明 ===
+Stage 1（页面探索）：用DOM工具在页面上操作（提取信息、点击、导航等）
+Stage 2（脚本处理）：用服务端脚本批量处理数据。脚本调用格式为 inject_script_N，其中 N 是脚本ID数字
+Stage 3（结果汇总）：输出最终结果
 
-Stage 1（本地DOM工具）：用DOM工具在页面上操作
-  subTodos 示例:
-  - { id: "s1-1", action: "read_page_content", description: "读取页面内容", dataDependKeys: [], dataOutputKey: "page_content" }
-  - { id: "s1-2", action: "extract_content", description: "提取新闻列表", dataDependKeys: [], dataOutputKey: "news_links" }
+=== 待办格式 ===
+每个 subTodo 必须包含:
+- id: 唯一标识（如 "s1-1", "s2-1"）
+- action: 工具名称。Stage1用DOM工具名；Stage2用 inject_script_N（N为脚本ID）；Stage3用 finish_task
+- description: 简要描述此步骤做什么
+- dataDependKeys: 依赖的数据key列表（引用之前待办的 dataOutputKey，无依赖为 []）
+- dataOutputKey: 输出数据的语义key（供后续待办引用，无输出设为 null）
 
-Stage 2（远程脚本）：用服务器端脚本批量处理（可为空）
-  subTodos 示例:
-  - { id: "s2-1", action: "inject_script_N", description: "批量采集内页", dataDependKeys: ["news_links"], dataOutputKey: "article_content" }${scriptHint}
+=== 正确示例 ===
+Stage 1:
+  { id: "s1-1", action: "read_page_content", description: "读取页面内容", dataDependKeys: [], dataOutputKey: "page_data" }
+  { id: "s1-2", action: "extract_content", description: "提取条目列表", dataDependKeys: [], dataOutputKey: "item_list" }
+Stage 2:
+  { id: "s2-1", action: "inject_script_10", description: "批量处理详情页", dataDependKeys: ["item_list"], dataOutputKey: "detail_data" }${scriptHint}
+Stage 3:
+  { id: "s3-1", action: "finish_task", description: "汇总所有数据", dataDependKeys: ["item_list", "detail_data"], dataOutputKey: null }
 
-Stage 3（数据汇总）：输出最终结果（固定1个）
-  subTodos:
-  - { id: "s3-1", action: "finish_task", description: "汇总所有数据", dataDependKeys: ["news_links", "article_content"], dataOutputKey: null }
-
-=== 规则 ===
-- 每个 subTodo 必须有: id, action, description
-- dataDependKeys: 依赖的数据key列表（从之前待办的dataOutputKey获取）
-- dataOutputKey: 输出数据的语义key（供后续待办引用，无输出设为null）
-- Stage 1 的 action 只能用DOM工具名
-- Stage 2 的 action 只能用 inject_script_* 或 search_tools
-- Stage 3 的 action 只能是 finish_task
+=== 常见错误 ===
+❌ Stage2 action 写成脚本中文名（如 "批量采集页面"）→ 应写为 inject_script_N 格式
+❌ Stage2 action 写成 DOM 工具名（如 "navigate_to"）→ Stage2 只能用 inject_script_* 或 search_tools
+❌ dataDependKeys 引用了不存在的 key → 必须引用之前待办的 dataOutputKey
 
 用户需求: ${userMessage}`
   }
@@ -147,20 +151,20 @@ Stage 3（数据汇总）：输出最终结果（固定1个）
         if (todo.action) {
           if (stage.stage === 1) {
             if (todo.action.startsWith('inject_script_')) {
-              errors.push(`Stage 1 禁止使用 ${todo.action}（硬性规则：Stage1屏蔽inject）`)
+              errors.push(`Stage 1 禁止使用 ${todo.action}。脚本属于Stage2，请将该待办移到Stage2。正确示例: Stage2 action="inject_script_10"`)
             } else if (!STAGE1_TOOLS.has(todo.action)) {
-              errors.push(`Stage 1 不允许使用 ${todo.action}（仅允许DOM工具）`)
+              errors.push(`Stage 1 不允许使用 ${todo.action}。Stage1只能用DOM工具（如 read_page_content, extract_content, navigate_to 等）`)
             }
           }
           if (stage.stage === 2) {
             const isAllowed = STAGE2_TOOLS.has(todo.action) ||
               todo.action.startsWith('inject_script_')
             if (!isAllowed) {
-              errors.push(`Stage 2 不允许使用 ${todo.action}（仅允许 search_tools/inject_script_*/recall_data/read_page_content/finish_task）`)
+              errors.push(`Stage 2 不允许使用 ${todo.action}。Stage2只能用 inject_script_N（N为脚本ID数字，如 inject_script_10）或 search_tools。不要用中文名或DOM工具。`)
             }
           }
           if (stage.stage === 3 && !STAGE3_TOOLS.has(todo.action)) {
-            errors.push(`Stage 3 不允许使用 ${todo.action}（仅允许 recall_data/finish_task）`)
+            errors.push(`Stage 3 不允许使用 ${todo.action}。Stage3只能用 recall_data 或 finish_task`)
           }
         }
 
@@ -168,7 +172,7 @@ Stage 3（数据汇总）：输出最终结果（固定1个）
         if (Array.isArray(todo.dataDependKeys)) {
           for (const depKey of todo.dataDependKeys) {
             if (!availableKeys.has(depKey)) {
-              errors.push(`待办 ${todo.id} 的 dataDependKeys 引用了不存在的 key: "${depKey}"`)
+              errors.push(`待办 ${todo.id} 的 dataDependKeys 引用了不存在的 key: "${depKey}"。dataDependKeys 必须引用之前待办的 dataOutputKey。当前可用的 key: ${[...availableKeys].join(', ') || '（无）'}`)
             }
           }
         }
