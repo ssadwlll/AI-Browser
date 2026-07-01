@@ -8,27 +8,22 @@
  */
 function filterScripts(searchResults, currentPageUrl, scriptService, filteredScriptsCache, domainMismatchLogged) {
   if (!searchResults || searchResults.length === 0) return []
-  const cacheKey = currentPageUrl || '__no_url__'
-  let cached = filteredScriptsCache.get(cacheKey)
-  if (!cached) {
-    cached = []
-    for (const s of searchResults.slice(0, 12)) {
-      if (cached.length >= 6) break
-      if (s.urlPattern && s.urlPattern !== '*' && currentPageUrl) {
-        if (!scriptService.matchUrl(s.urlPattern, currentPageUrl)) {
-          const msgKey = `${s.id}_${cacheKey}`
-          if (!domainMismatchLogged.has(msgKey)) {
-            domainMismatchLogged.add(msgKey)
-            console.log(`[Agent] 脚本域名不匹配，跳过: ${s.name} (urlPattern=${s.urlPattern})`)
-          }
-          continue
+  const result = []
+  for (const s of searchResults.slice(0, 12)) {
+    if (result.length >= 6) break
+    if (s.urlPattern && s.urlPattern !== '*' && currentPageUrl) {
+      if (!scriptService.matchUrl(s.urlPattern, currentPageUrl)) {
+        const msgKey = `${s.id}_${currentPageUrl || '__no_url__'}`
+        if (!domainMismatchLogged.has(msgKey)) {
+          domainMismatchLogged.add(msgKey)
+          console.log(`[Agent] 脚本域名不匹配，跳过: ${s.name} (urlPattern=${s.urlPattern})`)
         }
+        continue
       }
-      cached.push(s)
     }
-    filteredScriptsCache.set(cacheKey, cached)
+    result.push(s)
   }
-  return cached
+  return result
 }
 
 /**
