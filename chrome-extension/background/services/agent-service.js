@@ -1326,13 +1326,11 @@ export class AgentService {
     await this._loadDomainPolicy()
     // 从配置读取所有可配置参数
     let maxRounds = 15
-    let MAX_CONSECUTIVE_FAILS = 5
     let enableJudge = true
     let debug = false
     try {
       const agentCfg = await this.configService.getAgentConfig()
       if (agentCfg?.maxRounds >= 5) maxRounds = agentCfg.maxRounds
-      if (agentCfg?.maxConsecutiveFails >= 2) MAX_CONSECUTIVE_FAILS = agentCfg.maxConsecutiveFails
       enableJudge = agentCfg?.enableJudge !== false
       debug = agentCfg?.debug === true
     } catch {}
@@ -1348,17 +1346,12 @@ export class AgentService {
     let totalToolCalls = 0      // 工具调用总次数（含本地工具，防止无限调用）
     let searchResults = []
     const executedTools = []
-    let consecutiveFailCount = 0  // 连续无进展计数（保留作为硬性规则触发器）
     const _injections = []        // 系统注入消息（不写入主消息数组，避免破坏 assistant/tool 交替结构）
     let hasSearchedTools = false  // 自动搜索命中或LLM主动调用 search_tools 后置true
     // ===== 待办调度引擎初始化（三层存储+进度追踪+硬性规则） =====
     this.todoScheduler.clear()
     // 阶段切换由 todoScheduler 管理，本地变量用于构建工具列表
     let currentPhase = 1             // 映射到 todoScheduler.currentStage
-    let phase1FailCount = 0
-    const PHASE1_FAIL_THRESHOLD = 4
-    let phase2FailCount = 0
-    const PHASE2_FAIL_THRESHOLD = 3
     // 辅助跟踪（recall_data和selector重复提示）
     const _recallDataCallCount = new Map()
     const _usedSelectorToolCombo = new Set()
@@ -1536,7 +1529,7 @@ finish_task: 任务完成，汇报结果
     _debugLog('🐛 调试模式已开启', '待办调度系统：系统驱动进度追踪、收敛提示、阶段切换')
 
     // ===== 调试：输出配置摘要 =====
-    _debugLog('⚙️ Agent配置', { maxRounds, MAX_CONSECUTIVE_FAILS, enableJudge, debug })
+    _debugLog('⚙️ Agent配置', { maxRounds, enableJudge, debug })
     _debugLog('📋 系统提示词', systemMsg.content)
 
     while (aiRequestCount < maxRounds) {
@@ -2200,9 +2193,6 @@ finish_task: 任务完成，汇报结果
               _debugLog('🔄 硬性规则触发阶段切换', stageSwitch)
               this.todoScheduler.forceSwitchToStage(stageSwitch.to)
               currentPhase = stageSwitch.to
-              phase1FailCount = 0
-              phase2FailCount = 0
-              consecutiveFailCount = 0
               // 阶段切换时注入上下文（复用现有的阶段切换逻辑）
               if (stageSwitch.to === 2) {
                 // 切换到Stage2：构建隔离提示词
@@ -2269,48 +2259,11 @@ ${allData.length > 0 ? allData.join('\n') : '（无数据）'}`
               }
             }
 
-            // 使用更强烈的 nudge 重置无进展计数
+            // ===== 统一进度/失败记录（由调度引擎管理，不再使用本地计数变量） =====
             if (hasProgress) {
-              consecutiveFailCount = 0
-              // 阶段失败计数也重置（有进展说明当前阶段有效）
-              if (currentPhase === 1) phase1FailCount = 0
-              if (currentPhase === 2) phase2FailCount = 0
+              this.todoScheduler.recordProgress()
             } else {
-              consecutiveFailCount++
-              // 阶段失败计数：阶段1所有无进展都计，阶段2只有inject_script_*失败才计
-              if (currentPhase === 1) {
-                phase1FailCount++
-                _debugLog('📊 阶段1失败计数', { phase1FailCount, round: aiRequestCount, tool: funcName })
-              }
-              if (currentPhase === 2) {
-                // 阶段2只计脚本执行失败，search_tools/recall_data是信息收集不算失败
-                if (funcName.startsWith('inject_script_') || funcName.includes('inject_script')) {
-                  phase2FailCount++
-                  phase2ScriptAttempted = true
-                  _debugLog('📊 阶段2脚本失败计数', { phase2FailCount, round: aiRequestCount, tool: funcName })
-                }
-                // 如果没有脚本可用，search_tools多次搜索无结果也算失败
-                else if (funcName === 'search_tools' && searchResults.length === 0) {
-                  phase2FailCount++
-                  _debugLog('📊 阶段2搜索无果计数', { phase2FailCount, round: aiRequestCount })
-                }
-                // 其他工具在阶段2不计为失败
-              }
-              console.warn('[Agent] 无进展 #' + consecutiveFailCount, funcName, toolResult)
-            }
-
-            if (consecutiveFailCount >= MAX_CONSECUTIVE_FAILS) {
-              _debugLog('💡 提示: 连续无进展较多', { consecutiveFailCount, max: MAX_CONSECUTIVE_FAILS, phase: currentPhase })
-              // 根据当前阶段给出不同提示
-              if (currentPhase === 1) {
-                phase1FailCount += MAX_CONSECUTIVE_FAILS  // 批量计入阶段1失败，加速阶段切换
-                _injections.push(`💡 阶段1提示：已连续${consecutiveFailCount}次操作无进展。如果DOM工具无法完成任务，将自动切换到阶段2（远程脚本库模式）。`)
-              } else if (currentPhase === 2) {
-                phase2FailCount += 1
-                _injections.push(`💡 阶段2提示：已连续${consecutiveFailCount}次操作无进展。请尝试搜索其他关键词或调用finish_task。`)
-              }
-              // 重置通用计数
-              consecutiveFailCount = 0
+              this.todoScheduler.recordNoProgress(funcName)
             }
 
             this.postToUI(tabId, {

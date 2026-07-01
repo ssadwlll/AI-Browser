@@ -200,7 +200,7 @@ Stage 3（数据汇总）：输出最终结果（固定1个）
 
     if (status === 'done') {
       this.totalCompleted++
-      this.stageFailCount = 0  // 有进展，重置失败计数
+      // 失败计数由 recordProgress() 统一管理，此处不重复
 
       // 存储输出数据到全局存储
       if (todo.dataOutputKey && outputData !== null) {
@@ -219,14 +219,33 @@ Stage 3（数据汇总）：输出最终结果（固定1个）
         }
       }
     } else if (status === 'failed') {
-      this.stageFailCount++
-      // 阶段2：脚本失败单独计数
-      if (this.currentStage === STAGE.SCRIPT && todo.action?.startsWith('inject_script_')) {
-        this.stage2ScriptFailCount++
-      }
+      // 失败计数由 recordNoProgress() 统一管理，此处仅记录日志
+      console.log(`[TodoScheduler] todo ${todo.id} failed (action: ${todo.action})`)
     }
 
     console.log(`[TodoScheduler] todo ${todo.id} ${status} | 进度: ${this.totalCompleted}/${this.totalTodos} | 阶段${this.currentStage} 失败${this.stageFailCount}`)
+  }
+
+  /**
+   * 记录有进展（由引擎在每次工具调用有进展时调用）
+   * 重置连续失败计数，但不清零阶段2脚本失败累计
+   */
+  recordProgress() {
+    this.stageFailCount = 0
+  }
+
+  /**
+   * 记录无进展（由引擎在每次工具调用无进展时调用）
+   * 统一管理所有失败计数，包括未匹配待办的工具调用
+   */
+  recordNoProgress(funcName) {
+    this.stageFailCount++
+    // 阶段2：脚本执行失败单独累计（不随 stageFailCount 重置）
+    if (this.currentStage === STAGE.SCRIPT && funcName &&
+        (funcName.startsWith('inject_script_') || funcName.includes('inject_script'))) {
+      this.stage2ScriptFailCount++
+    }
+    console.log(`[TodoScheduler] 无进展: ${funcName} | 阶段${this.currentStage} 连续失败${this.stageFailCount} 脚本失败${this.stage2ScriptFailCount}`)
   }
 
   /**
