@@ -149,21 +149,31 @@ class EmbeddingService {
     const q = query.toLowerCase()
     const n = (name || '').toLowerCase()
     const d = (description || '').toLowerCase()
-    // 精确匹配 name
-    if (n === q) return 1.0
-    if (n.includes(q)) return 0.6
-    if (d.includes(q)) return 0.3
-    // P0: 加权 metadata.triggers 关键词
-    if (metadata && metadata.triggers && Array.isArray(metadata.triggers)) {
-      for (const t of metadata.triggers) {
-        if (typeof t === 'string' && t.toLowerCase().includes(q)) return 0.5
-      }
-      // 查询词包含 trigger
-      for (const t of metadata.triggers) {
-        if (typeof t === 'string' && q.includes(t.toLowerCase())) return 0.45
+    // 拆分为多个关键词，支持空格/逗号分隔
+    const words = q.split(/[\s,，、]+/).filter(w => w.length > 0)
+    if (words.length === 0) return 0
+
+    let score = 0
+    for (const w of words) {
+      // 精确匹配 name
+      if (n === w) { score += 1.0; continue }
+      if (n.includes(w)) { score += 0.6; continue }
+      if (d.includes(w)) { score += 0.3; continue }
+      // metadata.triggers 关键词
+      if (metadata && metadata.triggers && Array.isArray(metadata.triggers)) {
+        let matched = false
+        for (const t of metadata.triggers) {
+          if (typeof t === 'string' && t.toLowerCase().includes(w)) { score += 0.5; matched = true; break }
+        }
+        if (matched) continue
+        for (const t of metadata.triggers) {
+          if (typeof t === 'string' && w.includes(t.toLowerCase())) { score += 0.45; matched = true; break }
+        }
+        if (matched) continue
       }
     }
-    return 0
+    // 归一化：每个词最多1.0分，取平均
+    return words.length > 0 ? score / words.length : 0
   }
 
   /**
@@ -175,24 +185,41 @@ class EmbeddingService {
     try {
       const [rows] = await pool.query(
         `SELECT id, name, description, vector, metadata FROM scripts
-         WHERE status = 'published' AND vector IS NOT NULL`
+         WHERE status = 'published'`
       )
       if (rows.length === 0) return null
 
-      const queryVector = await this.embed(query)
+      // 对有向量的脚本生成查询向量
+      const hasVectorRows = rows.filter(r => r.vector)
+      let queryVector = null
+      if (hasVectorRows.length > 0) {
+        try {
+          queryVector = await this.embed(query)
+        } catch (e) {
+          console.warn('[Embedding] 查询向量生成失败:', e.message)
+        }
+      }
+
       const scored = rows.map(row => {
-        let vec
-        try { vec = JSON.parse(row.vector) } catch { return { id: row.id, name: row.name, description: row.description, score: 0 } }
-        const vectorScore = this.cosineSimilarity(queryVector, vec)
+        let vectorScore = 0
+        if (queryVector && row.vector) {
+          try {
+            const vec = JSON.parse(row.vector)
+            vectorScore = this.cosineSimilarity(queryVector, vec)
+          } catch { vectorScore = 0 }
+        }
         let metaParsed = null
         try { metaParsed = typeof row.metadata === 'string' ? JSON.parse(row.metadata) : row.metadata } catch {}
         const kwScore = this._keywordScore(query, row.name, row.description, metaParsed)
-        const finalScore = vectorScore * 0.7 + kwScore * 0.3
+        // 有向量：混合评分(70%向量+30%关键词)；无向量：纯关键词评分(按50%权重)
+        const finalScore = row.vector
+          ? vectorScore * 0.7 + kwScore * 0.3
+          : kwScore * 0.5
         return { id: row.id, name: row.name, description: row.description, score: finalScore }
       })
 
       scored.sort((a, b) => b.score - a.score)
-      return scored.filter(s => s.score >= 0.2).slice(0, topK)
+      return scored.filter(s => s.score >= 0.15).slice(0, topK)
     } catch (e) {
       console.warn('[Embedding] 搜索失败:', e.message)
       return null

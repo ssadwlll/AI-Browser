@@ -1,59 +1,6 @@
-// ============ 动作循环检测器 ============
-// 追踪重复动作模式和页面停滞，向AI发出分级提醒
-class ActionLoopDetector {
-  constructor(windowSize = 15) {
-    this.windowSize = windowSize
-    this.recentActions = []       // [{key, name, url}]
-    this.consecutiveStagnant = 0  // 连续页面无变化次数
-    this._lastPageState = null    // {url, elementCount}
-  }
-
-  record(name, params, currentUrl) {
-    const selector = params?.selector || ''
-    const navUrl = params?.url || ''
-    const key = `${name}|${selector}|${navUrl}`
-    this.recentActions.push({ key, name, url: currentUrl })
-    if (this.recentActions.length > this.windowSize) {
-      this.recentActions = this.recentActions.slice(-this.windowSize)
-    }
-  }
-
-  recordPageState(url, elementCount) {
-    const state = `${url}|${elementCount}`
-    if (this._lastPageState === state) {
-      this.consecutiveStagnant++
-    } else {
-      this.consecutiveStagnant = 0
-      this._lastPageState = state
-    }
-  }
-
-  getNudge() {
-    const msgs = []
-
-    // 动作重复检测
-    const counts = {}
-    for (const a of this.recentActions) {
-      counts[a.key] = (counts[a.key] || 0) + 1
-    }
-    const maxRepeat = Math.max(...Object.values(counts), 0)
-
-    if (maxRepeat >= 12) {
-      msgs.push(`严重警告：同一操作已重复 ${maxRepeat} 次（最近 ${this.recentActions.length} 个动作中）。如果每次都在推进，请继续；否则强烈建议更换策略或调用 finish_task 报告。`)
-    } else if (maxRepeat >= 8) {
-      msgs.push(`注意：同一操作已重复 ${maxRepeat} 次。是否每次都有进展？如果没有，建议尝试不同方法。`)
-    } else if (maxRepeat >= 5) {
-      msgs.push(`提示：同一操作已重复 ${maxRepeat} 次。如果是有意为之且持续有进展，请继续；否则值得重新考虑策略。`)
-    }
-
-    // 页面停滞检测
-    if (this.consecutiveStagnant >= 5) {
-      msgs.push(`页面内容已连续 ${this.consecutiveStagnant} 步没有变化，DOM操作可能没有生效。建议尝试不同的元素或策略。`)
-    }
-
-    return msgs.length > 0 ? msgs.join('\n') : null
-  }
-}
+import { PayloadStore } from './payload-store.js'
+import { ActionLoopDetector } from './action-loop-detector.js'
+import { DomainPolicy } from './domain-policy.js'
 
 // ============ AgentService ============
 export class AgentService {
@@ -69,22 +16,21 @@ export class AgentService {
     // Plan B: Agent 生命周期与 Port 解耦
     // tabId → { port, messages:[], running:bool }
     this.agentStates = new Map()
-    // 域名策略缓存（每次 run 时刷新）
-    this._allowedDomains = null
-    this._prohibitedDomains = null
-    this._blockIPAddresses = false
+    // 域名安全策略（每次 run 时加载）
+    this.domainPolicy = new DomainPolicy(configService, scriptService)
     // 按 URL 缓存过滤后的工具脚本，避免每轮重复过滤
     this._filteredScriptsCache = new Map()
     // 跟踪已记录过域名不匹配的脚本，避免日志刷屏
     this._domainMismatchLogged = new Set()
     // 记录已读取过的页面 URL，防止重复 read_page_content
     this._pageReadCache = new Map()
+    // 工具结果暂存区（超过阈值的结果存此处，只发摘要给AI）
+    this.payloadStore = new PayloadStore()
   }
 
   buildToolDefinitions(userQuery, searchResults, currentPageUrl, round) {
     const tools = []
     const roundNum = round || 1
-    const onlySpeedTools = roundNum <= 2  // 前2轮仅快速工具，降低LLM决策负担
 
     // 核心工具：始终提供
     tools.push({
@@ -227,8 +173,7 @@ export class AgentService {
       },
     })
 
-    // ===== P1: 辅助操作工具（仅第3轮起暴露，减少早期决策负担）=====
-    if (!onlySpeedTools) {
+    // ===== P1: 辅助操作工具 =====
     tools.push({
       type: 'function',
       function: {
@@ -295,7 +240,6 @@ export class AgentService {
     })
 
     // ===== P2: 辅助输出/导航工具 =====
-    if (!onlySpeedTools) {
     tools.push({
       type: 'function',
       function: {
@@ -304,8 +248,6 @@ export class AgentService {
         parameters: { type: 'object', properties: {}, required: [] },
       },
     })
-    }
-    }
 
     tools.push({
       type: 'function',
@@ -340,9 +282,9 @@ export class AgentService {
       },
     })
 
-    // 搜索结果中的工具脚本（最多6个，仅第3轮起暴露以加速早期响应）
+    // 搜索结果中的工具脚本（最多6个，从第1轮就暴露——新流程：先读取页面+搜索工具，再综合分析）
     // P0: 根据当前页面域名过滤不适用的脚本（缓存过滤结果，避免每轮重复计算）
-    if (!onlySpeedTools && searchResults && searchResults.length > 0) {
+    if (searchResults && searchResults.length > 0) {
     const cacheKey = currentPageUrl || '__no_url__'
     let cached = this._filteredScriptsCache.get(cacheKey)
     if (!cached) {
@@ -407,7 +349,26 @@ export class AgentService {
         },
       })
     }
-    }  // end if(!onlySpeedTools) 脚本块
+    }  // end 脚本块
+
+    // ===== P0: 数据查询工具（始终暴露）=====
+    tools.push({
+      type: 'function',
+      function: {
+        name: 'recall_data',
+        description: '查询已存储的工具执行结果。某些工具（extract_content、inject_script、read_page_content等）返回大量数据时只发送摘要，详细内容存于存储中。需要查看完整或部分数据时调用此工具。',
+        parameters: {
+          type: 'object',
+          properties: {
+            entry_id: { type: 'string', description: '存储条目ID（工具结果中标注）。不传则返回所有条目汇总。多条目用逗号分隔如"p1,p2"' },
+            tool_name: { type: 'string', description: '来源工具名。不传entry_id时按工具名查询最新条目' },
+            filter: { type: 'string', description: '过滤条件："前N条"、"第N-M条"、"含关键词xxx"' },
+            fields: { type: 'string', description: '需要的字段，逗号分隔如"title,url"。不传返回全部字段' },
+          },
+          required: [],
+        },
+      },
+    })
 
     tools.push({
       type: 'function',
@@ -454,6 +415,140 @@ export class AgentService {
     return tools
   }
 
+  // ===== 阶段1工具列表：本地DOM工具 + search_tools + finish_task（不含inject_script_*） =====
+  _buildPhase1Tools(userMessage, currentPageUrl, round) {
+    // 直接复用 buildToolDefinitions，但不传入 searchResults，这样就不会暴露 inject_script_*
+    return this.buildToolDefinitions(userMessage, [], currentPageUrl, round)
+  }
+
+  // ===== 阶段2工具列表：仅 search_tools + inject_script_* + read_page_content + recall_data + finish_task =====
+  _buildPhase2Tools(searchResults, currentPageUrl, round) {
+    const tools = []
+
+    // search_tools：搜索远程脚本
+    tools.push({
+      type: 'function',
+      function: {
+        name: 'search_tools',
+        description: '搜索服务器远程工具库，传简短中文关键词(2-4字)。',
+        parameters: {
+          type: 'object',
+          properties: {
+            query: { type: 'string', description: '核心关键词，如"新闻"、"采集"、"翻译"' },
+          },
+          required: ['query'],
+        },
+      },
+    })
+
+    // read_page_content：了解当前页面（辅助脚本判断）
+    tools.push({
+      type: 'function',
+      function: {
+        name: 'read_page_content',
+        description: '读取当前页面标题、URL和正文。用于向脚本提供页面上下文。',
+        parameters: { type: 'object', properties: {}, required: [] },
+      },
+    })
+
+    // recall_data：查询已有数据
+    tools.push({
+      type: 'function',
+      function: {
+        name: 'recall_data',
+        description: '查询已存储的工具执行结果。需要详细数据时调用。',
+        parameters: {
+          type: 'object',
+          properties: {
+            entry_id: { type: 'string', description: '存储条目ID' },
+            tool_name: { type: 'string', description: '来源工具名' },
+            filter: { type: 'string', description: '过滤条件' },
+            fields: { type: 'string', description: '需要的字段' },
+          },
+          required: [],
+        },
+      },
+    })
+
+    // 远程脚本工具
+    if (searchResults && searchResults.length > 0) {
+      const cacheKey = currentPageUrl || '__no_url__'
+      let cached = this._filteredScriptsCache.get(cacheKey)
+      if (!cached) {
+        cached = []
+        const loggedSet = this._domainMismatchLogged
+        for (const s of searchResults.slice(0, 12)) {
+          if (cached.length >= 6) break
+          if (s.urlPattern && s.urlPattern !== '*' && currentPageUrl) {
+            if (!this.scriptService.matchUrl(s.urlPattern, currentPageUrl)) {
+              const msgKey = `${s.id}_${cacheKey}`
+              if (!loggedSet.has(msgKey)) {
+                loggedSet.add(msgKey)
+                console.log(`[Agent] 脚本域名不匹配，跳过: ${s.name} (urlPattern=${s.urlPattern})`)
+              }
+              continue
+            }
+          }
+          cached.push(s)
+        }
+        this._filteredScriptsCache.set(cacheKey, cached)
+      }
+
+      // 按经验记忆排序
+      const sortedScripts = [...cached].sort((a, b) => {
+        const rateA = a.memoryTotal > 0 ? (a.memorySuccess || 0) / a.memoryTotal : -1
+        const rateB = b.memoryTotal > 0 ? (b.memorySuccess || 0) / b.memoryTotal : -1
+        return rateB - rateA
+      })
+
+      for (const s of sortedScripts) {
+        const tc = s.toolConfig || {}
+        const meta = s.metadata || {}
+        let desc = (tc.toolDescription || s.description || `执行: ${s.name}`).slice(0, 80)
+        if (meta.triggers && meta.triggers.length > 0) desc += ` [触发:${meta.triggers.slice(0,3).join(',')}]`
+        if (meta.requires_login) desc += ' [需登录]'
+        if (meta.pagination && meta.pagination.strategy !== 'none') {
+          desc += ` [分页:${meta.pagination.strategy},≤${meta.pagination.maxPages||20}次]`
+        }
+        const hasPrecheck = !!(s.precheck && s.precheck.trim())
+        if (hasPrecheck) desc += ' [有前置检查]'
+        if (s.memorySuccess !== undefined && s.memoryTotal > 0) {
+          const rate = Math.round(s.memorySuccess / s.memoryTotal * 100)
+          desc += ` [成功率:${rate}%(${s.memorySuccess}/${s.memoryTotal})]`
+        } else if (s.memoryTotal === 0) {
+          desc += ' [无历史记录]'
+        }
+
+        tools.push({
+          type: 'function',
+          function: {
+            name: `inject_script_${s.id}`,
+            description: desc,
+            parameters: tc.parameters || { type: 'object', properties: {}, required: [] },
+          },
+        })
+      }
+    }
+
+    // finish_task
+    tools.push({
+      type: 'function',
+      function: {
+        name: 'finish_task',
+        description: '任务完成，汇报结果。阶段2失败时也调用此工具总结失败原因和建议。',
+        parameters: {
+          type: 'object',
+          properties: {
+            summary: { type: 'string', description: '完成摘要或失败原因分析' },
+          },
+          required: ['summary'],
+        },
+      },
+    })
+
+    return tools
+  }
+
   async executeDOMTool(tabId, toolName, args) {
     // 注意：chrome.scripting.executeScript 会序列化 func，闭包变量会丢失
     // 所以每个工具函数必须自包含 qsa 定义（不能依赖外层闭包）
@@ -482,39 +577,7 @@ export class AgentService {
           }
           results.push(item)
         }
-        const content = multiple !== false ? results : (results[0] || '')
-
-        // 检测页面阻塞元素（登录弹窗、遮罩层等）
-        const blockerSelectors = [
-          '[class*="login"]', '[class*="Login"]',
-          '[class*="modal"]', '[class*="dialog"]', '[class*="overlay"]',
-          '[class*="mask"]', '[class*="popup"]',
-          '[id*="login"]', '[id*="modal"]', '[id*="dialog"]',
-        ]
-        const foundBlockers = []
-        for (const bs of blockerSelectors) {
-          try {
-            const bEls = document.querySelectorAll(bs)
-            for (const el of bEls) {
-              const style = getComputedStyle(el)
-              if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') continue
-              const rect = el.getBoundingClientRect()
-              if (rect.width === 0 || rect.height === 0) continue
-              foundBlockers.push({ selector: bs, text: el.textContent.trim().slice(0, 60) })
-              if (foundBlockers.length >= 3) break
-            }
-          } catch {}
-          if (foundBlockers.length >= 3) break
-        }
-
-        if (foundBlockers.length > 0) {
-          return {
-            content,
-            blocker: '页面检测到弹窗/遮罩层，可能阻碍操作: ' + JSON.stringify(foundBlockers),
-            hint: '如果弹窗是你的操作目标，继续操作；如果是登录/验证弹窗阻碍了你，尝试 press_key(Escape) 或 click_element 关闭按钮。若多次尝试无效，用 finish_task 报告用户：页面需要登录才能操作',
-          }
-        }
-        return content
+        return multiple !== false ? results : (results[0] || '')
       },
 
       click_element: (selector, index) => {
@@ -785,14 +848,14 @@ export class AgentService {
     }
 
     try {
-      console.log('[Agent] executeDOMTool:', toolName, 'args:', JSON.stringify(args).slice(0, 80))
+      console.log('[Agent] executeDOMTool:', toolName, 'args:', JSON.stringify(args))
       const serializedArgs = (argMap[toolName] || []).map(v => v === undefined ? null : v)
       const [result] = await chrome.scripting.executeScript({
         target: { tabId },
         func,
         args: serializedArgs,
       })
-      console.log('[Agent] executeDOMTool result:', JSON.stringify(result?.result).slice(0, 200))
+      console.log('[Agent] executeDOMTool result:', JSON.stringify(result?.result))
       return { ok: true, result: result?.result }
     } catch (e) {
       console.error('[Agent] executeDOMTool error:', toolName, e.message)
@@ -827,68 +890,142 @@ export class AgentService {
     }
   }
 
-  // ============ 域名安全策略 ============
-  // 加载域名策略配置（每次 run 开始时调用）
+  // ============ 域名安全策略（委托给 DomainPolicy） ============
   async _loadDomainPolicy() {
-    try {
-      const agentCfg = await this.configService.getAgentConfig()
-      const allowed = agentCfg?.allowedDomains
-      const prohibited = agentCfg?.prohibitedDomains
-      // 未设置时保持 null，跳过检查
-      this._allowedDomains = (allowed && allowed.length > 0) ? allowed : null
-      this._prohibitedDomains = (prohibited && prohibited.length > 0) ? prohibited : null
-      this._blockIPAddresses = !!agentCfg?.blockIPAddresses
-    } catch {
-      this._allowedDomains = null
-      this._prohibitedDomains = null
-      this._blockIPAddresses = false
-    }
+    await this.domainPolicy.load()
   }
 
-  // 判断 URL 是否被允许
   _isUrlAllowed(url) {
-    // 未设置任何策略 → 全部放行
-    if (!this._allowedDomains && !this._prohibitedDomains && !this._blockIPAddresses) return true
-
-    try {
-      const parsed = new URL(url)
-      const hostname = parsed.hostname
-
-      // 禁止IP直连
-      if (this._blockIPAddresses && /^[\d.]+$/.test(hostname)) return false
-
-      // 白名单优先
-      if (this._allowedDomains) {
-        return this._allowedDomains.some(pattern => this._matchDomain(hostname, pattern))
-      }
-      // 黑名单
-      if (this._prohibitedDomains) {
-        return !this._prohibitedDomains.some(pattern => this._matchDomain(hostname, pattern))
-      }
-    } catch { return false }
-    return true
+    return this.domainPolicy.isUrlAllowed(url)
   }
 
-  // 域名匹配：支持 *.example.com、example.com（自动匹配 www 变体）
-  _matchDomain(hostname, pattern) {
-    const h = hostname.toLowerCase()
-    const p = pattern.toLowerCase()
-    // *.example.com → 匹配 sub.example.com 和 example.com
-    if (p.startsWith('*.')) {
-      const domainPart = p.slice(2)
-      return h === domainPart || h.endsWith('.' + domainPart)
-    }
-    // 精确匹配 + www 变体
-    if (h === p) return true
-    if (h === 'www.' + p) return true
-    if ('www.' + h === p) return true
-    return false
-  }
-
-  // 判断 URL 是否匹配脚本的 urlPattern（用于 inject_script 过滤）
-  // URL 匹配已委托给 scriptService.matchUrl，此方法保留仅为向后兼容
   _matchUrlToDomain(pageUrl, urlPattern) {
-    return this.scriptService.matchUrl(urlPattern, pageUrl)
+    return this.domainPolicy.matchUrlToDomain(pageUrl, urlPattern)
+  }
+
+  // ============ PayloadStore 存储判断 ============
+  // 判断工具结果是否需要存 payloadStore
+  _shouldStoreToPayload(result, toolName) {
+    // recall_data 不存（避免嵌套JSON噩梦）
+    if (toolName === 'recall_data') return false
+    // search_tools 不存（搜索结果会更新searchResults变量，不需要再存）
+    if (toolName === 'search_tools') return false
+    const threshold = 1500  // 字符阈值
+    const resultStr = typeof result === 'string' ? result : JSON.stringify(result)
+    return resultStr.length > threshold
+  }
+
+  // 生成 payloadStore 摘要（发给AI的）
+  _generatePayloadSummary(result, toolName) {
+    try {
+      const obj = typeof result === 'string' ? JSON.parse(result) : result
+
+      // 数组类型（extract_content 等工具返回的批量数据）
+      if (Array.isArray(obj)) {
+        const count = obj.length
+        if (count === 0) return '已获取0条数据（空结果）'
+
+        // 检测核心字段
+        const firstItem = obj[0] || {}
+        const fieldSet = new Set()
+        for (const item of obj.slice(0, 5)) {
+          if (item.text) fieldSet.add('text')
+          if (item.attrs) {
+            for (const k of Object.keys(item.attrs)) fieldSet.add(`attrs.${k}`)
+          }
+          if (item.title) fieldSet.add('title')
+          if (item.href) fieldSet.add('href')
+          for (const k of Object.keys(item)) {
+            if (!['text', 'attrs', 'title', 'href'].includes(k)) fieldSet.add(k)
+          }
+        }
+        const fields = [...fieldSet].slice(0, 6).join(', ')
+
+        // 样本预览：前3条的关键信息
+        const samples = obj.slice(0, 3).map((item, i) => {
+          const parts = []
+          if (item.attrs?.href) parts.push(`href="${item.attrs.href.slice(0, 50)}"`)
+          if (item.title) parts.push(`title="${item.title.slice(0, 30)}"`)
+          if (item.text) parts.push(`text="${item.text.slice(0, 40)}"`)
+          if (!parts.length) parts.push(JSON.stringify(item).slice(0, 50))
+          return `[${i}] ${parts.join(' | ')}`
+        }).join('\n  ')
+
+        return `已获取${count}条数据（字段: ${fields}）\n  样本预览:\n  ${samples}${count > 3 ? `\n  ...(共${count}条，可用recall_data查看全部)` : ''}`
+      }
+
+      // 对象类型
+      if (typeof obj === 'object' && obj !== null) {
+        const keys = Object.keys(obj)
+        if (obj.ok && obj.pages) {
+          const pageCount = obj.pages.length || obj.successCount || 0
+          return `处理完成：${pageCount}条结果（字段: ${keys.join(', ')}）`
+        }
+        if (obj.ok && obj.total) {
+          return `处理完成：${obj.total}条结果（字段: ${keys.join(', ')}）`
+        }
+        // 通用对象：列出字段和值预览
+        const fieldPreview = keys.slice(0, 5).map(k => {
+          const v = obj[k]
+          if (typeof v === 'string') return `${k}="${v.slice(0, 40)}"`
+          if (typeof v === 'number') return `${k}=${v}`
+          if (Array.isArray(v)) return `${k}=[${v.length}项]`
+          return `${k}=...`
+        }).join(', ')
+        return `已获取数据（${keys.length}个字段: ${fieldPreview}）`
+      }
+
+      // 字符串类型
+      if (typeof obj === 'string') {
+        return `已获取文本数据（${obj.length}字符）: ${obj.slice(0, 60)}...`
+      }
+
+      return '已获取数据'
+    } catch {
+      return '已获取数据'
+    }
+  }
+
+  // 存入 payloadStore 并返回摘要
+  _storeToPayload(result, toolName) {
+    const summary = this._generatePayloadSummary(result, toolName)
+    const metadata = {
+      count: this._getPayloadCount(result),
+      sample: this._getPayloadSample(result)
+    }
+    const entryId = this.payloadStore.add(toolName, result, summary, metadata)
+    return `${summary}（存储ID: ${entryId}，详细内容可调用 recall_data 查询）`
+  }
+
+  // 获取数据条数
+  _getPayloadCount(result) {
+    try {
+      const obj = typeof result === 'string' ? JSON.parse(result) : result
+      if (Array.isArray(obj)) return obj.length
+      if (obj.pages) return obj.pages.length
+      if (obj.total) return obj.total
+      if (typeof obj === 'object') return Object.keys(obj).length
+      return 1
+    } catch {
+      return 1
+    }
+  }
+
+  // 获取数据样本
+  _getPayloadSample(result) {
+    try {
+      const obj = typeof result === 'string' ? JSON.parse(result) : result
+      if (Array.isArray(obj) && obj.length > 0) {
+        const first = obj[0]
+        if (first.attrs?.href) return first.attrs.href.slice(0, 60)
+        if (first.title) return first.title.slice(0, 60)
+        if (first.text) return first.text.slice(0, 60)
+        return JSON.stringify(first).slice(0, 60)
+      }
+      return ''
+    } catch {
+      return ''
+    }
   }
 
   // ============ 智能结果截断 ============
@@ -956,6 +1093,8 @@ export class AgentService {
       // 保留状态 30 秒，供重连时回放消息
       const state = this.agentStates.get(tabId)
       if (state) state.running = false
+      // 清空 payloadStore（任务结束后释放内存）
+      this.payloadStore.clear()
       setTimeout(() => {
         this.agentStates.delete(tabId)
       }, 30000)
@@ -1193,7 +1332,7 @@ export class AgentService {
       if (!debug) return
       const summary = typeof detail === 'string' ? detail : JSON.stringify(detail, null, 2)
       console.log(`[AgentDebug] ${label}`, detail)
-      try { this.postToUI(tabId, { type: 'agentDebug', label, detail: summary.slice(0, 2000) }) } catch(e) { console.warn('[AgentDebug] postToUI失败', e) }
+      try { this.postToUI(tabId, { type: 'agentDebug', label, detail: summary }) } catch(e) { console.warn('[AgentDebug] postToUI失败', e) }
     }
     // 工具调用上限 = 轮次 * 3，最低30，最高200
     const MAX_TOOL_CALLS = Math.min(200, Math.max(30, maxRounds * 3))
@@ -1206,7 +1345,7 @@ export class AgentService {
     let _idleTextCount = 0        // 连续纯文本无工具调用次数
     let consecutiveFailCount = 0  // 连续无进展计数（工具失败或结果无变化时+1，有进展时重置为0）
     let lowValueStreak = 0         // 连续低价值操作（find_text/screenshot/get_element_info/get_interactive 等）计数
-    const LOW_VALUE_TOOLS = new Set(['find_text_on_page', 'screenshot_visible', 'get_element_info', 'get_interactive_elements'])
+    const LOW_VALUE_TOOLS = new Set(['find_text_on_page', 'screenshot_visible', 'get_element_info', 'get_interactive_elements', 'recall_data'])
     const _injections = []        // 系统注入消息（不写入主消息数组，避免破坏 assistant/tool 交替结构）
     const COMPLEXITY_THRESHOLD = 8 // 预估轮次超过此值提示用户需要开发专用脚本
     // P2: 初始化动作循环检测器
@@ -1214,9 +1353,21 @@ export class AgentService {
     // 探索上限跟踪：无脚本匹配的探索轮次计数
     let explorationRounds = 0
     let _explorationWarned = false
+    let hasSearchedTools = false  // 自动搜索命中或LLM主动调用 search_tools 后置true
     // 计划跟踪
     let currentPlan = null        // { plan_items, current_step, created_at_round }
     let planStepProgress = 0      // 计划步骤推进计数（用于检测计划停滞）
+    // ===== 两阶段决策流程跟踪（阶段1=DOM工具, 阶段2=远程脚本, 阶段3=终止） =====
+    let currentPhase = 1              // 当前阶段：1=普通模式, 2=远程工具库, 3=终止
+    let phase1FailCount = 0           // 阶段1连续失败计数
+    const PHASE1_FAIL_THRESHOLD = 4  // 阶段1连续失败4次 → 进入阶段2
+    let phase2Attempted = false       // 阶段2是否已尝试
+    let phase2FailCount = 0           // 阶段2连续失败计数（仅计inject_script_*失败）
+    let phase2ScriptAttempted = false // 阶段2是否已尝试调用脚本
+    const PHASE2_FAIL_THRESHOLD = 3  // 阶段2脚本连续失败3次 → 进入阶段3
+    // 辅助跟踪（recall_data和selector重复提示）
+    const _recallDataCallCount = new Map()   // entry_id → 调用次数，超过3次温和提示
+    const _usedSelectorToolCombo = new Set() // "selector|toolName" 组合，重复时温和提示
 
     // 清理 chatHistory 中的自定义字段，避免 API 拒绝
     const cleanHistory = (chatHistory || []).map(m => {
@@ -1224,90 +1375,161 @@ export class AgentService {
       return clean
     })
 
-    const systemMsg = {
-      role: 'system',
-      content: `你是AI Browser脚本调度器。分析用户需求，匹配工具库中的脚本执行；脚本无法覆盖的简单交互可使用DOM工具辅助。
+    // ===== 阶段1系统提示词（隔离：仅描述DOM工具，不提及inject_script/阶段2/阶段3） =====
+    const phase1SystemPrompt = `你是AI Browser智能体，在网页上执行用户任务。
 
-注意：工具分阶段暴露。第1-2轮只有核心+探查工具（search_tools、read、find_text、get_element_info、get_interactive_elements、click、fill_input、wait、scroll、create_plan、navigate_to、go_back/forward、finish_task），第3轮起释放全部工具（hover、select_dropdown、press_key、screenshot、inject_script_*）。前2轮专注了解页面、定位数据、搜索脚本、制定计划。
+=== 工作流程 ===
+1. read_page_content 读取页面 → 理解页面结构和内容
+2. 根据任务目标，用DOM工具操作页面（提取数据、点击元素、填写表单、导航等）
+3. 任务完成 → 调用 finish_task 汇报结果
 
-=== 任务规划（重要！复杂任务必须先规划再执行） ===
-- 对于需要3步以上操作的任务，第1轮就用 create_plan 制定计划
-- plan_items 是步骤列表，current_step 指示当前进度（从0开始）
-- 每完成一个计划步骤，再次调用 create_plan 更新 current_step
-- 如果计划执行受阻，可修改后续 plan_items 调整策略
-- 简单任务（1-2步）可以跳过规划直接执行
+=== 可用工具 ===
+read_page_content: 读取当前页面标题、URL和正文
+extract_content: 提取指定选择器的内容（支持:contains伪类）
+click_element: 点击元素
+fill_input: 填写输入框
+wait_for_element: 等待元素出现
+navigate_to: 导航到URL
+go_back / go_forward: 浏览器前进/后退
+find_text_on_page: 在页面文本中搜索关键词
+get_element_info: 获取元素详细信息
+get_interactive_elements: 获取可交互元素列表
+scroll_page: 滚动页面
+hover_element: 悬停元素
+select_dropdown: 选择下拉框选项
+press_key: 按键
+recall_data: 查询已存储的工具执行结果
+create_plan: 创建执行计划
+search_tools: 搜索工具库（如有需要）
+finish_task: 任务完成，汇报结果
 
-=== 工具成本分类（重要！按成本从低到高选择） ===
+=== 导航规则 ===
+- navigate_to后页面已加载，直接extract/read获取内容
+- 提取内页后立刻go_back或继续下一条
 
-零LLM成本工具（优先使用，即时返回）：
-- extract_content: 批量提取元素文本和属性。**采集列表数据时首选**——一次调用提取所有标题+链接。传 attributes="href" 获取链接
-- get_interactive_elements: 获取页面可交互元素列表（链接、按钮、输入框），每个带index编号。构建选择器前先用此工具了解页面结构
-- find_text_on_page: 在页面文本中搜索关键词，返回匹配数量和上下文。确认"页面有没有XX"时首选
-- get_element_info: CSS选择器查DOM，返回元素数量、文本、属性。仅在 extract_content 不适合时使用（如只需统计数量）。采集链接请用 extract_content
-- read_page_content: 读取页面标题、URL、正文摘要
-- click_element: 点击页面元素，支持 :contains("文本") 按文字匹配，也支持 get_interactive_elements 返回的 index
-- fill_input: 填写输入框，支持回车提交
-- wait_for_element: 等待页面元素出现（仅 click 触发的跳转需要；navigate_to 后页面已加载，直接用 read/extract）
-
-低成本辅助工具（合理使用）：
-- scroll_page: 滚动页面。read_page_content只读首屏，要查看更多内容时先滚动
-- hover_element: 悬停元素（触发下拉菜单/tooltip）。click不能替代
-- select_dropdown: 选择<select>下拉框。fill_input对原生下拉框无效
-- press_key: 发送键盘操作。Escape关闭弹窗、PageDown翻页、Enter确认等
-- screenshot_visible: 截图当前视口。视觉验证操作结果时使用
-- go_back: 返回上一页
-- go_forward: 前进到下一页
-- navigate_to: 直接导航到指定URL。从 extract_content 的 attrs.href 获取链接后使用，比 click_element 更可靠。**导航后页面已加载，不要再用 wait_for_element，直接用 read_page_content 或 extract_content 获取内容。**
-
-核心工具：
-- create_plan: 创建/更新任务执行计划（复杂任务第1轮使用）
-- search_tools: 搜索工具脚本库，传简短中文关键词(2-4字)
-- inject_script_*: 执行工具库中已审核的脚本（需先search_tools搜索，已按当前页面域名过滤）
-- finish_task: 汇报结果并结束任务
-
-=== 工具选择原则 ===
-1. 采集列表/批量提取数据 → extract_content(selector, attributes="href") 一次性完成，不要分步
-2. extract_content 成功后 → 直接用返回的数据推进下一步（navigate_to/go_back/finish_task），不要验证
-3. 不确定页面选择器 → 先用 get_interactive_elements 了解结构（最多1次），然后 extract_content
-4. 需要操作页面 → click/fill/scroll/hover/select/press_key
-5. 需要循环翻页 → inject_script_* 脚本
-6. 遇到弹窗/遮罩 → press_key("Escape") 或 click_element 关闭
-7. 同一工具被反复调用≥3次 → 立即 finish_task("需要脚本")
-
-=== 脚本匹配规则 ===
-- search_tools 返回的脚本仅适用于其目标平台，确认平台匹配当前页面后再注入
-- 无匹配脚本且需求超出DOM工具能力 → finish_task("该网站暂无采集脚本，请上传到工具库后重试")
-- 禁止跨站注入
-
-=== 操作铁律（违反将导致大量浪费轮次） ===
-- extract_content 返回的数据即为最终数据，严禁再用 get_element_info / find_text / screenshot 重复验证同一批元素
-- extract_content 后禁止用 get_element_info 查相同选择器——这是完全重复的劳动
-- 只在操作明显失败（返回error/空结果）时才验证，成功则直接推进下一步
-- 导航到内页后 → extract_content 或 read_page_content 提取内容 → 立刻 go_back 或继续下一条链接，不要在内页反复探查
-- 同一操作失败2次后必须换策略，严禁重复失败操作
-- 如果导航(URL)跳转到了系统页面(chrome://)，用finish_task立即汇报
-- 每次 click 触发的跳转后调用 wait_for_element 等待页面稳定（navigate_to 后不需要）
+=== 数据存储 ===
+- 大量数据自动存储，只发摘要+存储ID
+- 需要详情时调用 recall_data(entry_id="xxx")
 
 === 输出规范 ===
-- 用自然语言总结工具返回的结果，不要输出原始JSON
-- 工具返回错误时分析原因并在 finish_task 中告知用户
+- 自然语言总结结果，不输出原始JSON
+- 错误时分析原因并在finish_task中告知`
 
-=== 典型工作流程（采集列表+内页）===
-1. read_page_content 了解页面
-2. extract_content(selector, attributes="href") → 得到所有标题+链接
-3. create_plan（可选，多步任务时用）
-4. navigate_to(第1条链接) → extract_content 提取内页 → go_back（注意：navigate_to后直接用extract，不要wait）
-5. 重复步骤4，**每5篇检查剩余轮次（预算）。当剩余轮次不足完成所有内页时，立即 finish_task 汇总已采集的**`,
-
+    const systemMsg = {
+      role: 'system',
+      content: phase1SystemPrompt,
     }
 
-    const messages = [systemMsg, ...cleanHistory, { role: 'user', content: userMessage }]
+    // ===== 第一步：自动读取页面内容，了解当前页面 =====
+    let autoPageContent = null
+    try {
+      const targetTab = await this._getTargetTab(tabId)
+      if (targetTab) {
+        const response = await chrome.tabs.sendMessage(targetTab.id, { type: 'extractPageContent' })
+        autoPageContent = response?.data || null
+        if (autoPageContent) {
+          console.log('[Agent] 自动读取页面内容:', autoPageContent.title, 'URL:', autoPageContent.url, '内容长度:', (autoPageContent.content || '').length)
+        }
+      }
+    } catch (e) {
+      console.warn('[Agent] 自动读取页面内容失败（非致命）:', e.message)
+    }
+
+    // ===== 第二步：基于页面内容+用户需求，自动搜索服务端工具库 =====
+    let autoSearchKeywords = []
+    try {
+      // 从用户消息中提取2-4字中文关键词
+      const chineseWords = userMessage.match(/[\u4e00-\u9fff]{2,4}/g) || []
+      // 从页面内容中提取领域关键词（标题、URL中的语义信息）
+      const pageKeywords = []
+      if (autoPageContent) {
+        // 从URL域名提取领域词
+        const urlHost = (autoPageContent.url || '').match(/(?:https?:\/\/)?([^./]+)/)?.[1] || ''
+        if (urlHost.length >= 2) pageKeywords.push(urlHost)
+        // 从标题中提取关键短词
+        const titleWords = (autoPageContent.title || '').match(/[\u4e00-\u9fff]{2,4}/g) || []
+        pageKeywords.push(...titleWords.slice(0, 3))
+        // 从内容中提取高频短词（简化处理：取前几个中文词）
+        const contentWords = (autoPageContent.content || '').match(/[\u4e00-\u9fff]{2,4}/g) || []
+        // 过滤常见无关词
+        const noiseWords = new Set(['可以', '已经', '但是', '因为', '所以', '或者', '如果', '虽然', '我们', '他们', '这个', '那个', '什么', '怎么', '就是', '也是', '不是', '还是', '只是', '以及', '其中', '其他', '一些', '这些', '那些'])
+        const meaningfulContentWords = contentWords.filter(w => !noiseWords.has(w)).slice(0, 5)
+        pageKeywords.push(...meaningfulContentWords)
+      }
+      // 常见任务意图关键词映射（扩展用户消息中可能缺失的搜索词）
+      const INTENT_KEYWORDS = {
+        '采集': ['采集', '批量'], '批量': ['批量', '采集'], '抓取': ['抓取', '采集'],
+        '新闻': ['新闻', '采集'], '导出': ['导出', '下载'], '下载': ['下载', '导出'],
+        '翻译': ['翻译'], '监控': ['监控'], '搜索': ['搜索'], '热点': ['热点', '热搜'],
+      }
+      const expandedWords = new Set(chineseWords)
+      for (const word of chineseWords) {
+        if (INTENT_KEYWORDS[word]) INTENT_KEYWORDS[word].forEach(w => expandedWords.add(w))
+      }
+      // 合合页面关键词
+      for (const pw of pageKeywords) {
+        if (!expandedWords.has(pw)) expandedWords.add(pw)
+      }
+      autoSearchKeywords = [...expandedWords].slice(0, 6)
+    } catch {}
+
+    if (autoSearchKeywords.length > 0) {
+      try {
+        const autoResults = await this.toolService.searchScripts(autoSearchKeywords.join(' '))
+        if (autoResults.length > 0) {
+          const existingIds = new Set(searchResults.map(s => s.id))
+          for (const r of autoResults) {
+            if (!existingIds.has(r.id)) {
+              searchResults.push(r)
+              existingIds.add(r.id)
+            }
+          }
+          hasSearchedTools = true
+          console.log(`[Agent] 自动搜索命中${autoResults.length}个脚本:`, autoResults.map(s => `${s.name}(#${s.id})`).join(', '))
+        } else {
+          hasSearchedTools = true
+          console.log('[Agent] 自动搜索无结果:', autoSearchKeywords.join(' '))
+        }
+      } catch (e) {
+        console.warn('[Agent] 自动搜索失败（非致命）:', e.message)
+      }
+    }
+
+    // ===== 将自动读取的页面内容注入到用户消息上下文中，供AI综合分析 =====
+    if (autoPageContent) {
+      // 精简版页面概览（只保留关键信息，避免上下文膨胀）
+      const pageContentBrief = (autoPageContent.content || '').slice(0, 300)
+      let pageContextMsg = `[页面概览] 标题: ${autoPageContent.title || '无标题'} | URL: ${autoPageContent.url || ''}\n内容摘要: ${pageContentBrief}`
+      if (searchResults.length > 0) {
+        pageContextMsg += `\n\n已匹配到 ${searchResults.length} 个专用脚本（当前阶段不暴露脚本工具，如DOM工具无法完成任务将自动切换到脚本模式）。`
+      } else {
+        pageContextMsg += '\n暂无匹配的专用脚本，可使用本地DOM工具操作页面。'
+      }
+      _injections.push(pageContextMsg)
+      // 缓存页面读取结果，避免后续 read_page_content 重复调用
+      const pageUrl = autoPageContent.url || ''
+      if (pageUrl) {
+        this._pageReadCache.set(pageUrl, JSON.stringify({
+          ok: true,
+          title: autoPageContent.title || '',
+          url: autoPageContent.url || '',
+          content: (autoPageContent.content || '').slice(0, 3000),
+        }))
+      }
+    }
+
+    // 避免用户消息重复：chatHistory 可能已包含用户消息（从 sidepanel 传来）
+    const lastHistoryMsg = cleanHistory.length > 0 ? cleanHistory[cleanHistory.length - 1] : null
+    const lastIsUserMsg = lastHistoryMsg?.role === 'user' && lastHistoryMsg?.content === userMessage
+    const messages = lastIsUserMsg
+      ? [systemMsg, ...cleanHistory]
+      : [systemMsg, ...cleanHistory, { role: 'user', content: userMessage }]
 
     // ===== 任务复杂度预评估 =====
     const complexity = await this._assessComplexity(tabId, userMessage, chatHistory)
     if (complexity.estimatedRounds > COMPLEXITY_THRESHOLD) {
       console.log(`[Agent] 复杂度评估: ${complexity.level}, 预估${complexity.estimatedRounds}轮, 建议开发专用脚本`)
-      _injections.push(`任务复杂度评估：${complexity.level}（预估需${complexity.estimatedRounds}轮）。如果任务涉及循环翻页、批量提取结构化数据、或多页面操作，请立即调用 finish_task 告知用户："该任务复杂度较高，建议开发专用脚本上传到工具库后执行，效率更高且结果更可靠。" 否则正常执行。`)
+      _injections.push(`💡 任务复杂度评估：${complexity.level}（预估需${complexity.estimatedRounds}轮）。如果任务涉及循环翻页、批量提取结构化数据、或多页面操作，建议开发专用脚本上传到工具库后执行，效率更高。你也可以尝试用本地DOM工具完成，自主决策即可。`)
     } else if (complexity.estimatedRounds > 0) {
       console.log(`[Agent] 复杂度评估: ${complexity.level}, 预估${complexity.estimatedRounds}轮, 正常执行`)
     }
@@ -1317,7 +1539,7 @@ export class AgentService {
 
     // ===== 调试：输出配置摘要 =====
     _debugLog('⚙️ Agent配置', { maxRounds, MAX_CONSECUTIVE_FAILS, MAX_LOW_VALUE, MAX_IDLE_TEXT, EXPLORATION_LIMIT, enableJudge, enablePlanning, debug })
-    _debugLog('📋 系统提示词（前500字）', systemMsg.content.slice(0, 500))
+    _debugLog('📋 系统提示词', systemMsg.content)
 
     while (aiRequestCount < maxRounds) {
       if (Date.now() - startTime > this.TIMEOUT_MS) {
@@ -1338,76 +1560,70 @@ export class AgentService {
       // 让出事件循环，确保状态消息即时送达侧边栏
       await this._yieldUI()
 
-      // P2: 步骤预算通知（两级提醒）
+      // 步骤预算提示（两级提醒，不再强制）
       const budgetRatio = aiRequestCount / maxRounds
       // 第一级：70%时温和提醒
       if (budgetRatio >= 0.7 && budgetRatio < 0.85 && !_budget70Warned) {
         _budget70Warned = true
-        _debugLog('⚠️ 规则触发: 预算警告(70%)', { round: aiRequestCount, maxRounds, budgetRatio: Math.round(budgetRatio * 100) + '%' })
-        _injections.push(`注意：已使用 ${aiRequestCount}/${maxRounds} 轮 (${Math.round(budgetRatio * 100)}%)。仅剩 ${maxRounds - aiRequestCount} 轮！如果是逐篇采集任务，估算剩余轮次能否覆盖所有内页（每篇约2轮），不能则立即 finish_task 汇总已采集的。不要再等待、不再浏览新页面。`)
+        _debugLog('💡 预算提醒(70%)', { round: aiRequestCount, maxRounds, budgetRatio: Math.round(budgetRatio * 100) + '%' })
+        _injections.push(`💡 已使用 ${aiRequestCount}/${maxRounds} 轮 (${Math.round(budgetRatio * 100)}%)。仅剩 ${maxRounds - aiRequestCount} 轮。建议评估剩余轮次能否完成计划中未完成的步骤，不能则调用 finish_task 汇总已有结果。`)
       }
-      // 第二级：85%以上紧急收尾
+      // 第二级：85%以上优先收尾提醒
       if (budgetRatio >= 0.85 && aiRequestCount < maxRounds - 1) {
-        _debugLog('🚨 规则触发: 紧急收尾(85%)', { round: aiRequestCount, maxRounds, budgetRatio: Math.round(budgetRatio * 100) + '%' })
-        _injections.push(`紧急：仅剩 ${maxRounds - aiRequestCount} 轮！严禁开始任何新操作，尤其是 navigate_to 打开新内页。立即汇总已有结果（说出已采集的文章标题），调用 finish_task 结束任务。不要再浏览、搜索或等待。`)
+        _debugLog('💡 收尾提醒(85%)', { round: aiRequestCount, maxRounds, budgetRatio: Math.round(budgetRatio * 100) + '%' })
+        _injections.push(`💡 仅剩 ${maxRounds - aiRequestCount} 轮！建议优先汇总已有结果并调用 finish_task 结束任务。如确有必要可以继续操作，自主决策即可。`)
       }
 
-      // 低价值操作提示
+      // 低价值操作温和提示
       if (lowValueStreak >= MAX_LOW_VALUE) {
         lowValueStreak = 0
-        _debugLog('⚠️ 规则触发: 低价值操作', { streak: lowValueStreak })
-        messages.push({
-          role: 'system',
-          content: '提示：已连续执行多轮搜索/截图辅助操作。如果核心数据已采集完毕，请立即调用 finish_task 汇总结果，不要再进行低价值的信息挖掘。'
-        })
+        _debugLog('💡 提示: 辅助操作较多', { streak: lowValueStreak })
+        _injections.push('💡 提示：已连续执行多轮辅助操作（查看数据/搜索/截图/探查结构），建议推进到下一个实质性步骤（操作页面/执行脚本/完成计划步骤），或调用 finish_task 汇报已有结果。')
       }
 
-      // 探索上限：无脚本匹配时累加，搜索到脚本或有数据产出时重置
+      // 探索建议：区分"从未搜索"和"搜索无果"两种情况
       if (searchResults.length === 0 && aiRequestCount > 2) {
         explorationRounds++
       } else {
         explorationRounds = 0
       }
-      if (explorationRounds >= EXPLORATION_LIMIT && !_explorationWarned) {
+
+      if (explorationRounds >= 2 && !hasSearchedTools) {
+        // 情况A：从未调用 search_tools → 温和建议搜索
+        _debugLog('💡 建议: 未搜索工具库', { explorationRounds, round: aiRequestCount })
+        _injections.push(`💡 建议：你已执行${aiRequestCount}轮操作但未搜索工具库。可以先调用 search_tools 传入简短关键词（如"采集"、"新闻"）查找专用脚本，可能一次调用即可完成任务。你也可以继续用本地DOM工具，自主决策即可。`)
+        // 不设 _explorationWarned，让每2轮建议一次直到搜索
+      } else if (explorationRounds >= EXPLORATION_LIMIT && !_explorationWarned && hasSearchedTools) {
+        // 情况B：已搜索但无匹配脚本 → 继续用DOM工具，不劝退
         _explorationWarned = true
-        _debugLog('⚠️ 规则触发: 探索上限', { explorationRounds })
-        messages.push({
-          role: 'system',
-          content: `已探索 ${explorationRounds} 轮但未找到匹配脚本。如果当前页面需求超出DOM工具能力，请调用 finish_task 告知用户："该网站暂无采集脚本，请上传脚本到工具库后重试"。如果可用DOM工具完成任务，请立即开始执行，不要再搜索。`
-        })
+        _debugLog('💡 搜索无果，继续用本地工具', { explorationRounds })
+        _injections.push(`已搜索工具库但无匹配脚本，已用DOM工具探索 ${explorationRounds} 轮。本地DOM工具可以完成大多数页面操作，请继续执行即可。如果需求确实超出DOM工具能力，请调用 finish_task 告知用户。`)
       }
 
       // 探查调用溢出检查已禁用（EXPLORATION_TOOLS 为空集，计数器永不递增）
 
+      // ===== 两阶段模式下：阶段1不暴露脚本，阶段2只有脚本 =====
+
       // 绝对轮次警告
+
+      // ===== 本地工具统计提示（两阶段模式下简化） =====
+      // 阶段1用DOM工具时，如果连续多次操作无进展，阶段切换机制会自动处理
+
+      // 绝对轮次提示（不再警告）
       if (aiRequestCount >= 20 && aiRequestCount / maxRounds < 0.7 && !_budget20Warned) {
         _budget20Warned = true
-        _debugLog('⚠️ 规则触发: 绝对轮次警告(≥20轮)', { round: aiRequestCount, maxRounds })
-        messages.push({
-          role: 'system',
-          content: `已执行 ${aiRequestCount} 轮（${Math.round(aiRequestCount / maxRounds * 100)}%）。任务应在数轮内完成，请立即推进到核心操作阶段，不要再进行探索性操作。`
-        })
+        _debugLog('💡 轮次较多提示(≥20轮)', { round: aiRequestCount, maxRounds })
+        _injections.push(`💡 已执行 ${aiRequestCount} 轮。如果任务仍需较多步骤才能完成，建议调用 finish_task 汇报当前结果，或加快推进核心操作。`)
       }
 
-      // 计划停滞检测
+      // 计划停滞温和提示（不再强制跳过步骤）
       if (currentPlan && aiRequestCount - currentPlan.created_at_round >= 5 && planStepProgress === currentPlan.current_step) {
         const stuckRounds = aiRequestCount - currentPlan.created_at_round
-        _debugLog('⚠️ 规则触发: 计划停滞', { planAge: stuckRounds, stuckAtStep: currentPlan.current_step + 1 })
-        if (stuckRounds >= 8) {
-          // 硬终止：8轮 stuck 后强制跳过当前步骤
-          _debugLog('🛑 计划停滞硬终止: 强制跳过当前步骤', { stuckRounds })
-          currentPlan.current_step++
-          planStepProgress = currentPlan.current_step
-          messages.push({
-            role: 'system',
-            content: `计划已在第${currentPlan.current_step}步停滞 ${stuckRounds} 轮！**系统已强制跳过当前步骤。你已经有足够的数据（extract_content 的返回结果），立即用 navigate_to 打开已获取的链接采集内页，不要再探查、搜索翻页、或重复读取页面。如果已有内页数据，直接 finish_task 汇总。**`
-          })
-        } else {
-          messages.push({
-            role: 'system',
-            content: `当前计划已执行 ${stuckRounds} 轮但步骤未推进（停留在第${currentPlan.current_step + 1}步）。如果当前步骤受阻，请跳过并继续下一步，或直接调用 finish_task。`
-          })
-        }
+        _debugLog('💡 提示: 计划停滞', { planAge: stuckRounds, stuckAtStep: currentPlan.current_step + 1 })
+        messages.push({
+          role: 'system',
+          content: `当前计划已执行 ${stuckRounds} 轮但步骤未推进（停留在第${currentPlan.current_step + 1}步）。如果当前步骤受阻，建议跳过并继续下一步，或直接调用 finish_task。你可以自主决定如何推进。`
+        })
       }
 
       // 获取当前页面URL用于工具过滤
@@ -1417,9 +1633,142 @@ export class AgentService {
         currentPageUrl = tab?.url || ''
       } catch {}
 
-      const tools = this.buildToolDefinitions(userMessage, searchResults, currentPageUrl, aiRequestCount + 1)
-      console.log(`[Agent] 第${aiRequestCount}轮API请求, tools:${tools.length}个, 已搜到${searchResults.length}个脚本`)
-      _debugLog(`🔧 第${aiRequestCount}轮 工具(${tools.length}个)`, tools.map(t => `  ${t.function.name}`).join('\n'))
+      // ===== 两阶段流程：阶段切换和工具暴露控制 =====
+      this.postToUI(tabId, { type: 'agentStatus', text: `阶段${currentPhase} 第${aiRequestCount}轮` })
+
+      // 阶段2切换检测：阶段1连续失败达到阈值 → 进入阶段2
+      if (currentPhase === 1 && phase1FailCount >= PHASE1_FAIL_THRESHOLD) {
+        currentPhase = 2
+        _debugLog('🔄 阶段切换: 阶段1→阶段2(远程工具库)', { phase1FailCount, round: aiRequestCount })
+
+        // ===== 构建阶段2隔离提示词（不提及DOM工具，仅描述脚本工具） =====
+        let scriptList = ''
+        if (searchResults.length > 0) {
+          scriptList = '\n\n=== 已匹配的专用脚本 ===\n' + searchResults.map(s => {
+            const params = s.toolConfig?.parameters?.properties ? Object.keys(s.toolConfig.parameters.properties) : []
+            const paramHint = params.length > 0 ? `（参数: ${params.join(', ')}）` : ''
+            return `  - inject_script_${s.id}(${s.name})${paramHint}: ${(s.description || '').slice(0, 80)}`
+          }).join('\n')
+        }
+
+        const phase2SystemPrompt = `你是AI Browser智能体，现在使用远程专用脚本执行任务。
+
+=== 工作流程 ===
+1. 查看已匹配的专用脚本列表（下方提供）
+2. 如需数据参数，先 recall_data 获取阶段1已收集的数据
+3. 调用 inject_script_* 执行脚本，传入所需参数
+4. 任务完成 → 调用 finish_task 汇报结果
+
+=== 可用工具 ===
+search_tools: 搜索服务器远程工具库（传简短中文关键词如"采集"、"翻译"）
+inject_script_*: 执行服务器端专用脚本（每个脚本有特定参数）
+recall_data: 查询已存储的工具执行结果（entry_id/tool_name/filter/fields）
+read_page_content: 读取当前页面信息（辅助脚本判断）
+finish_task: 任务完成，汇报结果
+
+=== 脚本使用指南 ===
+- 直接调用匹配到的脚本，不要犹豫
+- 如果脚本需要URL列表参数，先用 recall_data(entry_id="xxx") 获取阶段1收集的链接
+- 脚本执行成功后，基于结果直接 finish_task，不要重复调用其他工具
+- 如果无匹配脚本，先 search_tools 搜索关键词
+- 多次搜索无果或脚本执行失败 → 调用 finish_task 总结失败原因
+
+=== 数据存储 ===
+- 大量数据自动存储，只发摘要+存储ID
+- 需要详情时调用 recall_data(entry_id="xxx")
+
+=== 输出规范 ===
+- 自然语言总结结果，不输出原始JSON
+- 错误时分析原因并在finish_task中告知${scriptList}`
+
+        // ===== 构建阶段1数据摘要（注入到Phase 2上下文） =====
+        let phase1DataSummary = ''
+        const allStoredIds = this.payloadStore.listEntryIds()
+        if (allStoredIds.length > 0) {
+          phase1DataSummary = '\n\n=== 阶段1已收集的数据 ==='
+          for (const eid of allStoredIds.slice(0, 5)) {
+            const summary = this.payloadStore.getEntrySummary(eid)
+            if (summary) {
+              phase1DataSummary += `\n  ${eid}: ${summary}`
+            }
+          }
+          // 如果有URL数据，直接提示
+          const allUrls = this.payloadStore.listEntryIds().flatMap(eid => this.payloadStore.getEntryUrls(eid))
+          if (allUrls.length > 0) {
+            phase1DataSummary += `\n\n💡 已有${allUrls.length}个URL链接，可直接传给inject_script_*作为参数。`
+          }
+        }
+
+        // ===== 重置消息历史：替换系统提示词，清除Phase 1工具调用记录 =====
+        // 保留：Phase 2系统提示词 + 用户原始需求 + 阶段1数据摘要
+        const phase2UserMsg = {
+          role: 'user',
+          content: userMessage + (phase1DataSummary || '\n\n（阶段1未收集到可用数据，请直接使用脚本或搜索工具库。）')
+        }
+        messages.length = 0 // 清空数组
+        messages.push({ role: 'system', content: phase2SystemPrompt })
+        messages.push(phase2UserMsg)
+
+        _debugLog('🔄 阶段2提示词已注入', { scriptCount: searchResults.length, dataEntries: allStoredIds.length, msgCount: messages.length })
+
+        // 重置失败计数
+        phase1FailCount = 0
+        consecutiveFailCount = 0
+      }
+
+      // 阶段3切换检测：阶段2连续失败达到阈值 → 进入阶段3（终止）
+      if (currentPhase === 2 && phase2FailCount >= PHASE2_FAIL_THRESHOLD) {
+        _debugLog('🔄 阶段切换: 阶段2→阶段3(终止)', { phase2FailCount, round: aiRequestCount })
+        // 直接finish_task
+        const stopMsg = `任务无法完成：阶段1（本地DOM工具）和阶段2（远程脚本库）均未成功。阶段1连续${PHASE1_FAIL_THRESHOLD}次失败，阶段2连续${phase2FailCount}次失败或无匹配脚本。${searchResults.length > 0 ? `已找到脚本但执行失败：${searchResults.map(s => s.name).join('、')}` : '未找到匹配的专用脚本'}。建议：检查任务描述是否清晰，或开发专用脚本上传到工具库后重试。`
+        for (const char of stopMsg) {
+          this.postToUI(tabId, { type: 'streamChunk', content: char })
+          await new Promise(r => setTimeout(r, 10))
+        }
+        this.postToUI(tabId, { type: 'streamDone' })
+        await this._saveToChatHistoryStorage(tabId, stopMsg)
+        return
+      }
+
+      // 根据当前阶段构建工具列表
+      let tools
+      if (currentPhase === 1) {
+        // 阶段1：暴露所有本地DOM工具 + search_tools + finish_task（不暴露inject_script_*）
+        tools = this._buildPhase1Tools(userMessage, currentPageUrl, aiRequestCount + 1)
+      } else if (currentPhase === 2) {
+        // 阶段2：只暴露 search_tools + inject_script_* + read_page_content + recall_data + finish_task
+        tools = this._buildPhase2Tools(searchResults, currentPageUrl, aiRequestCount + 1)
+      } else {
+        // 阶段3：只有 finish_task
+        tools = [{
+          type: 'function',
+          function: {
+            name: 'finish_task',
+            description: '任务完成，汇报结果',
+            parameters: { type: 'object', properties: { summary: { type: 'string', description: '完成摘要' } }, required: ['summary'] }
+          }
+        }]
+      }
+
+      console.log(`[Agent] 阶段${currentPhase} 第${aiRequestCount}轮API请求, tools:${tools.length}个, 已搜到${searchResults.length}个脚本`)
+      _debugLog(`🔧 阶段${currentPhase} 第${aiRequestCount}轮 工具(${tools.length}个)`, tools.map(t => `  ${t.function.name}`).join('\n'))
+
+      // ===== 系统消息聚合：将 _injections 和 loopDetector nudge 合并为单条消息 =====
+      const systemNudges = []
+      // 消费 _injections（之前只push不消费，是bug）
+      while (_injections.length > 0) {
+        systemNudges.push(_injections.shift())
+      }
+      // 消费 loopDetector nudge（之前单独注入，现合并）
+      const loopNudge = loopDetector.getNudge()
+      if (loopNudge) systemNudges.push(loopNudge)
+      // 聚合为单条系统消息
+      if (systemNudges.length > 0) {
+        messages.push({
+          role: 'system',
+          content: systemNudges.join('\n'),
+        })
+      }
 
       const config = await this.configService.getAIConfig()
       const auth = await this.configService.getAppAuth()
@@ -1431,11 +1780,11 @@ export class AgentService {
         tools,
         tool_choice: 'auto',
       }
-      // 构建发送给 LLM 的消息摘要
+      // 构建发送给 LLM 的消息摘要（日志不截断）
       const msgSummary = messages.map((m, i) => ({
         idx: i,
         role: m.role,
-        preview: typeof m.content === 'string' ? m.content.slice(0, 500) : (Array.isArray(m.content) ? JSON.stringify(m.content).slice(0, 500) : String(m.content).slice(0, 500)),
+        preview: typeof m.content === 'string' ? m.content : (Array.isArray(m.content) ? JSON.stringify(m.content) : String(m.content)),
         len: typeof m.content === 'string' ? m.content.length : JSON.stringify(m.content).length,
         tc_id: m.tool_call_id || undefined
       }))
@@ -1553,7 +1902,7 @@ export class AgentService {
         const data = await res.json()
         const choice = data.choices?.[0]
         const msg = choice?.message
-        console.log(`[Agent] 第${aiRequestCount}轮响应:`, msg?.tool_calls?.length ? `tool_calls:${msg.tool_calls.length}` : (msg?.content ? `text:${msg.content.slice(0,60)}` : 'empty'))
+        console.log(`[Agent] 第${aiRequestCount}轮响应:`, msg?.tool_calls?.length ? `tool_calls:${msg.tool_calls.length}` : (msg?.content ? `text:${msg.content}` : 'empty'))
 
         if (!msg) {
           this.postToUI(tabId, { type: 'agentError', error: 'AI返回为空' })
@@ -1562,7 +1911,7 @@ export class AgentService {
 
         if (msg.tool_calls && msg.tool_calls.length > 0) {
           console.log('[Agent] tool_calls:', msg.tool_calls.map(t => t.function.name).join(', '))
-          _debugLog(`📥 第${aiRequestCount}轮 LLM响应: tool_calls`, msg.tool_calls.map(t => `${t.function.name}(${JSON.stringify(t.function.arguments || {}).slice(0, 100)})`).join('\n'))
+          _debugLog(`📥 第${aiRequestCount}轮 LLM响应: tool_calls`, msg.tool_calls.map(t => `${t.function.name}(${JSON.stringify(t.function.arguments || {})})`).join('\n'))
 
           // 有工具调用时重置纯文本空闲计数
           _idleTextCount = 0
@@ -1590,7 +1939,20 @@ export class AgentService {
             let funcArgs = {}
             try { funcArgs = JSON.parse(toolCall.function.arguments || '{}') } catch {}
 
+            // ===== 工具名称验证：防止LLM调用不存在工具（幻觉） =====
+            const allowedToolNames = tools.map(t => t.function.name)
+            if (!allowedToolNames.includes(funcName)) {
+              const rejectMsg = JSON.stringify({ ok: false, error: `工具 "${funcName}" 不在当前可用工具列表中，调用被拒绝。可用工具：${allowedToolNames.join('、')}。请仅使用列表中的工具。` })
+              console.warn(`[Agent] 工具幻觉拦截: ${funcName} 不在当前工具列表中`, allowedToolNames)
+              _debugLog('🚫 工具幻觉拦截', { rejected: funcName, allowed: allowedToolNames })
+              messages.push({ role: 'tool', tool_call_id: toolCall.id, content: rejectMsg })
+              this.postToUI(tabId, { type: 'agentStepResult', step: totalToolCalls + 1, toolName: `${funcName}(幻觉拦截)`, result: rejectMsg, done: false })
+              loopDetector.record(funcName, funcArgs, currentPageUrl)
+              continue  // 跳过执行，不递增 totalToolCalls
+            }
+
             totalToolCalls++
+            let _intercepted = false  // 安全拦截标志：仅用于域名安全策略拦截，跳过通用post-processing
 
             // 无进展检测：在工具执行后判断是否有进展（见下方 result 判断）
 
@@ -1604,8 +1966,35 @@ export class AgentService {
             await this._yieldUI()
 
             let toolResult
-            if (funcName === 'finish_task') {
+            if (funcName === 'recall_data') {
+              // ===== recall_data 重复查询提醒（不再硬拦截） =====
+              const entryIds = (funcArgs.entry_id || '').split(',').map(s => s.trim()).filter(Boolean)
+              let overLimitIds = []
+              for (const eid of entryIds) {
+                const count = (_recallDataCallCount.get(eid) || 0) + 1
+                _recallDataCallCount.set(eid, count)
+                if (count > 3) overLimitIds.push(`${eid}(已查${count}次)`)
+              }
+              if (overLimitIds.length > 0) {
+                // 温和提示而非硬拦截，允许继续查询
+                _injections.push(`💡 提示：以下存储数据已查询3次以上：${overLimitIds.join(', ')}。建议推进下一步操作或调用finish_task，但你可以自主决定。`)
+              }
+              // 查询 payloadStore（不再阻断查询）
+              const queryResult = this.payloadStore.query(funcArgs)
+              toolResult = JSON.stringify(queryResult)
+              console.log('[Agent] recall_data:', funcArgs, '→', JSON.stringify(queryResult).slice(0, 100))
+              this.postToUI(tabId, { type: 'agentStepResult', step: totalToolCalls, toolName: 'recall_data', result: typeof queryResult === 'object' ? JSON.stringify(queryResult).slice(0, 200) : queryResult, done: false })
+            } else if (funcName === 'finish_task') {
               console.log('[Agent] finish_task, summary:', funcArgs.summary)
+
+              // P0: payloadStore 汇总注入（如果有存储数据）
+              const payloadSummary = this.payloadStore.getSummaryForFinish()
+              if (payloadSummary) {
+                const summaryHint = `\n[存储数据汇总] 共${payloadSummary.count}条存储：${payloadSummary.items.map(e => `${e.id}(${e.toolName})`).join(', ')}。需要详细内容可调用 recall_data(entry_id="all")`
+                messages.push({ role: 'system', content: summaryHint })
+                console.log('[Agent] finish_task payloadStore 汇总:', payloadSummary)
+              }
+
               const summary = funcArgs.summary || '任务已完成'
               messages.push({ role: 'tool', tool_call_id: toolCall.id, content: JSON.stringify({ ok: true, summary }) })
               this.postToUI(tabId, { type: 'agentStepResult', step: totalToolCalls, result: summary, done: true })
@@ -1659,6 +2048,7 @@ export class AgentService {
                 }
               }
             } else if (funcName === 'search_tools') {
+              hasSearchedTools = true  // 标记已主动搜索过工具库
               const query = funcArgs.query || userMessage
               this.postToUI(tabId, { type: 'agentStep', step: totalToolCalls, toolName: 'search_tools', toolArgs: { query }, status: 'searching' })
               const newResults = await this.toolService.searchScripts(query)
@@ -1671,9 +2061,12 @@ export class AgentService {
                 }
               }
               if (newResults.length === 0) {
+                const noResultHint = currentPhase === 2
+                  ? `未找到与"${query}"匹配的专用脚本。请尝试搜索其他关键词，如果多次搜索无果，请调用finish_task总结当前结果并告知用户需要开发专用脚本。`
+                  : `未找到与"${query}"匹配的专用工具。你可以用本地DOM工具直接在页面上操作，也可以尝试搜索其他关键词。`
                 toolResult = JSON.stringify({
                   ok: true,
-                  result: `未找到与"${query}"匹配的专用工具。请改用 DOM工具（extract_content/fill_input/click_element）直接在页面上操作完成需求。不要再调用 search_tools。`,
+                  result: noResultHint,
                 })
               } else {
                 toolResult = JSON.stringify(newResults.slice(0, 5).map(t => ({
@@ -1787,6 +2180,10 @@ export class AgentService {
                 const execResult = await this.toolService.executeTool(tool, targetTab.id, funcArgs)
                 const execDuration = Date.now() - execStart
                 toolResult = JSON.stringify(execResult)
+                // API 类型脚本成功执行后注入提示，避免 LLM 忽略结果继续重复操作
+                if (execResult?.ok && (tool.toolType === 'api' || tool.toolConfig?.apiEndpoint)) {
+                  _injections.push(`脚本 ${tool.name} 已成功执行并返回完整结果，可直接基于这些数据继续后续步骤或 finish_task，无需再用其他工具重复获取。`)
+                }
                 executedTools.push({ name: tool.name || funcName, result: execResult })
                 // P3: 记录经验记忆
                 const memOk = execResult?.ok === true
@@ -1829,14 +2226,42 @@ export class AgentService {
               })()
               executedTools.push({ name: funcName, result: toolResult })
             } else if (funcName === 'extract_content' || funcName === 'click_element' || funcName === 'fill_input' || funcName === 'wait_for_element' || funcName === 'save_as_file' || funcName === 'navigate_to' || funcName === 'go_back' || funcName === 'find_text_on_page' || funcName === 'get_element_info' || funcName === 'scroll_page' || funcName === 'hover_element' || funcName === 'select_dropdown' || funcName === 'press_key' || funcName === 'go_forward' || funcName === 'get_interactive_elements') {
+              // ===== 重复selector+tool组合提醒（不再硬拦截，允许重复执行） =====
+              const selectorTools = ['extract_content', 'get_element_info', 'find_text_on_page']
+              if (selectorTools.includes(funcName) && funcArgs.selector) {
+                const comboKey = `${funcArgs.selector}|${funcName}`
+                if (_usedSelectorToolCombo.has(comboKey)) {
+                  // 温和提示，不再硬拦截阻断执行
+                  _injections.push(`💡 提示：已用 ${funcName} 提取过选择器 "${funcArgs.selector}" 的数据，重复提取可能浪费时间。建议推进下一步操作或调用finish_task，但你可以自主决定。`)
+                }
+                _usedSelectorToolCombo.add(comboKey)
+              }
+              // 统一执行逻辑：域名安全策略检查 → 预算提示 → 正常执行
               // P1: navigate_to 执行前检查域名安全策略
               if (funcName === 'navigate_to' && !this._isUrlAllowed(funcArgs.url)) {
                 toolResult = JSON.stringify({ ok: false, error: `导航被安全策略阻止：${funcArgs.url} 不在允许的域名范围内。请用finish_task告知用户。` })
                 executedTools.push({ name: `${funcName}(域名被拦截)`, result: toolResult })
                 this.postToUI(tabId, { type: 'agentStepResult', step: totalToolCalls, toolName: funcName, result: toolResult, done: false })
                 messages.push({ role: 'tool', tool_call_id: toolCall.id, content: toolResult })
-                // 跳过实际导航，但不设置终止标志
                 loopDetector.record(funcName, funcArgs, currentPageUrl)
+                _intercepted = true
+              } else if (funcName === 'navigate_to' && aiRequestCount / maxRounds >= 0.85) {
+                // 预算接近上限时温和提示（不再硬拦截，继续执行）
+                _debugLog('💡 预算提示: navigate_to接近预算上限', { round: aiRequestCount, maxRounds })
+                _injections.push(`💡 提示：已使用${Math.round(aiRequestCount / maxRounds * 100)}%预算，导航新页面可能消耗较多轮次。请评估剩余轮次能否完成，如不能请调用finish_task汇总已有结果。`)
+                // 继续正常执行导航
+                const targetTab = await this._getTargetTab(tabId)
+                if (!targetTab) {
+                  toolResult = JSON.stringify({ ok: false, error: '目标标签页不可用（可能已关闭或导航到了系统页面）。必须用finish_task告知用户。' })
+                } else {
+                  this.postToUI(tabId, { type: 'agentStep', step: totalToolCalls, toolName: funcName, toolArgs: funcArgs, status: 'running' })
+                  const domResult = await Promise.race([
+                    this.executeDOMTool(targetTab.id, funcName, funcArgs),
+                    new Promise((_, reject) => setTimeout(() => reject(new Error('动作超时')), this.ACTION_TIMEOUT_MS))
+                  ]).catch(e => ({ ok: false, error: e.message }))
+                  toolResult = JSON.stringify(domResult)
+                  executedTools.push({ name: funcName, result: domResult })
+                }
               } else {
                 const targetTab = await this._getTargetTab(tabId)
                 if (!targetTab) {
@@ -1852,16 +2277,21 @@ export class AgentService {
                   executedTools.push({ name: funcName, result: domResult })
                 }
               }
-              // 导航类动作 → 终止后续
-              if (['navigate_to', 'go_back', 'go_forward'].includes(funcName) && !toolResult.includes('域名被拦截')) {
+              // 导航类动作 → 终止后续调用（排除失败的情况）
+              if (['navigate_to', 'go_back', 'go_forward'].includes(funcName) && !toolResult.includes('域名被拦截') && !toolResult.includes('"ok":false')) {
                 shouldTerminateSequence = true
               }
             } else {
               toolResult = JSON.stringify({ ok: false, error: `未知工具: ${funcName}` })
             }
 
-            // 工具执行结果调试
-            _debugLog(`⚙️ 工具结果: ${funcName}`, (toolResult || '').slice(0, 300))
+            // ===== 拦截跳过：拦截块已自行处理tool消息和UI，跳过通用post-processing =====
+            if (_intercepted) continue
+
+            // ===== 阶段失败计数已在无进展检测中处理 =====
+
+            // 工具执行结果调试（不截断）
+            _debugLog(`⚙️ 工具结果: ${funcName}`, toolResult || '')
 
             // ===== P2: 动作循环检测（仅记录，不在此处注入消息） =====
             loopDetector.record(funcName, funcArgs, currentPageUrl)
@@ -1890,9 +2320,40 @@ export class AgentService {
               if (parsed?.ok === false) {
                 hasProgress = false
               }
-              // search_tools 不重置计数（搜到工具不等于任务有进展，可能执行后仍失败）
+              // search_tools 找到结果 → 有进展（信息收集是任务推进的一部分）
               else if (funcName === 'search_tools') {
-                hasProgress = false
+                // 结果可能是裸数组（找到脚本时）或 {ok:true, result:"提示文本"}（无结果时）
+                const results = Array.isArray(parsed) ? parsed : parsed?.result
+                if (Array.isArray(results) && results.length > 0) {
+                  hasProgress = true
+                }
+                else {
+                  hasProgress = false
+                }
+              }
+              // recall_data 返回数据 → 有进展（获取了信息）
+              else if (funcName === 'recall_data') {
+                const data = parsed?.data || parsed?.result || parsed
+                // 明确错误 → 无进展
+                if (parsed?.error) {
+                  hasProgress = false
+                }
+                // 数组：有元素 → 有进展
+                else if (Array.isArray(data) && data.length > 0) {
+                  hasProgress = true
+                }
+                // 对象：有实际数据字段 → 有进展
+                else if (data && typeof data === 'object' && !Array.isArray(data)) {
+                  const hasData = (data.count > 0) || (data.entries && data.entries.length > 0) || (Array.isArray(data.data) && data.data.length > 0)
+                  hasProgress = hasData
+                }
+                // 字符串：有实际内容（排除短提示语如"无存储数据"）
+                else if (typeof data === 'string' && data.length > 10 && !data.includes('无存储数据') && !data.includes('未找到')) {
+                  hasProgress = true
+                }
+                else {
+                  hasProgress = false
+                }
               }
               // ok=true 或 无ok字段但有有效内容 → 有进展
               else if (parsed?.ok === true || parsed?.ok === undefined) {
@@ -1908,9 +2369,31 @@ export class AgentService {
             // 使用更强烈的 nudge 重置无进展计数
             if (hasProgress) {
               consecutiveFailCount = 0
+              // 阶段失败计数也重置（有进展说明当前阶段有效）
+              if (currentPhase === 1) phase1FailCount = 0
+              if (currentPhase === 2) phase2FailCount = 0
             } else {
               consecutiveFailCount++
-              console.warn('[Agent] 无进展 #' + consecutiveFailCount, funcName, toolResult?.slice(0, 100))
+              // 阶段失败计数：阶段1所有无进展都计，阶段2只有inject_script_*失败才计
+              if (currentPhase === 1) {
+                phase1FailCount++
+                _debugLog('📊 阶段1失败计数', { phase1FailCount, round: aiRequestCount, tool: funcName })
+              }
+              if (currentPhase === 2) {
+                // 阶段2只计脚本执行失败，search_tools/recall_data是信息收集不算失败
+                if (funcName.startsWith('inject_script_') || funcName.includes('inject_script')) {
+                  phase2FailCount++
+                  phase2ScriptAttempted = true
+                  _debugLog('📊 阶段2脚本失败计数', { phase2FailCount, round: aiRequestCount, tool: funcName })
+                }
+                // 如果没有脚本可用，search_tools多次搜索无结果也算失败
+                else if (funcName === 'search_tools' && searchResults.length === 0) {
+                  phase2FailCount++
+                  _debugLog('📊 阶段2搜索无果计数', { phase2FailCount, round: aiRequestCount })
+                }
+                // 其他工具在阶段2不计为失败
+              }
+              console.warn('[Agent] 无进展 #' + consecutiveFailCount, funcName, toolResult)
             }
 
             // 低价值操作检测：仅当无进展时计数，有进展时重置（避免误杀合理的多关键词搜索）
@@ -1929,16 +2412,17 @@ export class AgentService {
 
 
             if (consecutiveFailCount >= MAX_CONSECUTIVE_FAILS) {
-              _debugLog('🛑 Agent终止: 连续无进展', { consecutiveFailCount, max: MAX_CONSECUTIVE_FAILS })
-              console.warn('[Agent] 连续', consecutiveFailCount, '次无进展，强制结束')
-              const stopMsg = `任务无法继续：已连续${consecutiveFailCount}次操作无进展（工具失败或结果未变化），可能页面被阻塞或任务超出能力范围。请调整后重试。`
-              for (const char of stopMsg) {
-                this.postToUI(tabId, { type: 'streamChunk', content: char })
-                await new Promise(r => setTimeout(r, 10))
+              _debugLog('💡 提示: 连续无进展较多', { consecutiveFailCount, max: MAX_CONSECUTIVE_FAILS, phase: currentPhase })
+              // 根据当前阶段给出不同提示
+              if (currentPhase === 1) {
+                phase1FailCount += MAX_CONSECUTIVE_FAILS  // 批量计入阶段1失败，加速阶段切换
+                _injections.push(`💡 阶段1提示：已连续${consecutiveFailCount}次操作无进展。如果DOM工具无法完成任务，将自动切换到阶段2（远程脚本库模式）。`)
+              } else if (currentPhase === 2) {
+                phase2FailCount += 1
+                _injections.push(`💡 阶段2提示：已连续${consecutiveFailCount}次操作无进展。请尝试搜索其他关键词或调用finish_task。`)
               }
-              this.postToUI(tabId, { type: 'streamDone' })
-              await this._saveToChatHistoryStorage(tabId, stopMsg)
-              return
+              // 重置通用计数
+              consecutiveFailCount = 0
             }
 
             this.postToUI(tabId, {
@@ -1949,57 +2433,195 @@ export class AgentService {
               done: false,
             })
 
-            // P3: 智能截断过长的工具结果（保留结构）
-            const truncatedResult = this._smartTruncateResult(toolResult)
+            // P0: PayloadStore 存储判断（超过阈值的结果存payloadStore，只发摘要给AI）
+            let finalResult
+            if (this._shouldStoreToPayload(toolResult, funcName)) {
+              finalResult = this._storeToPayload(toolResult, funcName)
+              console.log('[Agent] payloadStore 存储:', funcName, '→ ID:', this.payloadStore.entries[this.payloadStore.entries.length - 1]?.id)
+            } else {
+              // P3: 智能截断过长的工具结果（保留结构）
+              finalResult = this._smartTruncateResult(toolResult)
+            }
+
             messages.push({
               role: 'tool',
               tool_call_id: toolCall.id,
-              content: truncatedResult,
+              content: finalResult,
             })
 
             await new Promise(r => setTimeout(r, 200))
           }
 
-          // 循环检测提醒（在所有 tool 响应之后注入，避免破坏 assistant-tool 配对）
-          const nudge = loopDetector.getNudge()
-          if (nudge) {
-            messages.push({ role: 'system', content: nudge })
-          }
+          // 注意：loopDetector nudge 已移至每轮开头的系统消息聚合逻辑中，不再在此处单独注入
 
-          // 防止 messages 上下文无限膨胀：按完整分组裁剪，确保 assistant+tool 配对完整
-          const MAX_MESSAGES = 30
+          // 防止 messages 上下文无限膨胀：滑动窗口 + 分级摘要压缩
+          const MAX_MESSAGES = 40
           if (messages.length > MAX_MESSAGES) {
-            // 按分组边界裁剪：找到第一个可以安全删除的边界
-            // 分组规则：system | (user | (assistant [tool_calls] | tool*) | assistant text)*
-            let removeCount = messages.length - MAX_MESSAGES
-            let idx = 1 // 从索引1开始（跳过system）
-            while (removeCount > 0 && idx < messages.length) {
-              if (messages[idx].role === 'assistant' && messages[idx].tool_calls?.length > 0) {
-                // assistant + 紧随的 tool 消息作为一组删除
-                const toolCount = messages[idx].tool_calls.length
-                const delEnd = Math.min(idx + 1 + toolCount, messages.length)
-                const groupSize = delEnd - idx
-                messages.splice(idx, groupSize)
-                removeCount -= groupSize
-              } else {
-                // 单条消息（user / assistant文本 / 单独tool）
-                messages.splice(idx, 1)
-                removeCount--
+            // 保留最近的 60% 消息，压缩更早的
+            const keepRecent = Math.floor(MAX_MESSAGES * 0.6)
+            let cutOff = messages.length - keepRecent
+
+            // 向前调整切割点：确保不在 assistant(tool_calls)+tool 配对中间切割
+            if (cutOff > 1) {
+              while (cutOff < messages.length && messages[cutOff]?.role === 'tool') {
+                cutOff++
               }
-              // 删除后 idx 不变，因为后面的元素前移了
+            }
+
+            if (cutOff > 1) {
+              // 构建 tool_call_id → toolName 映射（从 assistant.tool_calls 获取）
+              const toolNameMap = new Map()
+              for (let i = 1; i < cutOff; i++) {
+                const m = messages[i]
+                if (m.role === 'assistant' && m.tool_calls) {
+                  for (const tc of m.tool_calls) {
+                    toolNameMap.set(tc.id, tc.function.name)
+                  }
+                }
+              }
+
+              // === 消息分级收集 ===
+              // S级：链接列表、批量采集结果（完整保留）
+              const sLevelParts = []
+              // A级：关键操作摘要（navigate成功/404、create_plan、search_tools、inject_script结果）
+              const aLevelParts = []
+              // B级：一般操作结论（read_page_content、extract_content正文压缩为结论）
+              const bLevelParts = []
+              // C级：系统提示（合并去重）
+              const cLevelMessages = []
+
+              for (let i = 1; i < cutOff; i++) {
+                const m = messages[i]
+
+                if (m.role === 'tool' && m.content) {
+                  const toolName = toolNameMap.get(m.tool_call_id) || ''
+                  try {
+                    const parsed = JSON.parse(m.content)
+
+                    // S级：extract_content 返回含 href 的链接列表
+                    if (toolName === 'extract_content' && parsed?.ok && Array.isArray(parsed.result)) {
+                      const hasHref = parsed.result.some(item => item?.attrs?.href)
+                      if (hasHref) {
+                        // 提取为结构化链接清单
+                        const links = parsed.result
+                          .filter(item => item?.attrs?.href && item?.text)
+                          .map(item => {
+                            const url = item.attrs.href
+                            const title = item.text.slice(0, 30)
+                            return `${url} | ${title}`
+                          })
+                        if (links.length > 0) {
+                          sLevelParts.push(`[链接列表(${links.length}条)]\n${links.join('\n')}`)
+                        }
+                        continue
+                      }
+                    }
+
+                    // S级：inject_script_* 返回批量采集结果
+                    if (toolName.startsWith('inject_script_') && parsed?.ok && parsed?.result) {
+                      const resultStr = typeof parsed.result === 'string'
+                        ? parsed.result.slice(0, 500)
+                        : JSON.stringify(parsed.result).slice(0, 500)
+                      sLevelParts.push(`[脚本${toolName}结果] ${resultStr}`)
+                      continue
+                    }
+
+                    // A级：navigate_to 结果
+                    if (toolName === 'navigate_to') {
+                      const isOk = parsed?.ok
+                      const resultText = typeof parsed?.result === 'string' ? parsed.result : ''
+                      const is404 = resultText.includes('404') || resultText.includes('not found') || resultText.includes('没有找到')
+                      aLevelParts.push(isOk && !is404
+                        ? `✓ 导航成功: ${resultText.slice(0, 60)}`
+                        : `✗ 导航失败(404): ${resultText.slice(0, 60)}`)
+                      continue
+                    }
+
+                    // A级：create_plan / search_tools 结果
+                    if (toolName === 'create_plan' || toolName === 'search_tools') {
+                      const summary = typeof parsed?.result === 'string'
+                        ? parsed.result.slice(0, 120)
+                        : JSON.stringify(parsed.result || '').slice(0, 120)
+                      aLevelParts.push(`[${toolName}] ${summary}`)
+                      continue
+                    }
+
+                    // B级：其他工具结果（压缩为结论）
+                    if (parsed?.ok && parsed?.result) {
+                      const resultStr = typeof parsed.result === 'string'
+                        ? parsed.result.slice(0, 100)
+                        : JSON.stringify(parsed.result).slice(0, 100)
+                      bLevelParts.push(`[${toolName || '工具'}] ${resultStr}`)
+                    } else if (parsed?.error) {
+                      bLevelParts.push(`[${toolName || '工具'}] 错误: ${String(parsed.error).slice(0, 60)}`)
+                    }
+                  } catch {
+                    // JSON 解析失败，简单保留
+                    bLevelParts.push(`[工具结果] ${m.content.slice(0, 60)}`)
+                  }
+                } else if (m.role === 'system' && m.content) {
+                  // C级：系统提示（收集后合并去重）
+                  cLevelMessages.push(m.content)
+                }
+                // assistant 消息不单独保留（其信息已体现在 tool 结果中）
+              }
+
+              // === C级合并去重 ===
+              const cLevelParts = []
+              // 合并"页面连续N步无变化"
+              const stagnantMsgs = cLevelMessages.filter(s => s.includes('没有变化') || s.includes('无变化'))
+              const otherSystemMsgs = cLevelMessages.filter(s => !s.includes('没有变化') && !s.includes('无变化'))
+              if (stagnantMsgs.length > 0) {
+                // 提取最大步数
+                const steps = stagnantMsgs.map(s => parseInt(s.match(/(\d+)\s*步/)?.[1] || '0'))
+                const maxStep = Math.max(...steps)
+                cLevelParts.push(`页面连续${steps.length}次检测无变化(最大${maxStep}步)`)
+              }
+              // 其他系统提示去重
+              const seen = new Set()
+              for (const s of otherSystemMsgs) {
+                const key = s.slice(0, 40)
+                if (!seen.has(key)) { seen.add(key); cLevelParts.push(s.slice(0, 80)) }
+              }
+
+              // === 组装摘要 ===
+              const summarySections = []
+              if (sLevelParts.length > 0) summarySections.push(sLevelParts.join('\n'))
+              if (aLevelParts.length > 0) summarySections.push(aLevelParts.join('\n'))
+              if (bLevelParts.length > 0) summarySections.push(bLevelParts.slice(-6).join('\n'))
+              if (cLevelParts.length > 0) summarySections.push(cLevelParts.join('\n'))
+
+              const summaryMsg = {
+                role: 'system',
+                content: `[上下文摘要] 以下为早期操作摘要：\n${summarySections.join('\n')}\n---\n原始用户需求: ${userMessage.slice(0, 200)}`,
+              }
+              // 删除早期消息，插入摘要
+              messages.splice(1, cutOff - 1, summaryMsg)
+            }
+
+            // 安全网：移除孤立的 tool 消息（没有对应 assistant tool_calls 的）
+            const validToolCallIds = new Set()
+            for (const m of messages) {
+              if (m.role === 'assistant' && m.tool_calls) {
+                for (const tc of m.tool_calls) validToolCallIds.add(tc.id)
+              }
+            }
+            for (let i = messages.length - 1; i >= 0; i--) {
+              if (messages[i].role === 'tool' && !validToolCallIds.has(messages[i].tool_call_id)) {
+                console.warn('[Agent] 移除孤立tool消息:', messages[i].tool_call_id)
+                messages.splice(i, 1)
+              }
             }
           }
         } else {
           console.log('[Agent] 纯文本回复（无tool_calls）:', (msg.content || '').slice(0, 80))
           const content = msg.content || ''
           const textContent = content || 'AI未返回有效响应，请重试。'
-          // P3: 检测连续纯文本回复（无工具调用），防止AI陷入无效对话循环
+          // 纯文本回复视为AI认为任务已完成或无法继续，自然结束
           _idleTextCount++
           if (_idleTextCount >= MAX_IDLE_TEXT) {
-            console.warn('[Agent] 连续', _idleTextCount, '次纯文本无工具调用，强制结束')
-            this.postToUI(tabId, { type: 'agentError', error: 'AI连续回复纯文本未使用工具，可能任务无法继续' })
-            await this._saveToChatHistoryStorage(tabId, '⚠️ AI连续回复纯文本未执行操作，请检查任务描述是否清晰。', [])
-            return
+            console.log('[Agent] 连续', _idleTextCount, '次纯文本无工具调用，AI可能认为任务已完成')
+            // 不再强制终止，让AI自然结束
           }
           if (content) {
             for (const char of content) {

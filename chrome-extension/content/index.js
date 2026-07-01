@@ -48,6 +48,14 @@
       sendResponse({ ok: true, data: content })
       return true
     }
+
+    // 右键菜单动作（AI 总结/翻译/解释）
+    if (msg.type === 'selectionAction') {
+      handleSelectionAction(msg.action, msg.text || '')
+      sendResponse({ ok: true })
+      return true
+    }
+
     sendResponse({ ok: true })
   })
 
@@ -271,16 +279,31 @@
     guardian.observe(document.body, { childList: true })
   }
 
-  // ---- 划词动作处理（通过原生 sidePanel）----
+  // ---- 划词/右键动作处理（通过原生 sidePanel）----
   function handleSelectionAction(action, text) {
-    const prompts = {
+    // 页面级提示（右键菜单 summarize/translate，无选中文本，sidepanel 自动注入页面内容）
+    const pagePrompts = {
+      summarize: '总结当前页面内容',
+      translate: '翻译当前页面为中文',
+    }
+    // 划词级提示（有选中文本，提示词 + 文本内容）
+    const selectionPrompts = {
       explain: '请解释以下内容：\n\n',
       translate: '请将以下内容翻译为中文：\n\n',
       rewrite: '请改写以下内容：\n\n',
       summarize: '请总结以下内容要点：\n\n',
     }
-    const prompt = prompts[action] || '请分析以下内容：\n\n'
-    const fullMessage = prompt + text
+
+    let fullMessage
+    if (!text && pagePrompts[action]) {
+      // 页面级：短提示，sidepanel 的 sendMessage 会自动检测关键词并注入页面内容
+      fullMessage = pagePrompts[action]
+    } else {
+      // 划词级：提示词 + 选中文本
+      const prompt = selectionPrompts[action] || '请分析以下内容：\n\n'
+      fullMessage = prompt + text
+    }
+
     // 存储待发送消息，并打开原生 sidePanel
     chrome.storage.local.set({ pendingMessage: fullMessage }).catch(() => {})
     safeSendMessage({ type: 'toggleSidebar', action })

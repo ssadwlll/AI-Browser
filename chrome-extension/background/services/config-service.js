@@ -1,7 +1,7 @@
 // ============ ConfigService + StorageService ============
 
 const DEFAULT_AI_CONFIG = {
-  model: 'deepseek-chat',
+  model: 'deepseek-v4-pro',
   temperature: 0.7,
   maxTokens: 4096,
   systemPrompt: '你是 AI Browser 助手，可以帮助用户分析网页内容、回答问题、编写代码和执行操作。',

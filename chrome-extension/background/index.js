@@ -185,10 +185,12 @@ chrome.runtime.onInstalled.addListener(() => {
   scriptService.syncScripts()
   sidebarService.setupPanelBehavior()
 
-  // 右键菜单
-  chrome.contextMenus.create({ id: 'ai-browser-summarize', title: 'AI 总结此页面', contexts: ['page'] })
-  chrome.contextMenus.create({ id: 'ai-browser-translate', title: '翻译此页面', contexts: ['page'] })
-  chrome.contextMenus.create({ id: 'ai-browser-explain', title: 'AI 解释选中文字', contexts: ['selection'] })
+  // 右键菜单：先清除旧菜单再创建，避免扩展重载后 ID 冲突导致菜单失效
+  chrome.contextMenus.removeAll(() => {
+    chrome.contextMenus.create({ id: 'ai-browser-summarize', title: 'AI 总结此页面', contexts: ['page'] })
+    chrome.contextMenus.create({ id: 'ai-browser-translate', title: '翻译此页面', contexts: ['page'] })
+    chrome.contextMenus.create({ id: 'ai-browser-explain', title: 'AI 解释选中文字', contexts: ['selection'] })
+  })
 })
 
 chrome.alarms.onAlarm.addListener((alarm) => {

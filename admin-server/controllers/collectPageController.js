@@ -1,5 +1,6 @@
 const http = require('http')
 const https = require('https')
+const iconv = require('iconv-lite')
 const { success, error } = require('../utils/response')
 
 function extractContent(html) {
@@ -45,8 +46,24 @@ function fetchPage(targetUrl) {
         proxyRes.on('data', chunk => chunks.push(chunk))
         proxyRes.on('end', () => {
           const raw = Buffer.concat(chunks)
+          // 检测编码：优先从 Content-Type 头提取，其次从 HTML meta 标签提取
+          let charset = 'utf-8'
+          const ctHeader = proxyRes.headers['content-type'] || ''
+          const ctMatch = ctHeader.match(/charset=["']?([\w-]+)/i)
+          if (ctMatch) {
+            charset = ctMatch[1].toLowerCase().replace('gb2312', 'gbk')
+          } else {
+            // 从 HTML meta 标签检测编码
+            const headStr = raw.slice(0, 1024).toString('ascii')
+            const metaMatch = headStr.match(/charset=["']?([\w-]+)/i)
+            if (metaMatch) charset = metaMatch[1].toLowerCase().replace('gb2312', 'gbk')
+          }
           let html = ''
-          try { html = raw.toString('utf-8') } catch { html = raw.toString() }
+          if (charset === 'utf-8' || charset === 'utf8') {
+            html = raw.toString('utf-8')
+          } else {
+            html = iconv.decode(raw, charset)
+          }
           resolve(html)
         })
       })

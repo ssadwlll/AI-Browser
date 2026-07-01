@@ -44,6 +44,12 @@ CREATE TABLE IF NOT EXISTS scripts (
   params_data JSON,
   status ENUM('draft', 'published', 'archived') DEFAULT 'draft',
   download_count INT DEFAULT 0,
+  tool_type VARCHAR(20) DEFAULT 'js',
+  tool_config JSON,
+  metadata JSON,
+  precheck TEXT,
+  vector LONGTEXT COMMENT '1024维embedding向量',
+  vector_updated_at TIMESTAMP NULL DEFAULT NULL COMMENT '向量最后生成时间',
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   FOREIGN KEY (category_id) REFERENCES categories(id) ON DELETE SET NULL,
@@ -173,4 +179,18 @@ CREATE TABLE IF NOT EXISTS ai_call_logs (
   INDEX idx_acl_model (model),
   CONSTRAINT fk_acl_appkey FOREIGN KEY (app_key_id) REFERENCES app_keys(id) ON DELETE SET NULL,
   CONSTRAINT fk_acl_provider FOREIGN KEY (provider_id) REFERENCES ai_providers(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- ============ 脚本经验记忆表 ============
+CREATE TABLE IF NOT EXISTS script_memories (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  script_id INT NOT NULL,
+  success TINYINT(1) NOT NULL DEFAULT 1,
+  duration_ms INT DEFAULT 0,
+  error_msg TEXT,
+  summary TEXT,
+  url VARCHAR(500) DEFAULT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_sm_script_id (script_id),
+  FOREIGN KEY (script_id) REFERENCES scripts(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
