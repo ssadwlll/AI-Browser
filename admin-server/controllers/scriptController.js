@@ -61,7 +61,7 @@ exports.list = async (req, res) => {
        LEFT JOIN categories c ON s.category_id = c.id
        LEFT JOIN users u ON s.author_id = u.id
        ${where}
-       ORDER BY s.updated_at DESC
+       ORDER BY s.id DESC
        LIMIT ? OFFSET ?`,
       [...params, parseInt(pageSize), offset],
     )
@@ -677,7 +677,7 @@ exports.injectData = async (req, res) => {
 exports.injectList = async (req, res) => {
   try {
     const [rows] = await pool.query(
-      "SELECT id, name, url_pattern FROM scripts WHERE status = 'published' ORDER BY updated_at DESC"
+      "SELECT id, name, url_pattern FROM scripts WHERE status = 'published' ORDER BY id DESC"
     )
     // Try to enrich with module counts, but fallback gracefully
     try {
