@@ -1,6 +1,6 @@
 import { PayloadStore } from './payload-store.js'
-import { ActionLoopDetector } from './action-loop-detector.js'
 import { DomainPolicy } from './domain-policy.js'
+import { TodoScheduler, STAGE } from './todo-scheduler.js'
 
 // ============ AgentService ============
 export class AgentService {
@@ -26,6 +26,8 @@ export class AgentService {
     this._pageReadCache = new Map()
     // 工具结果暂存区（超过阈值的结果存此处，只发摘要给AI）
     this.payloadStore = new PayloadStore()
+    // 分阶段AI待办调度引擎（内含全局持久存储+阶段临时缓存）
+    this.todoScheduler = new TodoScheduler()
   }
 
   buildToolDefinitions(userQuery, searchResults, currentPageUrl, round) {
@@ -373,26 +375,40 @@ export class AgentService {
     tools.push({
       type: 'function',
       function: {
-        name: 'create_plan',
-        description: '创建或更新任务执行计划（复杂任务建议在第1-2轮制定计划）。plan_items 为有序步骤列表，每步含 step(描述)和 estimatedTools(预计使用工具)',
+        name: 'create_todo',
+        description: '创建分阶段待办列表。系统校验合规性和数据依赖合法性，然后按待办顺序驱动执行。建议在第1轮创建。',
         parameters: {
           type: 'object',
           properties: {
-            plan_items: {
+            stages: {
               type: 'array',
-              description: '有序计划步骤列表',
+              description: '三阶段待办列表',
               items: {
                 type: 'object',
                 properties: {
-                  step: { type: 'string', description: '步骤描述' },
-                  estimatedTools: { type: 'string', description: '预计使用的工具，如"search_tools + inject_script"' },
+                  stage: { type: 'number', enum: [1, 2, 3], description: '阶段编号: 1=本地DOM工具, 2=远程脚本, 3=数据汇总' },
+                  name: { type: 'string', description: '阶段名称' },
+                  subTodos: {
+                    type: 'array',
+                    description: '该阶段的子待办列表',
+                    items: {
+                      type: 'object',
+                      properties: {
+                        id: { type: 'string', description: '待办ID，如 "s1-1"' },
+                        action: { type: 'string', description: '使用的工具名称，如 read_page_content / extract_content / inject_script_N / finish_task' },
+                        description: { type: 'string', description: '待办描述' },
+                        dataDependKeys: { type: 'array', items: { type: 'string' }, description: '依赖的数据key列表（从之前待办的dataOutputKey获取）' },
+                        dataOutputKey: { type: 'string', description: '输出数据的语义key（供后续待办引用，无输出设为null）' },
+                      },
+                      required: ['id', 'action', 'description'],
+                    },
+                  },
                 },
-                required: ['step'],
+                required: ['stage', 'subTodos'],
               },
             },
-            current_step: { type: 'number', description: '当前正在执行的步骤索引(从0起)，默认0' },
           },
-          required: ['plan_items'],
+          required: ['stages'],
         },
       },
     })
@@ -1311,21 +1327,13 @@ export class AgentService {
     // 从配置读取所有可配置参数
     let maxRounds = 15
     let MAX_CONSECUTIVE_FAILS = 5
-    let MAX_LOW_VALUE = 3
-    let MAX_IDLE_TEXT = 2
-    let EXPLORATION_LIMIT = 5
     let enableJudge = true
-    let enablePlanning = true
     let debug = false
     try {
       const agentCfg = await this.configService.getAgentConfig()
       if (agentCfg?.maxRounds >= 5) maxRounds = agentCfg.maxRounds
       if (agentCfg?.maxConsecutiveFails >= 2) MAX_CONSECUTIVE_FAILS = agentCfg.maxConsecutiveFails
-      if (agentCfg?.maxLowValue >= 2) MAX_LOW_VALUE = agentCfg.maxLowValue
-      if (agentCfg?.maxIdleText >= 1) MAX_IDLE_TEXT = agentCfg.maxIdleText
-      if (agentCfg?.explorationLimit >= 2) EXPLORATION_LIMIT = agentCfg.explorationLimit
       enableJudge = agentCfg?.enableJudge !== false
-      enablePlanning = agentCfg?.enablePlanning !== false
       debug = agentCfg?.debug === true
     } catch {}
     const _debugLog = (label, detail) => {
@@ -1340,34 +1348,20 @@ export class AgentService {
     let totalToolCalls = 0      // 工具调用总次数（含本地工具，防止无限调用）
     let searchResults = []
     const executedTools = []
-    let _budget20Warned = false   // 绝对轮次警告(≥20轮)
-    let _budget70Warned = false   // 70%预算警告
-    let _idleTextCount = 0        // 连续纯文本无工具调用次数
-    let consecutiveFailCount = 0  // 连续无进展计数（工具失败或结果无变化时+1，有进展时重置为0）
-    let lowValueStreak = 0         // 连续低价值操作（find_text/screenshot/get_element_info/get_interactive 等）计数
-    const LOW_VALUE_TOOLS = new Set(['find_text_on_page', 'screenshot_visible', 'get_element_info', 'get_interactive_elements', 'recall_data'])
+    let consecutiveFailCount = 0  // 连续无进展计数（保留作为硬性规则触发器）
     const _injections = []        // 系统注入消息（不写入主消息数组，避免破坏 assistant/tool 交替结构）
-    const COMPLEXITY_THRESHOLD = 8 // 预估轮次超过此值提示用户需要开发专用脚本
-    // P2: 初始化动作循环检测器
-    const loopDetector = new ActionLoopDetector(15)
-    // 探索上限跟踪：无脚本匹配的探索轮次计数
-    let explorationRounds = 0
-    let _explorationWarned = false
     let hasSearchedTools = false  // 自动搜索命中或LLM主动调用 search_tools 后置true
-    // 计划跟踪
-    let currentPlan = null        // { plan_items, current_step, created_at_round }
-    let planStepProgress = 0      // 计划步骤推进计数（用于检测计划停滞）
-    // ===== 两阶段决策流程跟踪（阶段1=DOM工具, 阶段2=远程脚本, 阶段3=终止） =====
-    let currentPhase = 1              // 当前阶段：1=普通模式, 2=远程工具库, 3=终止
-    let phase1FailCount = 0           // 阶段1连续失败计数
-    const PHASE1_FAIL_THRESHOLD = 4  // 阶段1连续失败4次 → 进入阶段2
-    let phase2Attempted = false       // 阶段2是否已尝试
-    let phase2FailCount = 0           // 阶段2连续失败计数（仅计inject_script_*失败）
-    let phase2ScriptAttempted = false // 阶段2是否已尝试调用脚本
-    const PHASE2_FAIL_THRESHOLD = 3  // 阶段2脚本连续失败3次 → 进入阶段3
+    // ===== 待办调度引擎初始化（三层存储+进度追踪+硬性规则） =====
+    this.todoScheduler.clear()
+    // 阶段切换由 todoScheduler 管理，本地变量用于构建工具列表
+    let currentPhase = 1             // 映射到 todoScheduler.currentStage
+    let phase1FailCount = 0
+    const PHASE1_FAIL_THRESHOLD = 4
+    let phase2FailCount = 0
+    const PHASE2_FAIL_THRESHOLD = 3
     // 辅助跟踪（recall_data和selector重复提示）
-    const _recallDataCallCount = new Map()   // entry_id → 调用次数，超过3次温和提示
-    const _usedSelectorToolCombo = new Set() // "selector|toolName" 组合，重复时温和提示
+    const _recallDataCallCount = new Map()
+    const _usedSelectorToolCombo = new Set()
 
     // 清理 chatHistory 中的自定义字段，避免 API 拒绝
     const cleanHistory = (chatHistory || []).map(m => {
@@ -1376,14 +1370,16 @@ export class AgentService {
     })
 
     // ===== 阶段1系统提示词（隔离：仅描述DOM工具，不提及inject_script/阶段2/阶段3） =====
-    const phase1SystemPrompt = `你是AI Browser智能体，在网页上执行用户任务。
+    const phase1SystemPrompt = `你是AI Browser智能体，按照待办调度系统执行任务。
 
 === 工作流程 ===
-1. read_page_content 读取页面 → 理解页面结构和内容
-2. 根据任务目标，用DOM工具操作页面（提取数据、点击元素、填写表单、导航等）
-3. 任务完成 → 调用 finish_task 汇报结果
+1. 调用 create_todo 创建分阶段待办列表（Stage1: DOM工具, Stage2: 远程脚本, Stage3: 汇总）
+2. 系统校验待办合规性和数据依赖合法性
+3. 按待办顺序执行工具操作
+4. 系统客观统计进度，到达阈值自动下发收敛提示
+5. 所有待办完成 → 调用 finish_task 汇报结果
 
-=== 可用工具 ===
+=== Stage 1 可用工具 ===
 read_page_content: 读取当前页面标题、URL和正文
 extract_content: 提取指定选择器的内容（支持:contains伪类）
 click_element: 点击元素
@@ -1399,9 +1395,20 @@ hover_element: 悬停元素
 select_dropdown: 选择下拉框选项
 press_key: 按键
 recall_data: 查询已存储的工具执行结果
-create_plan: 创建执行计划
+create_todo: 创建分阶段待办列表
 search_tools: 搜索工具库（如有需要）
 finish_task: 任务完成，汇报结果
+
+=== 待办模板 ===
+每个子待办需指定:
+- action: 使用的工具名称
+- dataDependKeys: 依赖的数据key（从之前待办的dataOutputKey获取）
+- dataOutputKey: 输出的数据key（供后续待办引用，无输出设为null）
+
+=== 硬性规则（系统强制，无需AI判断） ===
+- Stage 1 不暴露 inject_script_* 工具
+- 连续4次无进展 → 系统自动切换到Stage 2
+- 连续3次脚本失败 → 系统自动切换到Stage 3
 
 === 导航规则 ===
 - navigate_to后页面已加载，直接extract/read获取内容
@@ -1525,20 +1532,11 @@ finish_task: 任务完成，汇报结果
       ? [systemMsg, ...cleanHistory]
       : [systemMsg, ...cleanHistory, { role: 'user', content: userMessage }]
 
-    // ===== 任务复杂度预评估 =====
-    const complexity = await this._assessComplexity(tabId, userMessage, chatHistory)
-    if (complexity.estimatedRounds > COMPLEXITY_THRESHOLD) {
-      console.log(`[Agent] 复杂度评估: ${complexity.level}, 预估${complexity.estimatedRounds}轮, 建议开发专用脚本`)
-      _injections.push(`💡 任务复杂度评估：${complexity.level}（预估需${complexity.estimatedRounds}轮）。如果任务涉及循环翻页、批量提取结构化数据、或多页面操作，建议开发专用脚本上传到工具库后执行，效率更高。你也可以尝试用本地DOM工具完成，自主决策即可。`)
-    } else if (complexity.estimatedRounds > 0) {
-      console.log(`[Agent] 复杂度评估: ${complexity.level}, 预估${complexity.estimatedRounds}轮, 正常执行`)
-    }
-
     this.postToUI(tabId, { type: 'agentStart' })
-    _debugLog('🐛 调试模式已开启', '每步的信息（提示词、工具调用、规则触发）将在外部 Log 窗口中显示')
+    _debugLog('🐛 调试模式已开启', '待办调度系统：系统驱动进度追踪、收敛提示、阶段切换')
 
     // ===== 调试：输出配置摘要 =====
-    _debugLog('⚙️ Agent配置', { maxRounds, MAX_CONSECUTIVE_FAILS, MAX_LOW_VALUE, MAX_IDLE_TEXT, EXPLORATION_LIMIT, enableJudge, enablePlanning, debug })
+    _debugLog('⚙️ Agent配置', { maxRounds, MAX_CONSECUTIVE_FAILS, enableJudge, debug })
     _debugLog('📋 系统提示词', systemMsg.content)
 
     while (aiRequestCount < maxRounds) {
@@ -1560,70 +1558,19 @@ finish_task: 任务完成，汇报结果
       // 让出事件循环，确保状态消息即时送达侧边栏
       await this._yieldUI()
 
-      // 步骤预算提示（两级提醒，不再强制）
-      const budgetRatio = aiRequestCount / maxRounds
-      // 第一级：70%时温和提醒
-      if (budgetRatio >= 0.7 && budgetRatio < 0.85 && !_budget70Warned) {
-        _budget70Warned = true
-        _debugLog('💡 预算提醒(70%)', { round: aiRequestCount, maxRounds, budgetRatio: Math.round(budgetRatio * 100) + '%' })
-        _injections.push(`💡 已使用 ${aiRequestCount}/${maxRounds} 轮 (${Math.round(budgetRatio * 100)}%)。仅剩 ${maxRounds - aiRequestCount} 轮。建议评估剩余轮次能否完成计划中未完成的步骤，不能则调用 finish_task 汇总已有结果。`)
-      }
-      // 第二级：85%以上优先收尾提醒
-      if (budgetRatio >= 0.85 && aiRequestCount < maxRounds - 1) {
-        _debugLog('💡 收尾提醒(85%)', { round: aiRequestCount, maxRounds, budgetRatio: Math.round(budgetRatio * 100) + '%' })
-        _injections.push(`💡 仅剩 ${maxRounds - aiRequestCount} 轮！建议优先汇总已有结果并调用 finish_task 结束任务。如确有必要可以继续操作，自主决策即可。`)
+      // ===== 系统驱动收敛提示（替代原有AI自主判断的软性规则） =====
+      const convergencePrompt = this.todoScheduler.getConvergencePrompt(aiRequestCount, maxRounds)
+      if (convergencePrompt) {
+        _debugLog('💡 系统收敛提示', convergencePrompt)
+        _injections.push(convergencePrompt)
       }
 
-      // 低价值操作温和提示
-      if (lowValueStreak >= MAX_LOW_VALUE) {
-        lowValueStreak = 0
-        _debugLog('💡 提示: 辅助操作较多', { streak: lowValueStreak })
-        _injections.push('💡 提示：已连续执行多轮辅助操作（查看数据/搜索/截图/探查结构），建议推进到下一个实质性步骤（操作页面/执行脚本/完成计划步骤），或调用 finish_task 汇报已有结果。')
-      }
-
-      // 探索建议：区分"从未搜索"和"搜索无果"两种情况
-      if (searchResults.length === 0 && aiRequestCount > 2) {
-        explorationRounds++
-      } else {
-        explorationRounds = 0
-      }
-
-      if (explorationRounds >= 2 && !hasSearchedTools) {
-        // 情况A：从未调用 search_tools → 温和建议搜索
-        _debugLog('💡 建议: 未搜索工具库', { explorationRounds, round: aiRequestCount })
-        _injections.push(`💡 建议：你已执行${aiRequestCount}轮操作但未搜索工具库。可以先调用 search_tools 传入简短关键词（如"采集"、"新闻"）查找专用脚本，可能一次调用即可完成任务。你也可以继续用本地DOM工具，自主决策即可。`)
-        // 不设 _explorationWarned，让每2轮建议一次直到搜索
-      } else if (explorationRounds >= EXPLORATION_LIMIT && !_explorationWarned && hasSearchedTools) {
-        // 情况B：已搜索但无匹配脚本 → 继续用DOM工具，不劝退
-        _explorationWarned = true
-        _debugLog('💡 搜索无果，继续用本地工具', { explorationRounds })
-        _injections.push(`已搜索工具库但无匹配脚本，已用DOM工具探索 ${explorationRounds} 轮。本地DOM工具可以完成大多数页面操作，请继续执行即可。如果需求确实超出DOM工具能力，请调用 finish_task 告知用户。`)
-      }
-
-      // 探查调用溢出检查已禁用（EXPLORATION_TOOLS 为空集，计数器永不递增）
-
-      // ===== 两阶段模式下：阶段1不暴露脚本，阶段2只有脚本 =====
-
-      // 绝对轮次警告
-
-      // ===== 本地工具统计提示（两阶段模式下简化） =====
-      // 阶段1用DOM工具时，如果连续多次操作无进展，阶段切换机制会自动处理
-
-      // 绝对轮次提示（不再警告）
-      if (aiRequestCount >= 20 && aiRequestCount / maxRounds < 0.7 && !_budget20Warned) {
-        _budget20Warned = true
-        _debugLog('💡 轮次较多提示(≥20轮)', { round: aiRequestCount, maxRounds })
-        _injections.push(`💡 已执行 ${aiRequestCount} 轮。如果任务仍需较多步骤才能完成，建议调用 finish_task 汇报当前结果，或加快推进核心操作。`)
-      }
-
-      // 计划停滞温和提示（不再强制跳过步骤）
-      if (currentPlan && aiRequestCount - currentPlan.created_at_round >= 5 && planStepProgress === currentPlan.current_step) {
-        const stuckRounds = aiRequestCount - currentPlan.created_at_round
-        _debugLog('💡 提示: 计划停滞', { planAge: stuckRounds, stuckAtStep: currentPlan.current_step + 1 })
-        messages.push({
-          role: 'system',
-          content: `当前计划已执行 ${stuckRounds} 轮但步骤未推进（停留在第${currentPlan.current_step + 1}步）。如果当前步骤受阻，建议跳过并继续下一步，或直接调用 finish_task。你可以自主决定如何推进。`
-        })
+      // ===== 待办进度上下文注入（让AI知道当前待办和进度） =====
+      if (this.todoScheduler.parentTodo) {
+        const stageCtx = this.todoScheduler.getStageContext()
+        if (stageCtx) {
+          _injections.push(stageCtx)
+        }
       }
 
       // 获取当前页面URL用于工具过滤
@@ -1633,104 +1580,10 @@ finish_task: 任务完成，汇报结果
         currentPageUrl = tab?.url || ''
       } catch {}
 
-      // ===== 两阶段流程：阶段切换和工具暴露控制 =====
+      // ===== 阶段状态显示 =====
       this.postToUI(tabId, { type: 'agentStatus', text: `阶段${currentPhase} 第${aiRequestCount}轮` })
 
-      // 阶段2切换检测：阶段1连续失败达到阈值 → 进入阶段2
-      if (currentPhase === 1 && phase1FailCount >= PHASE1_FAIL_THRESHOLD) {
-        currentPhase = 2
-        _debugLog('🔄 阶段切换: 阶段1→阶段2(远程工具库)', { phase1FailCount, round: aiRequestCount })
-
-        // ===== 构建阶段2隔离提示词（不提及DOM工具，仅描述脚本工具） =====
-        let scriptList = ''
-        if (searchResults.length > 0) {
-          scriptList = '\n\n=== 已匹配的专用脚本 ===\n' + searchResults.map(s => {
-            const params = s.toolConfig?.parameters?.properties ? Object.keys(s.toolConfig.parameters.properties) : []
-            const paramHint = params.length > 0 ? `（参数: ${params.join(', ')}）` : ''
-            return `  - inject_script_${s.id}(${s.name})${paramHint}: ${(s.description || '').slice(0, 80)}`
-          }).join('\n')
-        }
-
-        const phase2SystemPrompt = `你是AI Browser智能体，现在使用远程专用脚本执行任务。
-
-=== 工作流程 ===
-1. 查看已匹配的专用脚本列表（下方提供）
-2. 如需数据参数，先 recall_data 获取阶段1已收集的数据
-3. 调用 inject_script_* 执行脚本，传入所需参数
-4. 任务完成 → 调用 finish_task 汇报结果
-
-=== 可用工具 ===
-search_tools: 搜索服务器远程工具库（传简短中文关键词如"采集"、"翻译"）
-inject_script_*: 执行服务器端专用脚本（每个脚本有特定参数）
-recall_data: 查询已存储的工具执行结果（entry_id/tool_name/filter/fields）
-read_page_content: 读取当前页面信息（辅助脚本判断）
-finish_task: 任务完成，汇报结果
-
-=== 脚本使用指南 ===
-- 直接调用匹配到的脚本，不要犹豫
-- 如果脚本需要URL列表参数，先用 recall_data(entry_id="xxx") 获取阶段1收集的链接
-- 脚本执行成功后，基于结果直接 finish_task，不要重复调用其他工具
-- 如果无匹配脚本，先 search_tools 搜索关键词
-- 多次搜索无果或脚本执行失败 → 调用 finish_task 总结失败原因
-
-=== 数据存储 ===
-- 大量数据自动存储，只发摘要+存储ID
-- 需要详情时调用 recall_data(entry_id="xxx")
-
-=== 输出规范 ===
-- 自然语言总结结果，不输出原始JSON
-- 错误时分析原因并在finish_task中告知${scriptList}`
-
-        // ===== 构建阶段1数据摘要（注入到Phase 2上下文） =====
-        let phase1DataSummary = ''
-        const allStoredIds = this.payloadStore.listEntryIds()
-        if (allStoredIds.length > 0) {
-          phase1DataSummary = '\n\n=== 阶段1已收集的数据 ==='
-          for (const eid of allStoredIds.slice(0, 5)) {
-            const summary = this.payloadStore.getEntrySummary(eid)
-            if (summary) {
-              phase1DataSummary += `\n  ${eid}: ${summary}`
-            }
-          }
-          // 如果有URL数据，直接提示
-          const allUrls = this.payloadStore.listEntryIds().flatMap(eid => this.payloadStore.getEntryUrls(eid))
-          if (allUrls.length > 0) {
-            phase1DataSummary += `\n\n💡 已有${allUrls.length}个URL链接，可直接传给inject_script_*作为参数。`
-          }
-        }
-
-        // ===== 重置消息历史：替换系统提示词，清除Phase 1工具调用记录 =====
-        // 保留：Phase 2系统提示词 + 用户原始需求 + 阶段1数据摘要
-        const phase2UserMsg = {
-          role: 'user',
-          content: userMessage + (phase1DataSummary || '\n\n（阶段1未收集到可用数据，请直接使用脚本或搜索工具库。）')
-        }
-        messages.length = 0 // 清空数组
-        messages.push({ role: 'system', content: phase2SystemPrompt })
-        messages.push(phase2UserMsg)
-
-        _debugLog('🔄 阶段2提示词已注入', { scriptCount: searchResults.length, dataEntries: allStoredIds.length, msgCount: messages.length })
-
-        // 重置失败计数
-        phase1FailCount = 0
-        consecutiveFailCount = 0
-      }
-
-      // 阶段3切换检测：阶段2连续失败达到阈值 → 进入阶段3（终止）
-      if (currentPhase === 2 && phase2FailCount >= PHASE2_FAIL_THRESHOLD) {
-        _debugLog('🔄 阶段切换: 阶段2→阶段3(终止)', { phase2FailCount, round: aiRequestCount })
-        // 直接finish_task
-        const stopMsg = `任务无法完成：阶段1（本地DOM工具）和阶段2（远程脚本库）均未成功。阶段1连续${PHASE1_FAIL_THRESHOLD}次失败，阶段2连续${phase2FailCount}次失败或无匹配脚本。${searchResults.length > 0 ? `已找到脚本但执行失败：${searchResults.map(s => s.name).join('、')}` : '未找到匹配的专用脚本'}。建议：检查任务描述是否清晰，或开发专用脚本上传到工具库后重试。`
-        for (const char of stopMsg) {
-          this.postToUI(tabId, { type: 'streamChunk', content: char })
-          await new Promise(r => setTimeout(r, 10))
-        }
-        this.postToUI(tabId, { type: 'streamDone' })
-        await this._saveToChatHistoryStorage(tabId, stopMsg)
-        return
-      }
-
-      // 根据当前阶段构建工具列表
+      // 根据当前阶段构建工具列表（阶段切换由调度引擎在工具执行后处理）
       let tools
       if (currentPhase === 1) {
         // 阶段1：暴露所有本地DOM工具 + search_tools + finish_task（不暴露inject_script_*）
@@ -1753,15 +1606,11 @@ finish_task: 任务完成，汇报结果
       console.log(`[Agent] 阶段${currentPhase} 第${aiRequestCount}轮API请求, tools:${tools.length}个, 已搜到${searchResults.length}个脚本`)
       _debugLog(`🔧 阶段${currentPhase} 第${aiRequestCount}轮 工具(${tools.length}个)`, tools.map(t => `  ${t.function.name}`).join('\n'))
 
-      // ===== 系统消息聚合：将 _injections 和 loopDetector nudge 合并为单条消息 =====
+      // ===== 系统消息聚合：将 _injections 合并为单条消息 =====
       const systemNudges = []
-      // 消费 _injections（之前只push不消费，是bug）
       while (_injections.length > 0) {
         systemNudges.push(_injections.shift())
       }
-      // 消费 loopDetector nudge（之前单独注入，现合并）
-      const loopNudge = loopDetector.getNudge()
-      if (loopNudge) systemNudges.push(loopNudge)
       // 聚合为单条系统消息
       if (systemNudges.length > 0) {
         messages.push({
@@ -1913,9 +1762,6 @@ finish_task: 任务完成，汇报结果
           console.log('[Agent] tool_calls:', msg.tool_calls.map(t => t.function.name).join(', '))
           _debugLog(`📥 第${aiRequestCount}轮 LLM响应: tool_calls`, msg.tool_calls.map(t => `${t.function.name}(${JSON.stringify(t.function.arguments || {})})`).join('\n'))
 
-          // 有工具调用时重置纯文本空闲计数
-          _idleTextCount = 0
-
           // 推送 assistant 消息（包含所有 tool_calls）
           messages.push({ role: 'assistant', content: null, tool_calls: msg.tool_calls })
 
@@ -1947,7 +1793,6 @@ finish_task: 任务完成，汇报结果
               _debugLog('🚫 工具幻觉拦截', { rejected: funcName, allowed: allowedToolNames })
               messages.push({ role: 'tool', tool_call_id: toolCall.id, content: rejectMsg })
               this.postToUI(tabId, { type: 'agentStepResult', step: totalToolCalls + 1, toolName: `${funcName}(幻觉拦截)`, result: rejectMsg, done: false })
-              loopDetector.record(funcName, funcArgs, currentPageUrl)
               continue  // 跳过执行，不递增 totalToolCalls
             }
 
@@ -2076,20 +1921,26 @@ finish_task: 任务完成，汇报结果
               }
               executedTools.push({ name: 'search_tools', result: { ok: newResults.length > 0, count: newResults.length } })
               this.postToUI(tabId, { type: 'agentSearchResult', results: newResults.slice(0, 5) })
-            } else if (funcName === 'create_plan') {
-              const planItems = funcArgs.plan_items || []
-              const currentStep = funcArgs.current_step || 0
-              currentPlan = {
-                plan_items: planItems,
-                current_step: currentStep,
-                created_at_round: aiRequestCount,
+            } else if (funcName === 'create_todo') {
+              // ===== 系统校验待办合规性和数据依赖合法性 =====
+              const submitResult = this.todoScheduler.submitTodo(funcArgs.stages || [])
+              if (submitResult.ok) {
+                const progress = this.todoScheduler.getProgress()
+                toolResult = JSON.stringify({
+                  ok: true,
+                  result: `待办列表已创建并通过校验：共${progress.total}个待办。系统将按待办顺序驱动执行，自动跟踪进度和切换阶段。当前待办: ${this.todoScheduler.getCurrentTodo()?.id || '无'} - ${this.todoScheduler.getCurrentTodo()?.description || ''}`,
+                })
+                _debugLog('📋 待办列表已创建', { total: progress.total, currentStage: this.todoScheduler.currentStage })
+              } else {
+                const errors = submitResult.errors || [submitResult.error || '校验失败']
+                toolResult = JSON.stringify({
+                  ok: false,
+                  error: `待办列表校验失败：\n${errors.join('\n')}\n请修正后重新提交。`,
+                })
+                _debugLog('❌ 待办校验失败', errors)
               }
-              const planSummary = planItems.map((p, i) => `${i === currentStep ? '▶' : '  '} [${i}] ${p.step}${p.estimatedTools ? ' (' + p.estimatedTools + ')' : ''}`).join('\n')
-              toolResult = JSON.stringify({ ok: true, plan: planItems, current_step: currentStep, summary: `计划已${planStepProgress > 0 ? '更新' : '创建'}（共${planItems.length}步）：\n${planSummary}` })
-              planStepProgress = currentStep
-              executedTools.push({ name: 'create_plan', result: { planLength: planItems.length, currentStep } })
-              this.postToUI(tabId, { type: 'agentStepResult', step: totalToolCalls, toolName: 'create_plan', result: `计划: ${planItems.length}步, 当前第${currentStep + 1}步`, done: false })
-              this.postToUI(tabId, { type: 'agentSearchResult', results: [] })  // 复用该类型展示计划
+              executedTools.push({ name: 'create_todo', result: { ok: submitResult.ok, total: submitResult.totalTodos || 0 } })
+              this.postToUI(tabId, { type: 'agentStepResult', step: totalToolCalls, toolName: 'create_todo', result: toolResult, done: false })
             } else if (funcName === 'read_page_content') {
               const targetTab = await this._getTargetTab(tabId)
               if (!targetTab) {
@@ -2243,7 +2094,6 @@ finish_task: 任务完成，汇报结果
                 executedTools.push({ name: `${funcName}(域名被拦截)`, result: toolResult })
                 this.postToUI(tabId, { type: 'agentStepResult', step: totalToolCalls, toolName: funcName, result: toolResult, done: false })
                 messages.push({ role: 'tool', tool_call_id: toolCall.id, content: toolResult })
-                loopDetector.record(funcName, funcArgs, currentPageUrl)
                 _intercepted = true
               } else if (funcName === 'navigate_to' && aiRequestCount / maxRounds >= 0.85) {
                 // 预算接近上限时温和提示（不再硬拦截，继续执行）
@@ -2293,67 +2143,41 @@ finish_task: 任务完成，汇报结果
             // 工具执行结果调试（不截断）
             _debugLog(`⚙️ 工具结果: ${funcName}`, toolResult || '')
 
-            // ===== P2: 动作循环检测（仅记录，不在此处注入消息） =====
-            loopDetector.record(funcName, funcArgs, currentPageUrl)
-            // 当 navigate_to 或 click_element 成功，且计划存在 → 重置计划停滞计时（Agent 正在推进）
-            if (['navigate_to'].includes(funcName) && currentPlan && !toolResult.includes('域名被拦截') && !toolResult.includes('"ok":false')) {
-              currentPlan.created_at_round = aiRequestCount
-              _debugLog('🔄 计划停滞计时已重置（navigate_to 推进了任务）', { newRefRound: aiRequestCount })
-            }
-            try {
-              const tab = await this._getTargetTab(tabId)
-              if (tab) {
-                const elementCount = await chrome.scripting.executeScript({
-                  target: { tabId: tab.id },
-                  func: () => document.querySelectorAll('[class],[id],[type]').length
-                }).then(r => r[0]?.result || 0).catch(() => 0)
-                loopDetector.recordPageState(tab.url || '', elementCount)
-              }
-            } catch {}
-
-            // ===== 统一无进展检测 =====
-            // 判断工具执行是否有进展：基于结构化字段，不依赖字符串匹配
+            // ===== 待办调度：匹配工具调用到当前待办，记录输出数据 =====
+            const matchedTodo = this.todoScheduler.matchToolCall(funcName)
             let hasProgress = false
             try {
               const parsed = JSON.parse(toolResult)
               // 明确失败 → 无进展
               if (parsed?.ok === false) {
                 hasProgress = false
+                if (matchedTodo) this.todoScheduler.markTodoResult('failed')
               }
-              // search_tools 找到结果 → 有进展（信息收集是任务推进的一部分）
+              // search_tools 找到结果 → 有进展
               else if (funcName === 'search_tools') {
-                // 结果可能是裸数组（找到脚本时）或 {ok:true, result:"提示文本"}（无结果时）
                 const results = Array.isArray(parsed) ? parsed : parsed?.result
-                if (Array.isArray(results) && results.length > 0) {
-                  hasProgress = true
-                }
-                else {
-                  hasProgress = false
-                }
+                hasProgress = Array.isArray(results) && results.length > 0
+                if (matchedTodo && hasProgress) this.todoScheduler.markTodoResult('done', parsed)
+                else if (matchedTodo) this.todoScheduler.markTodoResult('failed')
               }
-              // recall_data 返回数据 → 有进展（获取了信息）
+              // recall_data 返回数据 → 有进展
               else if (funcName === 'recall_data') {
                 const data = parsed?.data || parsed?.result || parsed
-                // 明确错误 → 无进展
                 if (parsed?.error) {
                   hasProgress = false
-                }
-                // 数组：有元素 → 有进展
-                else if (Array.isArray(data) && data.length > 0) {
+                } else if (Array.isArray(data) && data.length > 0) {
+                  hasProgress = true
+                } else if (data && typeof data === 'object' && !Array.isArray(data)) {
+                  hasProgress = (data.count > 0) || (data.entries?.length > 0) || (Array.isArray(data.data) && data.data.length > 0)
+                } else if (typeof data === 'string' && data.length > 10 && !data.includes('无存储数据') && !data.includes('未找到')) {
                   hasProgress = true
                 }
-                // 对象：有实际数据字段 → 有进展
-                else if (data && typeof data === 'object' && !Array.isArray(data)) {
-                  const hasData = (data.count > 0) || (data.entries && data.entries.length > 0) || (Array.isArray(data.data) && data.data.length > 0)
-                  hasProgress = hasData
-                }
-                // 字符串：有实际内容（排除短提示语如"无存储数据"）
-                else if (typeof data === 'string' && data.length > 10 && !data.includes('无存储数据') && !data.includes('未找到')) {
-                  hasProgress = true
-                }
-                else {
-                  hasProgress = false
-                }
+                if (matchedTodo && hasProgress) this.todoScheduler.markTodoResult('done', parsed)
+              }
+              // create_todo → 有进展
+              else if (funcName === 'create_todo') {
+                hasProgress = parsed?.ok === true
+                if (hasProgress && matchedTodo) this.todoScheduler.markTodoResult('done', parsed)
               }
               // ok=true 或 无ok字段但有有效内容 → 有进展
               else if (parsed?.ok === true || parsed?.ok === undefined) {
@@ -2361,9 +2185,88 @@ finish_task: 任务完成，汇报结果
                   || parsed?.content !== undefined && String(parsed.content).length > 0
                   || parsed?.title !== undefined
                 hasProgress = hasContent && !parsed?.error
+                // 匹配到待办且有进展 → 记录输出数据
+                if (matchedTodo && hasProgress) {
+                  this.todoScheduler.markTodoResult('done', parsed)
+                }
               }
             } catch {
               // JSON 解析失败 → 无进展
+            }
+
+            // 检查硬性规则：是否应该切换阶段
+            const stageSwitch = this.todoScheduler.shouldSwitchStage()
+            if (stageSwitch.switch) {
+              _debugLog('🔄 硬性规则触发阶段切换', stageSwitch)
+              this.todoScheduler.forceSwitchToStage(stageSwitch.to)
+              currentPhase = stageSwitch.to
+              phase1FailCount = 0
+              phase2FailCount = 0
+              consecutiveFailCount = 0
+              // 阶段切换时注入上下文（复用现有的阶段切换逻辑）
+              if (stageSwitch.to === 2) {
+                // 切换到Stage2：构建隔离提示词
+                let scriptList = ''
+                if (searchResults.length > 0) {
+                  scriptList = '\n\n=== 已匹配的专用脚本 ===\n' + searchResults.map(s => {
+                    const params = s.toolConfig?.parameters?.properties ? Object.keys(s.toolConfig.parameters.properties) : []
+                    const paramHint = params.length > 0 ? `（参数: ${params.join(', ')}）` : ''
+                    return `  - inject_script_${s.id}(${s.name})${paramHint}: ${(s.description || '').slice(0, 80)}`
+                  }).join('\n')
+                }
+                const phase2Prompt = `你是AI Browser智能体，现在使用远程专用脚本执行任务。
+
+=== 工作流程 ===
+1. 查看待办列表中Stage 2的子待办
+2. 如需数据参数，先 recall_data 获取已收集的数据
+3. 调用 inject_script_* 执行脚本
+4. 完成后 → finish_task
+
+=== Stage 2 可用工具 ===
+search_tools, inject_script_*, recall_data, read_page_content, finish_task
+
+=== 脚本使用指南 ===
+- 直接调用匹配到的脚本，不要犹豫
+- 如果脚本需要URL列表参数，先 recall_data 获取
+- 脚本执行成功后，基于结果直接 finish_task
+- 多次搜索无果或脚本失败 → 调用 finish_task 总结失败原因${scriptList}`
+
+                // 注入阶段1数据摘要
+                let dataSummary = ''
+                const summaries = this.todoScheduler.globalDataStore.getAllSummaries()
+                if (summaries.length > 0) {
+                  dataSummary = '\n\n=== 全局存储数据 ===\n  ' + summaries.join('\n  ')
+                  const allUrls = this.todoScheduler.globalDataStore.getAllUrls()
+                  if (allUrls.length > 0) {
+                    dataSummary += `\n\n💡 已有${allUrls.length}个URL链接，可直接传给inject_script_*作为参数。`
+                  }
+                }
+                // 重置消息历史
+                messages.length = 0
+                messages.push({ role: 'system', content: phase2Prompt })
+                messages.push({ role: 'user', content: userMessage + (dataSummary || '\n\n（无已收集数据，请直接使用脚本或搜索工具库。）') })
+                _debugLog('🔄 Stage2提示词已注入', { scriptCount: searchResults.length, dataKeys: summaries.length })
+              } else if (stageSwitch.to === 3) {
+                // 切换到Stage3：数据汇总
+                const allData = this.todoScheduler.globalDataStore.getAllSummaries()
+                const phase3Prompt = `你是AI Browser智能体，正在执行Stage 3数据汇总。
+
+=== 工作流程 ===
+1. 查看全局存储中的所有数据摘要
+2. 生成结构化汇总：数据条数、核心字段、样本预览
+3. 调用 finish_task 输出汇总
+
+=== Stage 3 可用工具 ===
+finish_task, recall_data
+
+=== 全局存储数据 ===
+${allData.length > 0 ? allData.join('\n') : '（无数据）'}`
+
+                messages.length = 0
+                messages.push({ role: 'system', content: phase3Prompt })
+                messages.push({ role: 'user', content: userMessage + '\n\n请汇总所有已收集的数据并输出最终结果。' })
+                _debugLog('🔄 Stage3提示词已注入', { dataKeys: allData.length })
+              }
             }
 
             // 使用更强烈的 nudge 重置无进展计数
@@ -2395,21 +2298,6 @@ finish_task: 任务完成，汇报结果
               }
               console.warn('[Agent] 无进展 #' + consecutiveFailCount, funcName, toolResult)
             }
-
-            // 低价值操作检测：仅当无进展时计数，有进展时重置（避免误杀合理的多关键词搜索）
-            if (LOW_VALUE_TOOLS.has(funcName) && !hasProgress) {
-              lowValueStreak++
-              console.warn(`[Agent] 低价值操作 #${lowValueStreak}: ${funcName} (无进展)`)
-            } else {
-              lowValueStreak = 0
-            }
-
-            // extract_content 返回数据 → 不是"探索"，是"干活"，重置探索计数器
-            if (funcName === 'extract_content' && hasProgress) {
-              explorationRounds = 0
-              _explorationWarned = false
-            }
-
 
             if (consecutiveFailCount >= MAX_CONSECUTIVE_FAILS) {
               _debugLog('💡 提示: 连续无进展较多', { consecutiveFailCount, max: MAX_CONSECUTIVE_FAILS, phase: currentPhase })
@@ -2452,8 +2340,6 @@ finish_task: 任务完成，汇报结果
             await new Promise(r => setTimeout(r, 200))
           }
 
-          // 注意：loopDetector nudge 已移至每轮开头的系统消息聚合逻辑中，不再在此处单独注入
-
           // 防止 messages 上下文无限膨胀：滑动窗口 + 分级摘要压缩
           const MAX_MESSAGES = 40
           if (messages.length > MAX_MESSAGES) {
@@ -2483,7 +2369,7 @@ finish_task: 任务完成，汇报结果
               // === 消息分级收集 ===
               // S级：链接列表、批量采集结果（完整保留）
               const sLevelParts = []
-              // A级：关键操作摘要（navigate成功/404、create_plan、search_tools、inject_script结果）
+              // A级：关键操作摘要（navigate成功/404、create_todo、search_tools、inject_script结果）
               const aLevelParts = []
               // B级：一般操作结论（read_page_content、extract_content正文压缩为结论）
               const bLevelParts = []
@@ -2537,8 +2423,8 @@ finish_task: 任务完成，汇报结果
                       continue
                     }
 
-                    // A级：create_plan / search_tools 结果
-                    if (toolName === 'create_plan' || toolName === 'search_tools') {
+                    // A级：create_todo / search_tools 结果
+                    if (toolName === 'create_todo' || toolName === 'search_tools') {
                       const summary = typeof parsed?.result === 'string'
                         ? parsed.result.slice(0, 120)
                         : JSON.stringify(parsed.result || '').slice(0, 120)
@@ -2617,12 +2503,6 @@ finish_task: 任务完成，汇报结果
           console.log('[Agent] 纯文本回复（无tool_calls）:', (msg.content || '').slice(0, 80))
           const content = msg.content || ''
           const textContent = content || 'AI未返回有效响应，请重试。'
-          // 纯文本回复视为AI认为任务已完成或无法继续，自然结束
-          _idleTextCount++
-          if (_idleTextCount >= MAX_IDLE_TEXT) {
-            console.log('[Agent] 连续', _idleTextCount, '次纯文本无工具调用，AI可能认为任务已完成')
-            // 不再强制终止，让AI自然结束
-          }
           if (content) {
             for (const char of content) {
               try { this.postToUI(tabId, { type: 'streamChunk', content: char }) } catch {}
