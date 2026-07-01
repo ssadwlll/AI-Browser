@@ -190,8 +190,8 @@ document.getElementById('floatToolsBtn').addEventListener('click', () => {
 })
 
 // 浮动Agent按钮 - 切换Agent模式
-document.getElementById('floatAgentBtn').addEventListener('click', () => {
-  toggleAgentMode()
+document.getElementById('floatTodoBtn').addEventListener('click', () => {
+  openTodoWindow()
 })
 
 // 浮动设置按钮 - 跳转设置视图
@@ -359,7 +359,7 @@ function openDebugLogWindow() {
 }
 
 // 打开 Todo Tracker 窗口
-function openTodoWindow() {
+async function openTodoWindow() {
   if (_todoWindow && !_todoWindow.closed) {
     _todoWindow.focus()
     return
@@ -367,20 +367,24 @@ function openTodoWindow() {
   _todoReady = false
   _todoQueue = []
   const url = chrome.runtime.getURL('sidepanel/todo-viewer.html')
-  // 优先使用 chrome.windows.create（更可靠，不会被拦截）
+  const todoWidth = 450
+  let left = 100, top = 50, height = 650
+  try {
+    const currentWin = await chrome.windows.getCurrent()
+    if (currentWin) {
+      left = currentWin.left - todoWidth
+      top = currentWin.top
+      height = currentWin.height || 650
+    }
+  } catch (e) {
+    console.warn('[TodoWindow] 获取窗口位置失败，使用默认位置', e)
+  }
   if (chrome.windows?.create) {
-    chrome.windows.create({
-      url,
-      type: 'popup',
-      width: 700,
-      height: 650,
-      focused: true
-    }).then((win) => {
-      // 保存窗口引用（通过 tab id 跟踪）
+    try {
+      const win = await chrome.windows.create({ url, type: 'popup', width: todoWidth, height, left, top, focused: true })
       const tabId = win.tabs?.[0]?.id
       if (tabId) {
-        _todoWindow = { closed: false, focus: () => chrome.windows.update(win.id, { focused: true }) }
-        // 监听窗口关闭
+        _todoWindow = { closed: false, _winId: win.id, focus: () => chrome.windows.update(win.id, { focused: true }) }
         chrome.windows.onRemoved.addListener(function onRemoved(winId) {
           if (winId === win.id) {
             _todoWindow = null
@@ -388,13 +392,37 @@ function openTodoWindow() {
           }
         })
       }
-    }).catch(() => {
-      // 备选：window.open
-      _todoWindow = window.open(url, 'todoPopup', 'width=700,height=650,left=920,top=50,menubar=no,toolbar=no,location=no,status=no')
-    })
+    } catch (e) {
+      _todoWindow = window.open(url, 'todoPopup', `width=${todoWidth},height=${height},left=${left},top=${top},menubar=no,toolbar=no,location=no,status=no`)
+    }
   } else {
-    _todoWindow = window.open(url, 'todoPopup', 'width=700,height=650,left=920,top=50,menubar=no,toolbar=no,location=no,status=no')
+    _todoWindow = window.open(url, 'todoPopup', `width=${todoWidth},height=${height},left=${left},top=${top},menubar=no,toolbar=no,location=no,status=no`)
   }
+}
+
+// 侧边栏移动/缩放时，重新定位 Todo 窗口
+function repositionTodoWindow() {
+  if (!_todoWindow || _todoWindow.closed || !_todoWindow._winId) return
+  const todoWidth = 450
+  chrome.windows.getCurrent().then(currentWin => {
+    if (!currentWin) return
+    chrome.windows.update(_todoWindow._winId, {
+      left: currentWin.left - todoWidth,
+      top: currentWin.top,
+      height: currentWin.height
+    }).catch(() => {})
+  }).catch(() => {})
+}
+
+// 监听侧边栏窗口变化，同步 Todo 窗口位置
+if (chrome.windows?.onBoundsChanged) {
+  chrome.windows.onBoundsChanged.addListener((win) => {
+    chrome.windows.getCurrent().then(currentWin => {
+      if (currentWin && win.id === currentWin.id) {
+        repositionTodoWindow()
+      }
+    }).catch(() => {})
+  })
 }
 
 // 转发 agentTodoUpdate 消息到 Todo 窗口，窗口未打开时自动打开
@@ -430,13 +458,6 @@ window.addEventListener('message', (e) => {
   }
 })
 
-document.getElementById('floatDebugLogBtn')?.addEventListener('click', () => {
-  openDebugLogWindow()
-})
-
-document.getElementById('floatTodoBtn')?.addEventListener('click', () => {
-  openTodoWindow()
-})
 
 function renderMarkdown(text) {
   if (!text) return ''
@@ -783,17 +804,7 @@ async function loadAgentMode() {
         } else if (msg.type === 'agentStepResult') {
           if (msg.toolName === 'search_tools') return
           const body = card.querySelector('.agent-step-body')
-          let displayResult = msg.result || ''
-          try {
-            const parsed = JSON.parse(displayResult)
-            if (parsed.ok === false && parsed.error) {
-              displayResult = '执行失败：' + parsed.error
-            } else if (parsed.ok && parsed.result) {
-              if (typeof parsed.result === 'string') displayResult = parsed.result
-              else if (Array.isArray(parsed.result)) displayResult = parsed.result.map((item, i) => `${i + 1}. ${typeof item === 'string' ? item : item.name || item.title || JSON.stringify(item)}`).join('\n')
-              else displayResult = JSON.stringify(parsed.result, null, 2)
-            }
-          } catch {}
+          let displayResult = summarizeToolResult(msg.toolName, msg.result || '')
           body.textContent = displayResult
           const title = card.querySelector('.agent-step-title')
           if (title) title.innerHTML = title.innerHTML.replace('\u23F3', '\u2705')
@@ -877,6 +888,94 @@ function formatToolArgs(toolName, toolArgs) {
   }
 }
 
+// 将工具执行结果转为可读摘要，避免显示原始JSON
+function summarizeToolResult(toolName, rawResult) {
+  let parsed = null
+  try { parsed = JSON.parse(rawResult) } catch {}
+
+  // 执行失败
+  if (parsed && parsed.ok === false && parsed.error) {
+    return '失败：' + parsed.error
+  }
+
+  // 按工具类型生成摘要
+  switch (toolName) {
+    case 'read_page_content':
+      if (parsed?.title) return `已读取页面「${parsed.title}」(${(parsed.content || '').length}字)`
+      return '已读取当前页面内容'
+    case 'extract_content': {
+      if (!parsed) return '提取完成'
+      const items = parsed.result || parsed
+      if (Array.isArray(items)) return `已提取 ${items.length} 条数据`
+      if (typeof items === 'string') return items.length > 100 ? items.slice(0, 100) + '...' : items
+      return '提取完成'
+    }
+    case 'get_interactive_elements':
+      if (Array.isArray(parsed)) return `发现 ${parsed.length} 个可交互元素`
+      return '已获取可交互元素'
+    case 'get_element_info':
+      return '已获取元素详细信息'
+    case 'click_element':
+      return '已点击目标元素'
+    case 'fill_input':
+      return '已填写输入框'
+    case 'navigate_to':
+      if (parsed?.url) return `已导航到 ${parsed.url}`
+      return '页面导航完成'
+    case 'go_back':
+      return '已返回上一页'
+    case 'go_forward':
+      return '已前进到下一页'
+    case 'scroll_page':
+      return '已滚动页面'
+    case 'hover_element':
+      return '已悬停目标元素'
+    case 'select_dropdown':
+      return '已选择下拉选项'
+    case 'press_key':
+      return '已执行按键操作'
+    case 'find_text_on_page':
+      if (parsed?.count !== undefined) return `找到 ${parsed.count} 处匹配`
+      return '文本搜索完成'
+    case 'wait_for_element':
+      return '目标元素已出现'
+    case 'recall_data':
+      if (parsed) {
+        if (Array.isArray(parsed)) return `查询到 ${parsed.length} 条记录`
+        if (typeof parsed === 'string') return parsed.length > 100 ? parsed.slice(0, 100) + '...' : parsed
+        if (parsed.result) {
+          if (Array.isArray(parsed.result)) return `查询到 ${parsed.result.length} 条记录`
+          if (typeof parsed.result === 'string') return parsed.result.length > 100 ? parsed.result.slice(0, 100) + '...' : parsed.result
+        }
+      }
+      return '已查询存储数据'
+    case 'create_todo':
+      if (parsed?.ok && parsed.totalTodos) return `已创建待办列表（${parsed.totalTodos}个待办）`
+      if (parsed?.errors) return '待办创建失败：' + parsed.errors.slice(0, 2).join('；')
+      return '待办列表操作完成'
+    case 'screenshot_visible':
+      return '已截取当前页面'
+    case 'finish_task':
+      return parsed || '任务完成'
+    default:
+      if (toolName.startsWith('inject_script_')) {
+        if (parsed) {
+          if (parsed.ok === false) return '脚本执行失败：' + (parsed.error || '未知错误')
+          if (Array.isArray(parsed)) return `脚本执行完成，返回 ${parsed.length} 条结果`
+          if (parsed.result) {
+            if (Array.isArray(parsed.result)) return `脚本执行完成，处理了 ${parsed.result.length} 条数据`
+            if (typeof parsed.result === 'string') return parsed.result.length > 100 ? parsed.result.slice(0, 100) + '...' : parsed.result
+          }
+          if (parsed.count !== undefined) return `脚本执行完成，处理了 ${parsed.count} 条`
+        }
+        return '脚本执行完成'
+      }
+      // 兜底：尝试简短展示
+      if (typeof rawResult === 'string' && rawResult.length > 150) return rawResult.slice(0, 150) + '...'
+      return rawResult || '执行完成'
+  }
+}
+
 // 工具元数据：统一管理名称和图标
 const TOOL_META = {
   search_tools:    { name: '搜索工具', icon: '\uD83D\uDD0D' },
@@ -934,36 +1033,14 @@ async function runAgent(userText, pageContext) {
           : '未找到匹配的工具'
         chatMessages.scrollTop = chatMessages.scrollHeight
       } else if (msg.type === 'agentStepResult') {
-        // search_tools 的结果已在 agentSearchResult 中格式化显示，不再覆盖
         if (msg.toolName === 'search_tools') return
         const body = card.querySelector('.agent-step-body')
-        let displayResult = msg.result || ''
-        try {
-          const parsed = JSON.parse(displayResult)
-          if (parsed.ok === false && parsed.error) {
-            displayResult = '执行失败：' + parsed.error
-          } else if (parsed.ok && parsed.result) {
-            if (typeof parsed.result === 'string') {
-              displayResult = parsed.result
-            } else if (Array.isArray(parsed.result)) {
-              displayResult = parsed.result.map((item, i) => `${i + 1}. ${typeof item === 'string' ? item : item.name || item.title || JSON.stringify(item)}`).join('\n')
-            } else {
-              displayResult = JSON.stringify(parsed.result, null, 2)
-            }
-          } else if (parsed.content !== undefined) {
-            displayResult = typeof parsed.content === 'string' ? parsed.content : JSON.stringify(parsed.content)
-          } else if (Array.isArray(parsed)) {
-            displayResult = parsed.map((item, i) => `${i + 1}. ${item.name || item.title || (typeof item === 'string' ? item : JSON.stringify(item))}`).join('\n')
-          } else if (typeof parsed === 'string') {
-            displayResult = parsed
-          }
-        } catch {}
+        let displayResult = summarizeToolResult(msg.toolName, msg.result || '')
         body.textContent = displayResult
         const title = card.querySelector('.agent-step-title')
         if (title) title.innerHTML = title.innerHTML.replace('\u23F3', '\u2705')
         chatMessages.scrollTop = chatMessages.scrollHeight
 
-        // 收集工具执行记录
         if (msg.toolName && msg.toolName !== 'finish_task') {
           toolResults.push({ name: msg.toolName, result: displayResult })
         }
