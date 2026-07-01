@@ -53,7 +53,22 @@ export async function runAgent(ctx) {
   const _recallDataCallCount = new Map()
   const _usedSelectorToolCombo = new Set()
 
-  const cleanHistory = (chatHistory || []).map(m => {
+  const rawHistory = (chatHistory || [])
+  // 移除末尾连续的失败 agent 回复及其对应 user 消息，避免 LLM 被历史错误误导重复生成相同内容
+  const failureMarkers = ['❌', '脚本语法错误', '执行失败', 'Unexpected identifier', 'appKey', 'appSecret', '认证失败', '401', '403']
+  while (rawHistory.length >= 2) {
+    const last = rawHistory[rawHistory.length - 1]
+    if (last.role === 'assistant' && failureMarkers.some(m => last.content?.includes(m))) {
+      rawHistory.pop() // 移除失败的 assistant 回复
+      // 同时移除对应的 user 消息（如果末尾是 user）
+      if (rawHistory.length > 0 && rawHistory[rawHistory.length - 1].role === 'user') {
+        rawHistory.pop()
+      }
+    } else {
+      break
+    }
+  }
+  const cleanHistory = rawHistory.map(m => {
     const { toolCalls, tool_calls, ...clean } = m
     return clean
   })
