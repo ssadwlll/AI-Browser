@@ -72,18 +72,6 @@ body{font-family:var(--font-sans);background:var(--bg-white);color:var(--text-pr
 .view.active{display:flex;animation:fadeIn .2s ease-in}
 @keyframes fadeIn{0%{opacity:0;transform:translateY(10px)}100%{opacity:1;transform:translateY(0)}}
 
-/* ============ 左侧浮动工具按钮组 ============ */
-.floating-tools{display:flex;position:absolute;left:0;top:50%;transform:translateY(-50%);flex-direction:column;gap:8px;z-index:40}
-.floating-tool-btn{width:36px;height:36px;border-radius:18px 0 0 18px;border:1px solid var(--border-light);border-right:none;background:var(--bg-white);cursor:pointer;display:flex;align-items:center;justify-content:center;color:var(--text-quaternary);transition:all .2s ease-in-out;box-shadow:var(--box-shadow-s1)}
-.floating-tool-btn:hover{background:var(--brand-light);color:var(--brand);border-color:var(--brand-light2);box-shadow:var(--box-shadow-s2)}
-.floating-tool-btn:active{transform:scale(.95)}
-.floating-tool-btn.active{background:var(--brand);color:#fff;border-color:var(--brand)}
-/* 智能工具箱 pill 按钮 */
-.floating-toolbox-btn{display:flex;align-items:center;gap:6px;height:36px;padding:0 12px 0 8px;border-radius:18px 0 0 18px;border:1px solid var(--border-light);border-right:none;background:var(--bg-white);cursor:pointer;color:var(--text-primary);font-size:var(--fs-xs);font-weight:500;box-shadow:var(--box-shadow-s1);transition:all .2s ease-in-out;white-space:nowrap;margin-bottom:4px}
-.floating-toolbox-btn:hover{background:var(--brand-light);color:var(--brand);box-shadow:var(--box-shadow-s2)}
-.floating-toolbox-btn:active{transform:scale(.97)}
-.floating-toolbox-btn .icon{width:18px;height:18px;display:flex;align-items:center;justify-content:center;flex-shrink:0}
-
 /* ============ 聊天消息区 ============ */
 .chat-messages{flex:1;overflow-y:auto;padding:20px 12px 0 22px;scroll-behavior:smooth;overscroll-behavior:contain}
 

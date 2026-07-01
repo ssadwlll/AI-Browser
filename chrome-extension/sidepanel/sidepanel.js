@@ -175,30 +175,6 @@ document.getElementById('toolboxCloseBtn').addEventListener('click', (e) => {
 
 // ============ 左侧浮动工具按钮 ============
 
-// 浮动工具箱按钮 - 切换工具箱面板
-document.getElementById('floatToolboxBtn').addEventListener('click', async () => {
-  toggleToolbox()
-  if (document.getElementById('toolboxPanel').classList.contains('show')) {
-    await loadToolboxScripts()
-  }
-})
-
-// 浮动工具按钮 - 跳转脚本管理
-document.getElementById('floatToolsBtn').addEventListener('click', () => {
-  showView('scriptsView')
-  loadScripts()
-})
-
-// 浮动Agent按钮 - 切换Agent模式
-document.getElementById('floatTodoBtn').addEventListener('click', () => {
-  openTodoWindow()
-})
-
-// 浮动设置按钮 - 跳转设置视图
-document.getElementById('floatSettingsBtn').addEventListener('click', () => {
-  showView('settingsView')
-})
-
 async function loadToolboxScripts() {
   const scripts = await callService('scriptService', 'getScripts')
   const container = document.getElementById('toolboxScripts')
@@ -367,21 +343,22 @@ async function openTodoWindow() {
   _todoReady = false
   _todoQueue = []
   const url = chrome.runtime.getURL('sidepanel/todo-viewer.html')
-  const todoWidth = 450
-  let left = 100, top = 50, height = 650
+  const todoWidth = 380
+  const todoHeight = 520
+  let left = 100, top = 100
   try {
     const currentWin = await chrome.windows.getCurrent()
     if (currentWin) {
-      left = currentWin.left - todoWidth
-      top = currentWin.top
-      height = currentWin.height || 650
+      // sidepanel 在浏览器窗口右侧，todo窗口紧贴浏览器窗口左侧
+      left = currentWin.left + 10
+      top = currentWin.top + Math.max(10, (currentWin.height - todoHeight) / 3)
     }
   } catch (e) {
     console.warn('[TodoWindow] 获取窗口位置失败，使用默认位置', e)
   }
   if (chrome.windows?.create) {
     try {
-      const win = await chrome.windows.create({ url, type: 'popup', width: todoWidth, height, left, top, focused: true })
+      const win = await chrome.windows.create({ url, type: 'popup', width: todoWidth, height: todoHeight, left, top, focused: true })
       const tabId = win.tabs?.[0]?.id
       if (tabId) {
         _todoWindow = { closed: false, _winId: win.id, focus: () => chrome.windows.update(win.id, { focused: true }) }
@@ -393,23 +370,23 @@ async function openTodoWindow() {
         })
       }
     } catch (e) {
-      _todoWindow = window.open(url, 'todoPopup', `width=${todoWidth},height=${height},left=${left},top=${top},menubar=no,toolbar=no,location=no,status=no`)
+      _todoWindow = window.open(url, 'todoPopup', `width=${todoWidth},height=${todoHeight},left=${left},top=${top},menubar=no,toolbar=no,location=no,status=no`)
     }
   } else {
-    _todoWindow = window.open(url, 'todoPopup', `width=${todoWidth},height=${height},left=${left},top=${top},menubar=no,toolbar=no,location=no,status=no`)
+    _todoWindow = window.open(url, 'todoPopup', `width=${todoWidth},height=${todoHeight},left=${left},top=${top},menubar=no,toolbar=no,location=no,status=no`)
   }
 }
 
-// 侧边栏移动/缩放时，重新定位 Todo 窗口
+// 侧边栏移动时，重新定位 Todo 窗口
 function repositionTodoWindow() {
   if (!_todoWindow || _todoWindow.closed || !_todoWindow._winId) return
-  const todoWidth = 450
+  const todoWidth = 380
+  const todoHeight = 520
   chrome.windows.getCurrent().then(currentWin => {
     if (!currentWin) return
     chrome.windows.update(_todoWindow._winId, {
-      left: currentWin.left - todoWidth,
-      top: currentWin.top,
-      height: currentWin.height
+      left: currentWin.left + 10,
+      top: currentWin.top + Math.max(10, (currentWin.height - todoHeight) / 3)
     }).catch(() => {})
   }).catch(() => {})
 }
@@ -1960,6 +1937,9 @@ async function handleFloatingAction(action) {
       break
     case 'agent':
       toggleAgentMode()
+      break
+    case 'todo':
+      openTodoWindow()
       break
     case 'settings':
       showView('settingsView')
