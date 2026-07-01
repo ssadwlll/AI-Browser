@@ -47,7 +47,7 @@ app.use('/api/ai-proxy', aiProxyRoutes)
 app.use('/api/ai-call-logs', aiCallLogRoutes)
 app.use('/api/attachments', require('./routes/attachments'))
 app.use('/api/forge', require('./routes/forge'))
-app.use('/api/collect-pages', require('./middleware/optionalAuth'), require('./routes/collect-pages'))
+app.use('/api/collect-pages', require('./middleware/appAuth'), require('./routes/collect-pages'))
 
 // 静态文件 — 管理后台前端资源（CSS/JS）和上传的附件
 app.use(express.static(path.join(__dirname, 'public')))
