@@ -33,6 +33,17 @@
   // 初始化页面助手浮动按钮
   initPageAssistant()
 
+  // 待办追踪面板变量声明（必须在 initTodoTracker 调用之前）
+  let _todoHost = null
+  let _todoShadow = null
+  let _todoVisible = false
+  let _todoLastData = null
+  let _todoSwitchLogs = []
+  const STAGE_NAMES = { 1: 'Stage 1 DOM工具', 2: 'Stage 2 远程脚本', 3: 'Stage 3 数据汇总' }
+
+  // 初始化待办追踪面板
+  initTodoTracker()
+
   // 初始化划词工具栏
   if (config.selectionToolsEnabled !== false) {
     initSelectionToolbar()
@@ -52,6 +63,13 @@
     // 右键菜单动作（AI 总结/翻译/解释）
     if (msg.type === 'selectionAction') {
       handleSelectionAction(msg.action, msg.text || '')
+      sendResponse({ ok: true })
+      return true
+    }
+
+    // 待办更新消息
+    if (msg.type === 'todoUpdate') {
+      updateTodoPanel(msg.data)
       sendResponse({ ok: true })
       return true
     }
@@ -245,6 +263,13 @@
           el.style.transform = 'scale(0.92)'
           setTimeout(() => { el.style.transform = '' }, 150)
 
+          // 待办按钮：直接切换待办面板显示，不打开sidebar
+          if (action === 'todo') {
+            toggleTodoPanel()
+            return
+          }
+
+          // 其他按钮：打开sidebar
           // 先存储 action，确保即使 sidePanel 打开失败也能在手动打开时读取
           chrome.storage.local.set({ floatingToolAction: action }).catch(() => {})
 
@@ -277,6 +302,282 @@
       }
     })
     guardian.observe(document.body, { childList: true })
+  }
+
+  // ---- 待办追踪面板（注入到页面 DOM，紧贴 sidebar 左侧）----
+  function initTodoTracker() {
+    if (document.getElementById('ai-browser-todo-host')) return
+
+    _todoHost = document.createElement('div')
+    _todoHost.id = 'ai-browser-todo-host'
+    _todoShadow = _todoHost.attachShadow({ mode: 'closed' })
+
+    _todoShadow.innerHTML = `
+      <style>
+        :host{position:fixed;top:60px;left:0;z-index:2147483645;font-family:'Segoe UI',Consolas,-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;pointer-events:none;transition:left .3s ease}
+        .todo-panel{pointer-events:auto;width:340px;max-height:calc(100vh - 120px);background:#fff;border:1px solid rgba(79,89,102,0.12);border-radius:16px;box-shadow:0 8px 24px rgba(0,0,0,0.12),0 0 1px rgba(0,0,0,0.08);display:none;flex-direction:column;overflow:hidden;animation:todoIn .25s ease-out}
+        .todo-panel.show{display:flex}
+        @keyframes todoIn{from{opacity:0;transform:translateX(10px)}to{opacity:1;transform:translateX(0)}}
+        .todo-header{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid rgba(79,89,102,0.08);flex-shrink:0}
+        .todo-header-title{font-size:14px;font-weight:700;color:#262626;display:flex;align-items:center;gap:6px}
+        .todo-header-actions{display:flex;gap:4px}
+        .todo-header-btn{background:none;border:none;cursor:pointer;padding:4px 8px;border-radius:6px;font-size:12px;color:#8c8c8c;transition:all .2s}
+        .todo-header-btn:hover{background:rgba(79,89,102,0.06);color:#404040}
+        .todo-header-btn.copy{color:#3bbfff}
+        .todo-header-btn.copy:hover{background:rgba(59,191,255,0.08)}
+        .todo-header-btn.clear{color:#ea3639}
+        .todo-header-btn.clear:hover{background:rgba(234,54,57,0.08)}
+        .todo-close{background:none;border:none;cursor:pointer;color:#8c8c8c;padding:4px;border-radius:6px;display:flex;align-items:center;justify-content:center;transition:all .2s}
+        .todo-close:hover{background:rgba(79,89,102,0.06);color:#404040}
+        .todo-overview{display:flex;gap:10px;padding:8px 16px;background:#fafafa;border-bottom:1px solid rgba(79,89,102,0.06);flex-shrink:0;flex-wrap:wrap;align-items:center;font-size:12px}
+        .todo-overview-item{display:flex;align-items:center;gap:4px;color:#8c8c8c}
+        .todo-overview-item .val{font-weight:700;font-size:12px}
+        .todo-overview-item .val.stage1{color:#3bbfff}
+        .todo-overview-item .val.stage2{color:#ffab00}
+        .todo-overview-item .val.stage3{color:#00aa5b}
+        .todo-progress-bar{width:80px;height:6px;background:#ececee;border-radius:3px;overflow:hidden;display:inline-block;vertical-align:middle}
+        .todo-progress-fill{height:100%;background:#00aa5b;border-radius:3px;transition:width 0.4s ease;width:0%}
+        .todo-last-tool{font-size:11px;color:#8c8c8c;margin-left:auto;font-style:italic}
+        .todo-body{flex:1;overflow-y:auto;padding:10px 14px;max-height:400px}
+        .stage-group{margin-bottom:12px}
+        .stage-header{display:flex;align-items:center;gap:6px;padding:6px 10px;background:#fafafa;border-radius:8px 8px 0 0;border-left:3px solid #bdbdbd;font-size:12px;font-weight:700;color:#8c8c8c}
+        .stage-header.active{border-left-color:#00aa5b;color:#00aa5b;background:rgba(0,170,91,0.04)}
+        .stage-header.done{border-left-color:#3bbfff;color:#3bbfff}
+        .stage-header .badge{font-size:10px;padding:1px 6px;border-radius:8px;background:#ececee;color:#8c8c8c;margin-left:auto}
+        .stage-header.active .badge{background:rgba(0,170,91,0.1);color:#00aa5b}
+        .stage-header.done .badge{background:rgba(59,191,255,0.1);color:#3bbfff}
+        .todo-list{list-style:none;margin:0;padding:0}
+        .todo-item{display:flex;align-items:flex-start;gap:6px;padding:8px 10px;border-bottom:1px solid rgba(79,89,102,0.06);font-size:12px;line-height:1.4;transition:background 0.2s}
+        .todo-item:last-child{border-bottom:none}
+        .todo-item.running{background:rgba(59,191,255,0.04);border-left:2px solid #3bbfff}
+        .todo-item.done{background:rgba(0,170,91,0.04);border-left:2px solid #00aa5b}
+        .todo-item.failed{background:rgba(234,54,57,0.04);border-left:2px solid #ea3639}
+        .todo-item.pending{border-left:2px solid transparent}
+        .todo-icon{flex-shrink:0;width:16px;text-align:center;font-size:12px;line-height:1.4}
+        .todo-content{flex:1;min-width:0}
+        .todo-id{font-size:10px;color:#8c8c8c;font-family:Consolas,monospace;margin-right:4px}
+        .todo-action{font-size:11px;color:#3bbfff;font-family:Consolas,monospace;background:rgba(59,191,255,0.06);padding:1px 4px;border-radius:3px;margin-right:4px}
+        .todo-desc{color:#404040;font-size:12px}
+        .todo-keys{margin-top:3px;font-size:10px;color:#8c8c8c}
+        .todo-keys .key{display:inline-block;background:#ececee;padding:1px 4px;border-radius:3px;margin-right:3px;color:#595959;font-family:Consolas,monospace}
+        .stage-switch-log{padding:6px 10px;background:rgba(255,171,0,0.06);border-left:2px solid #ffab00;border-radius:4px;margin:6px 0;font-size:11px;color:#ffab00}
+        .empty-state{text-align:center;color:#8c8c8c;padding:40px 20px;font-size:12px;line-height:1.6}
+        .toast{position:absolute;top:12px;right:12px;background:#00aa5b;color:#fff;padding:6px 12px;border-radius:6px;font-size:12px;opacity:0;transition:opacity 0.3s;pointer-events:none;z-index:10}
+        .toast.show{opacity:1}
+      </style>
+      <div class="todo-panel" id="todoPanel">
+        <div class="todo-header">
+          <span class="todo-header-title">📋 待办追踪</span>
+          <div class="todo-header-actions">
+            <button class="todo-header-btn copy" id="copyBtn" title="复制全部">📋</button>
+            <button class="todo-header-btn clear" id="clearBtn" title="清空">✕</button>
+            <button class="todo-close" id="closeBtn" title="关闭">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
+            </button>
+          </div>
+        </div>
+        <div class="todo-overview" id="overview" style="display:none">
+          <div class="todo-overview-item">阶段: <span class="val" id="ovStage">-</span></div>
+          <div class="todo-overview-item">进度:
+            <div class="todo-progress-bar"><div class="todo-progress-fill" id="ovProgressFill"></div></div>
+            <span class="val" id="ovProgress">0%</span>
+          </div>
+          <div class="todo-overview-item">已完成: <span class="val" id="ovDone">0</span>/<span id="ovTotal">0</span></div>
+          <div class="todo-last-tool" id="ovLastTool"></div>
+        </div>
+        <div class="todo-body" id="todoBody">
+          <div class="empty-state">等待 Agent 任务启动…待办列表将自动显示在这里</div>
+        </div>
+        <div class="toast" id="toast"></div>
+      </div>
+    `
+
+    document.body.appendChild(_todoHost)
+
+    // 事件绑定
+    _todoShadow.getElementById('closeBtn').addEventListener('click', () => {
+      _todoShadow.getElementById('todoPanel').classList.remove('show')
+      _todoVisible = false
+    })
+    _todoShadow.getElementById('copyBtn').addEventListener('click', () => {
+      copyAllTodos()
+    })
+    _todoShadow.getElementById('clearBtn').addEventListener('click', () => {
+      _todoLastData = null
+      _todoSwitchLogs = []
+      _todoShadow.getElementById('overview').style.display = 'none'
+      _todoShadow.getElementById('todoBody').innerHTML = '<div class="empty-state">已清空，等待新任务…</div>'
+      showTodoToast('已清空')
+    })
+
+    // DOM 守护
+    const guardian = new MutationObserver(() => {
+      if (!document.getElementById('ai-browser-todo-host') && document.body) {
+        guardian.disconnect()
+        console.log('[AI Browser] 待办面板被移除，重新注入')
+        _todoHost = null
+        _todoShadow = null
+        initTodoTracker()
+        // 恢复数据
+        if (_todoLastData) updateTodoPanel(_todoLastData)
+      }
+    })
+    guardian.observe(document.body, { childList: true })
+  }
+
+  function showTodoToast(msg) {
+    if (!_todoShadow) return
+    const toast = _todoShadow.getElementById('toast')
+    toast.textContent = msg
+    toast.classList.add('show')
+    setTimeout(() => toast.classList.remove('show'), 2000)
+  }
+
+  function copyAllTodos() {
+    if (!_todoLastData || !_todoLastData.stages) {
+      showTodoToast('没有待办列表')
+      return
+    }
+    let text = ''
+    for (const stage of _todoLastData.stages) {
+      text += `[${STAGE_NAMES[stage.stage] || 'Stage ' + stage.stage}] ${stage.name || ''}\n`
+      for (const todo of stage.subTodos || []) {
+        const status = todo._status || 'pending'
+        const icon = status === 'done' ? '✅' : status === 'failed' ? '❌' : status === 'running' ? '⏳' : '⬜'
+        text += `  ${icon} [${todo.id}] ${todo.action}: ${todo.description || ''}\n`
+        if (todo.dataOutputKey) text += `       out: ${todo.dataOutputKey}\n`
+        if (todo.dataDependKeys?.length) text += `       dep: ${todo.dataDependKeys.join(', ')}\n`
+      }
+      text += '\n'
+    }
+    navigator.clipboard.writeText(text)
+      .then(() => showTodoToast('已复制到剪贴板'))
+      .catch(() => showTodoToast('复制失败'))
+  }
+
+  function updateTodoPanel(data) {
+    if (!data || !data.stages || data.stages.length === 0) return
+
+    _todoLastData = data
+
+    // 记录阶段切换日志
+    if (data.stageSwitch) {
+      _todoSwitchLogs.push(`${data.stageSwitch.reason} → ${STAGE_NAMES[data.stageSwitch.to] || 'Stage ' + data.stageSwitch.to}`)
+    }
+
+    // 自动显示
+    if (!_todoVisible) {
+      _todoShadow.getElementById('todoPanel').classList.add('show')
+      _todoVisible = true
+    }
+
+    const overview = _todoShadow.getElementById('overview')
+    const todoBody = _todoShadow.getElementById('todoBody')
+
+    overview.style.display = 'flex'
+    todoBody.innerHTML = ''
+
+    // Update overview
+    const progress = data.progress || {}
+    const currentStage = data.currentStage || 1
+    const stageName = STAGE_NAMES[currentStage] || `Stage ${currentStage}`
+    const stageCls = currentStage === 1 ? 'stage1' : currentStage === 2 ? 'stage2' : 'stage3'
+    _todoShadow.getElementById('ovStage').textContent = stageName
+    _todoShadow.getElementById('ovStage').className = 'val ' + stageCls
+    const pct = progress.percentage || 0
+    _todoShadow.getElementById('ovProgressFill').style.width = pct + '%'
+    _todoShadow.getElementById('ovProgress').textContent = pct + '%'
+    _todoShadow.getElementById('ovDone').textContent = progress.completed || 0
+    _todoShadow.getElementById('ovTotal').textContent = progress.total || 0
+    if (data.lastTool) {
+      const statusEmoji = data.lastProgress ? '✅' : '❌'
+      _todoShadow.getElementById('ovLastTool').textContent = statusEmoji + ' ' + data.lastTool
+    }
+
+    // Find current todo id to mark as running
+    const currentTodoId = progress.currentTodo?.id || null
+    const currentAction = progress.currentTodo?.action || null
+    const isExecutingCurrentTodo = data.lastTool && currentAction && (
+      data.lastTool === currentAction ||
+      (currentAction.startsWith('inject_script_') && data.lastTool.startsWith('inject_script_'))
+    )
+
+    // Render stages
+    for (const stage of data.stages) {
+      const stageNum = stage.stage
+      const isActive = stageNum === currentStage
+      const isDone = stageNum < currentStage || (stageNum === currentStage && !currentTodoId && progress.completed > 0)
+
+      const group = document.createElement('div')
+      group.className = 'stage-group'
+
+      const header = document.createElement('div')
+      header.className = 'stage-header' + (isActive ? ' active' : '') + (isDone ? ' done' : '')
+      const headerText = STAGE_NAMES[stageNum] || `Stage ${stageNum}`
+      const subTodos = stage.subTodos || []
+      const completedCount = subTodos.filter(t => t._status === 'done').length
+      header.innerHTML = `<span>${headerText}</span><span class="badge">${completedCount}/${subTodos.length}</span>`
+      group.appendChild(header)
+
+      const list = document.createElement('ul')
+      list.className = 'todo-list'
+
+      for (const todo of subTodos) {
+        const li = document.createElement('li')
+        let status = todo._status || 'pending'
+        if (todo.id === currentTodoId && !todo._status && isExecutingCurrentTodo) status = 'running'
+        li.className = 'todo-item ' + status
+
+        const icon = document.createElement('span')
+        icon.className = 'todo-icon'
+        const statusIcons = { done: '✅', failed: '❌', running: '⏳', pending: '⬜' }
+        icon.textContent = statusIcons[status] || '⬜'
+        li.appendChild(icon)
+
+        const content = document.createElement('div')
+        content.className = 'todo-content'
+        content.innerHTML =
+          `<span class="todo-id">${todo.id}</span>` +
+          `<span class="todo-action">${todo.action}</span>` +
+          `<span class="todo-desc">${todo.description || ''}</span>`
+
+        const keysDiv = document.createElement('div')
+        keysDiv.className = 'todo-keys'
+        if (todo.dataOutputKey) {
+          keysDiv.innerHTML += `<span class="key">out: ${todo.dataOutputKey}</span>`
+        }
+        if (Array.isArray(todo.dataDependKeys) && todo.dataDependKeys.length > 0) {
+          keysDiv.innerHTML += `<span class="key">dep: ${todo.dataDependKeys.join(', ')}</span>`
+        }
+        if (keysDiv.innerHTML) content.appendChild(keysDiv)
+
+        li.appendChild(content)
+        list.appendChild(li)
+      }
+
+      group.appendChild(list)
+      todoBody.appendChild(group)
+    }
+
+    // Append stage switch logs
+    for (const log of _todoSwitchLogs) {
+      const div = document.createElement('div')
+      div.className = 'stage-switch-log'
+      div.textContent = `🔄 ${log}`
+      todoBody.appendChild(div)
+    }
+  }
+
+  function toggleTodoPanel() {
+    if (!_todoHost) return
+    const panel = _todoShadow.getElementById('todoPanel')
+    if (_todoVisible) {
+      panel.classList.remove('show')
+      _todoVisible = false
+    } else {
+      panel.classList.add('show')
+      _todoVisible = true
+    }
   }
 
   // ---- 划词/右键动作处理（通过原生 sidePanel）----
