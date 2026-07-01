@@ -1,6 +1,6 @@
 import { PayloadStore } from './payload-store.js'
 import { DomainPolicy } from './domain-policy.js'
-import { TodoScheduler, STAGE } from './todo-scheduler.js'
+import { TodoScheduler } from './todo-scheduler.js'
 
 // ============ AgentService ============
 export class AgentService {
@@ -1585,15 +1585,25 @@ finish_task: 任务完成，汇报结果
         // 阶段2：只暴露 search_tools + inject_script_* + read_page_content + recall_data + finish_task
         tools = this._buildPhase2Tools(searchResults, currentPageUrl, aiRequestCount + 1)
       } else {
-        // 阶段3：只有 finish_task
-        tools = [{
-          type: 'function',
-          function: {
-            name: 'finish_task',
-            description: '任务完成，汇报结果',
-            parameters: { type: 'object', properties: { summary: { type: 'string', description: '完成摘要' } }, required: ['summary'] }
+        // 阶段3：recall_data + finish_task
+        tools = [
+          {
+            type: 'function',
+            function: {
+              name: 'recall_data',
+              description: '从已存储的工具结果中查询数据',
+              parameters: { type: 'object', properties: { entry_id: { type: 'string' }, tool_name: { type: 'string' }, filter: { type: 'string' }, fields: { type: 'string' } } }
+            }
+          },
+          {
+            type: 'function',
+            function: {
+              name: 'finish_task',
+              description: '任务完成，汇报结果',
+              parameters: { type: 'object', properties: { summary: { type: 'string', description: '完成摘要' } }, required: ['summary'] }
+            }
           }
-        }]
+        ]
       }
 
       console.log(`[Agent] 阶段${currentPhase} 第${aiRequestCount}轮API请求, tools:${tools.length}个, 已搜到${searchResults.length}个脚本`)
@@ -2187,6 +2197,13 @@ finish_task: 任务完成，汇报结果
               // JSON 解析失败 → 无进展
             }
 
+            // ===== 统一进度/失败记录（由调度引擎管理，在阶段切换检查之前更新计数） =====
+            if (hasProgress) {
+              this.todoScheduler.recordProgress()
+            } else {
+              this.todoScheduler.recordNoProgress(funcName)
+            }
+
             // 检查硬性规则：是否应该切换阶段
             const stageSwitch = this.todoScheduler.shouldSwitchStage()
             if (stageSwitch.switch) {
@@ -2257,13 +2274,6 @@ ${allData.length > 0 ? allData.join('\n') : '（无数据）'}`
                 messages.push({ role: 'user', content: userMessage + '\n\n请汇总所有已收集的数据并输出最终结果。' })
                 _debugLog('🔄 Stage3提示词已注入', { dataKeys: allData.length })
               }
-            }
-
-            // ===== 统一进度/失败记录（由调度引擎管理，不再使用本地计数变量） =====
-            if (hasProgress) {
-              this.todoScheduler.recordProgress()
-            } else {
-              this.todoScheduler.recordNoProgress(funcName)
             }
 
             this.postToUI(tabId, {

@@ -27,14 +27,14 @@ export class GlobalDataStore {
    * 获取原始数据
    */
   get(key) {
-    return this.entries.get(key)?.value || null
+    return this.entries.get(key)?.value ?? null
   }
 
   /**
    * 获取数据摘要
    */
   getSummary(key) {
-    return this.entries.get(key)?.summary || null
+    return this.entries.get(key)?.summary ?? null
   }
 
   /**
@@ -67,9 +67,12 @@ export class GlobalDataStore {
    */
   getUrls(key) {
     const value = this.get(key)
-    if (!value) return []
+    if (value === null || value === undefined) return []
     try {
-      const obj = typeof value === 'string' ? JSON.parse(value) : value
+      let obj = value
+      if (typeof value === 'string') {
+        try { obj = JSON.parse(value) } catch { obj = value }
+      }
       if (Array.isArray(obj)) {
         return obj.filter(item => item?.attrs?.href).map(item => item.attrs.href)
       }
@@ -96,7 +99,11 @@ export class GlobalDataStore {
    */
   _generateSummary(value) {
     try {
-      const obj = typeof value === 'string' ? JSON.parse(value) : value
+      // 尝试解析JSON，失败则保持原始字符串
+      let obj = value
+      if (typeof value === 'string') {
+        try { obj = JSON.parse(value) } catch { obj = value }
+      }
 
       // 数组类型
       if (Array.isArray(obj)) {
@@ -104,19 +111,19 @@ export class GlobalDataStore {
         if (count === 0) return '0条数据（空结果）'
         const fields = new Set()
         for (const item of obj.slice(0, 5)) {
-          if (item.text) fields.add('text')
-          if (item.attrs) for (const k of Object.keys(item.attrs)) fields.add(`attrs.${k}`)
-          if (item.title) fields.add('title')
-          if (item.href) fields.add('href')
+          if (item?.text) fields.add('text')
+          if (item?.attrs) for (const k of Object.keys(item.attrs)) fields.add(`attrs.${k}`)
+          if (item?.title) fields.add('title')
+          if (item?.href) fields.add('href')
           for (const k of Object.keys(item)) {
             if (!['text', 'attrs', 'title', 'href'].includes(k)) fields.add(k)
           }
         }
         const fieldList = [...fields].slice(0, 6).join(', ')
         const sample = obj.slice(0, 2).map(item => {
-          if (item.attrs?.href) return item.text?.slice(0, 30) || item.attrs.href.slice(0, 40)
-          if (item.title) return item.title.slice(0, 30)
-          if (item.text) return item.text.slice(0, 30)
+          if (item?.attrs?.href) return item.text?.slice(0, 30) || item.attrs.href.slice(0, 40)
+          if (item?.title) return item.title.slice(0, 30)
+          if (item?.text) return item.text.slice(0, 30)
           return JSON.stringify(item).slice(0, 30)
         }).join(', ')
         return `${count}条数据（字段: ${fieldList}）: ${sample}${count > 2 ? '...' : ''}`
@@ -125,14 +132,14 @@ export class GlobalDataStore {
       // 对象类型
       if (typeof obj === 'object' && obj !== null) {
         const keys = Object.keys(obj)
-        if (obj.ok && obj.total) return `${obj.total}条结果`
+        if (obj.ok && typeof obj.total === 'number') return `${obj.total}条结果`
         if (obj.data && Array.isArray(obj.data)) return `${obj.data.length}条数据`
         return `${keys.length}个字段: ${keys.slice(0, 5).join(', ')}`
       }
 
       // 字符串
       if (typeof obj === 'string') {
-        return `${obj.length}字符: ${obj.slice(0, 50)}...`
+        return `${obj.length}字符: ${obj.slice(0, 50)}${obj.length > 50 ? '...' : ''}`
       }
 
       return '已存储'

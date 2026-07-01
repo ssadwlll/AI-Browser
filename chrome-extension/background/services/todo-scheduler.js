@@ -130,10 +130,11 @@ Stage 3（数据汇总）：输出最终结果（固定1个）
 
         // 阶段工具合规校验
         if (todo.action) {
-          if (stage.stage === 1 && !STAGE1_TOOLS.has(todo.action) && !todo.action.startsWith('inject_script_')) {
-            // Stage1 允许 search_tools 但不允许 inject_script_*
+          if (stage.stage === 1) {
             if (todo.action.startsWith('inject_script_')) {
               errors.push(`Stage 1 禁止使用 ${todo.action}（硬性规则：Stage1屏蔽inject）`)
+            } else if (!STAGE1_TOOLS.has(todo.action)) {
+              errors.push(`Stage 1 不允许使用 ${todo.action}（仅允许DOM工具）`)
             }
           }
           if (stage.stage === 2) {
@@ -340,6 +341,7 @@ Stage 3（数据汇总）：输出最终结果（固定1个）
     this.currentStage = nextStage
     this.currentTodoIndex = 0
     this.stageFailCount = 0
+    this.stage2ScriptFailCount = 0
     // 清空阶段临时缓存
     this.stageCache.clear()
     console.log(`[TodoScheduler] 阶段切换 → Stage ${this.currentStage}`)
@@ -352,6 +354,7 @@ Stage 3（数据汇总）：输出最终结果（固定1个）
     this.currentStage = stage
     this.currentTodoIndex = 0
     this.stageFailCount = 0
+    this.stage2ScriptFailCount = 0
     this.stageCache.clear()
     console.log(`[TodoScheduler] 强制切换 → Stage ${this.currentStage}`)
   }
