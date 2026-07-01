@@ -86,13 +86,14 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       return false
     }
     ;(async () => {
-      // 先存储 action（无论 open 成功与否，sidepanel 手动打开时都能读取）
-      if (action) {
-        await chrome.storage.local.set({ floatingToolAction: action })
-      }
-      // 尝试打开 sidePanel
+      // 必须先打开 sidePanel（需要用户手势），再异步存储 action
+      // await storage.set 会消耗用户手势，导致 sidePanel.open 失败
       const success = await sidebarService.open(tabId)
       console.log('[Background] toggleSidebar: open 结果=', success)
+      // 异步存储 action（sidepanel 通过 storage.onChanged 或 checkFloatingAction 读取）
+      if (action) {
+        chrome.storage.local.set({ floatingToolAction: action }).catch(() => {})
+      }
       sendResponse({ ok: success, opened: success })
     })()
     return true  // 异步响应
@@ -121,6 +122,16 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       data: callbackData,
       tabUrl,
     }).catch(() => {})  // 忽略没有接收者的错误
+    sendResponse({ ok: true })
+    return false
+  }
+
+  // 待办更新：转发给 content script（注入到页面的待办面板）
+  if (msg.type === 'todoUpdate') {
+    const tabId = msg.tabId
+    if (tabId) {
+      chrome.tabs.sendMessage(tabId, { type: 'todoUpdate', data: msg.data }).catch(() => {})
+    }
     sendResponse({ ok: true })
     return false
   }

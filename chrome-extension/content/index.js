@@ -314,11 +314,11 @@
 
     _todoShadow.innerHTML = `
       <style>
-        :host{position:fixed;top:60px;left:0;z-index:2147483645;font-family:'Segoe UI',Consolas,-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;pointer-events:none;transition:left .3s ease}
+        :host{position:fixed;top:60px;right:0;z-index:2147483645;font-family:'Segoe UI',Consolas,-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;pointer-events:none}
         .todo-panel{pointer-events:auto;width:340px;max-height:calc(100vh - 120px);background:#fff;border:1px solid rgba(79,89,102,0.12);border-radius:16px;box-shadow:0 8px 24px rgba(0,0,0,0.12),0 0 1px rgba(0,0,0,0.08);display:none;flex-direction:column;overflow:hidden;animation:todoIn .25s ease-out}
         .todo-panel.show{display:flex}
         @keyframes todoIn{from{opacity:0;transform:translateX(10px)}to{opacity:1;transform:translateX(0)}}
-        .todo-header{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid rgba(79,89,102,0.08);flex-shrink:0}
+        .todo-header{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid rgba(79,89,102,0.08);flex-shrink:0;cursor:move;user-select:none}
         .todo-header-title{font-size:14px;font-weight:700;color:#262626;display:flex;align-items:center;gap:6px}
         .todo-header-actions{display:flex;gap:4px}
         .todo-header-btn{background:none;border:none;cursor:pointer;padding:4px 8px;border-radius:6px;font-size:12px;color:#8c8c8c;transition:all .2s}
@@ -408,6 +408,47 @@
       _todoShadow.getElementById('overview').style.display = 'none'
       _todoShadow.getElementById('todoBody').innerHTML = '<div class="empty-state">已清空，等待新任务…</div>'
       showTodoToast('已清空')
+    })
+
+    // 拖动功能
+    const header = _todoShadow.getElementById('todoPanel').querySelector('.todo-header')
+    const panel = _todoShadow.getElementById('todoPanel')
+    let isDragging = false
+    let startX, startY, initialLeft, initialTop
+
+    header.addEventListener('mousedown', (e) => {
+      // 忽略按钮点击
+      if (e.target.closest('button')) return
+      
+      isDragging = true
+      const rect = panel.getBoundingClientRect()
+      startX = e.clientX
+      startY = e.clientY
+      initialLeft = rect.left
+      initialTop = rect.top
+      
+      // 切换到绝对定位以便拖动
+      _todoHost.style.position = 'fixed'
+      _todoHost.style.top = initialTop + 'px'
+      _todoHost.style.left = initialLeft + 'px'
+      _todoHost.style.right = 'auto'
+      
+      e.preventDefault()
+    })
+
+    document.addEventListener('mousemove', (e) => {
+      if (!isDragging) return
+      
+      const dx = e.clientX - startX
+      const dy = e.clientY - startY
+      _todoHost.style.left = (initialLeft + dx) + 'px'
+      _todoHost.style.top = (initialTop + dy) + 'px'
+    })
+
+    document.addEventListener('mouseup', () => {
+      if (isDragging) {
+        isDragging = false
+      }
     })
 
     // DOM 守护

@@ -220,23 +220,6 @@ document.getElementById('jsInjectorCloseBtn').addEventListener('click', () => {
   document.getElementById('jsInjectorPanel').classList.remove('show')
 })
 
-// ============ 待办追踪面板 ============
-
-// 关闭待办面板
-document.getElementById('todoCloseBtn').addEventListener('click', () => {
-  hideTodoPanel()
-})
-
-// 复制待办
-document.getElementById('todoCopyBtn').addEventListener('click', () => {
-  copyTodoAll()
-})
-
-// 清空待办
-document.getElementById('todoClearBtn').addEventListener('click', () => {
-  clearTodoPanel()
-})
-
 // 快捷键 Ctrl+Enter 执行注入
 document.getElementById('jsCodeInput').addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
@@ -288,180 +271,6 @@ let _debugLogReady = false     // 外部窗口就绪标志
 let _debugLogQueue = []        // 就绪前的消息队列
 let _debugLogFlushTimer = null // 定时刷新队列
 
-// ===== Todo Tracker 内嵌面板 =====
-let _todoPanelVisible = false
-let _todoLastData = null
-let _todoSwitchLogs = []
-const STAGE_NAMES = { 1: 'Stage 1 DOM工具', 2: 'Stage 2 远程脚本', 3: 'Stage 3 数据汇总' }
-const STAGE_CLASS = { 1: 'stage1', 2: 'stage2', 3: 'stage3' }
-
-function getStatusIcon(status) {
-  if (status === 'done') return '✅'
-  if (status === 'failed') return '❌'
-  if (status === 'running') return '⏳'
-  return '⬜'
-}
-
-function renderTodoPanel(data) {
-  if (!data || !data.stages || data.stages.length === 0) return
-  
-  _todoLastData = data
-  const overview = document.getElementById('todoOverview')
-  const todoBody = document.getElementById('todoBody')
-  
-  overview.style.display = 'flex'
-  todoBody.innerHTML = ''
-  
-  // Update overview
-  const progress = data.progress || {}
-  const currentStage = data.currentStage || 1
-  const stageName = STAGE_NAMES[currentStage] || `Stage ${currentStage}`
-  document.getElementById('todoStage').textContent = stageName
-  document.getElementById('todoStage').className = 'val ' + (STAGE_CLASS[currentStage] || '')
-  const pct = progress.percentage || 0
-  document.getElementById('todoProgressFill').style.width = pct + '%'
-  document.getElementById('todoProgress').textContent = pct + '%'
-  document.getElementById('todoDone').textContent = progress.completed || 0
-  document.getElementById('todoTotal').textContent = progress.total || 0
-  if (data.lastTool) {
-    const statusEmoji = data.lastProgress ? '✅' : '❌'
-    document.getElementById('todoLastTool').textContent = statusEmoji + ' ' + data.lastTool
-  }
-  
-  // Find current todo id to mark as running
-  const currentTodoId = progress.currentTodo?.id || null
-  const currentAction = progress.currentTodo?.action || null
-  const isExecutingCurrentTodo = data.lastTool && currentAction && (
-    data.lastTool === currentAction ||
-    (currentAction.startsWith('inject_script_') && data.lastTool.startsWith('inject_script_'))
-  )
-  
-  // Render stages
-  for (const stage of data.stages) {
-    const stageNum = stage.stage
-    const isActive = stageNum === currentStage
-    const isDone = stageNum < currentStage || (stageNum === currentStage && !currentTodoId && progress.completed > 0)
-    
-    const group = document.createElement('div')
-    group.className = 'todo-stage-group'
-    
-    const header = document.createElement('div')
-    header.className = 'todo-stage-header' + (isActive ? ' active' : '') + (isDone ? ' done' : '')
-    const headerText = STAGE_NAMES[stageNum] || `Stage ${stageNum}`
-    const subTodos = stage.subTodos || []
-    const completedCount = subTodos.filter(t => t._status === 'done').length
-    header.innerHTML = `<span>${headerText}</span><span class="badge">${completedCount}/${subTodos.length}</span>`
-    group.appendChild(header)
-    
-    const list = document.createElement('ul')
-    list.className = 'todo-list'
-    
-    for (const todo of subTodos) {
-      const li = document.createElement('li')
-      let status = todo._status || 'pending'
-      if (todo.id === currentTodoId && !todo._status && isExecutingCurrentTodo) status = 'running'
-      li.className = 'todo-item ' + status
-      
-      const icon = document.createElement('span')
-      icon.className = 'todo-icon'
-      icon.textContent = getStatusIcon(status)
-      li.appendChild(icon)
-      
-      const content = document.createElement('div')
-      content.className = 'todo-content'
-      content.innerHTML =
-        `<span class="todo-id">${todo.id}</span>` +
-        `<span class="todo-action">${todo.action}</span>` +
-        `<span class="todo-desc">${todo.description || ''}</span>`
-      
-      const keysDiv = document.createElement('div')
-      keysDiv.className = 'todo-keys'
-      if (todo.dataOutputKey) {
-        keysDiv.innerHTML += `<span class="key">out: ${todo.dataOutputKey}</span>`
-      }
-      if (Array.isArray(todo.dataDependKeys) && todo.dataDependKeys.length > 0) {
-        keysDiv.innerHTML += `<span class="key">dep: ${todo.dataDependKeys.join(', ')}</span>`
-      }
-      if (keysDiv.innerHTML) content.appendChild(keysDiv)
-      
-      li.appendChild(content)
-      list.appendChild(li)
-    }
-    
-    group.appendChild(list)
-    todoBody.appendChild(group)
-  }
-  
-  // Append stage switch logs
-  for (const log of _todoSwitchLogs) {
-    const div = document.createElement('div')
-    div.className = 'todo-stage-switch-log'
-    div.textContent = `🔄 ${log}`
-    todoBody.appendChild(div)
-  }
-}
-
-function showTodoPanel() {
-  const panel = document.getElementById('todoTrackerPanel')
-  panel.classList.add('show')
-  _todoPanelVisible = true
-}
-
-function hideTodoPanel() {
-  const panel = document.getElementById('todoTrackerPanel')
-  panel.classList.remove('show')
-  _todoPanelVisible = false
-}
-
-function toggleTodoPanel() {
-  if (_todoPanelVisible) {
-    hideTodoPanel()
-  } else {
-    showTodoPanel()
-  }
-}
-
-function copyTodoAll() {
-  if (!_todoLastData || !_todoLastData.stages) {
-    showTodoToast('没有待办列表')
-    return
-  }
-  let text = ''
-  for (const stage of _todoLastData.stages) {
-    text += `[${STAGE_NAMES[stage.stage] || 'Stage ' + stage.stage}] ${stage.name || ''}\n`
-    for (const todo of stage.subTodos || []) {
-      const status = todo._status || (todo.id === _todoLastData.progress?.currentTodo?.id ? 'running' : 'pending')
-      text += `  ${getStatusIcon(status)} [${todo.id}] ${todo.action}: ${todo.description || ''}\n`
-      if (todo.dataOutputKey) text += `       out: ${todo.dataOutputKey}\n`
-      if (todo.dataDependKeys?.length) text += `       dep: ${todo.dataDependKeys.join(', ')}\n`
-    }
-    text += '\n'
-  }
-  navigator.clipboard.writeText(text)
-    .then(() => showTodoToast('已复制到剪贴板'))
-    .catch(() => showTodoToast('复制失败'))
-}
-
-function clearTodoPanel() {
-  _todoLastData = null
-  _todoSwitchLogs = []
-  document.getElementById('todoOverview').style.display = 'none'
-  document.getElementById('todoBody').innerHTML = '<div class="todo-empty-state">已清空，等待新任务…</div>'
-  showTodoToast('已清空')
-}
-
-function showTodoToast(msg) {
-  let toast = document.querySelector('.todo-toast')
-  if (!toast) {
-    toast = document.createElement('div')
-    toast.className = 'todo-toast'
-    document.getElementById('todoTrackerPanel').appendChild(toast)
-  }
-  toast.textContent = msg
-  toast.classList.add('show')
-  setTimeout(() => toast.classList.remove('show'), 2000)
-}
-
 function appendDebugLog(label, detail, level) {
   // 转发到外部 Log 窗口
   if (_debugLogWindow && !_debugLogWindow.closed) {
@@ -504,15 +313,19 @@ function openDebugLogWindow() {
   )
 }
 
-// 转发 agentTodoUpdate 消息到内嵌面板
-function forwardTodoUpdate(data) {
-  if (data?.stageSwitch) {
-    _todoSwitchLogs.push(`${data.stageSwitch.reason} → ${STAGE_NAMES[data.stageSwitch.to] || 'Stage ' + data.stageSwitch.to}`)
-  }
-  renderTodoPanel(data)
-  // 自动显示面板
-  if (!_todoPanelVisible) {
-    showTodoPanel()
+// 转发 agentTodoUpdate 消息到 content script（注入到页面的待办面板）
+async function forwardTodoUpdate(data) {
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
+    if (tab?.id) {
+      chrome.runtime.sendMessage({
+        type: 'todoUpdate',
+        tabId: tab.id,
+        data: data
+      }).catch(() => {})
+    }
+  } catch (e) {
+    console.warn('[Sidepanel] forwardTodoUpdate failed:', e)
   }
 }
 
