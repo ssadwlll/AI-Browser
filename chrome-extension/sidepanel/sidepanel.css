@@ -73,7 +73,7 @@ body{font-family:var(--font-sans);background:var(--bg-white);color:var(--text-pr
 @keyframes fadeIn{0%{opacity:0;transform:translateY(10px)}100%{opacity:1;transform:translateY(0)}}
 
 /* ============ 左侧浮动工具按钮组 ============ */
-.floating-tools{display:none;position:absolute;left:0;top:50%;transform:translateY(-50%);flex-direction:column;gap:8px;z-index:40}
+.floating-tools{display:flex;position:absolute;left:0;top:50%;transform:translateY(-50%);flex-direction:column;gap:8px;z-index:40}
 .floating-tool-btn{width:36px;height:36px;border-radius:18px 0 0 18px;border:1px solid var(--border-light);border-right:none;background:var(--bg-white);cursor:pointer;display:flex;align-items:center;justify-content:center;color:var(--text-quaternary);transition:all .2s ease-in-out;box-shadow:var(--box-shadow-s1)}
 .floating-tool-btn:hover{background:var(--brand-light);color:var(--brand);border-color:var(--brand-light2);box-shadow:var(--box-shadow-s2)}
 .floating-tool-btn:active{transform:scale(.95)}

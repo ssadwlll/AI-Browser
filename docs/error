@@ -1,0 +1,900 @@
+[🐛 调试模式已开启]
+每步的信息（提示词、工具调用、规则触发）将在外部 Log 窗口中显示
+
+[⚙️ Agent配置]
+{
+  "maxRounds": 40,
+  "MAX_CONSECUTIVE_FAILS": 5,
+  "MAX_LOW_VALUE": 3,
+  "MAX_IDLE_TEXT": 2,
+  "EXPLORATION_LIMIT": 5,
+  "enableJudge": true,
+  "enablePlanning": true,
+  "debug": true
+}
+
+[📋 系统提示词（前500字）]
+你是AI Browser脚本调度器。分析用户需求，匹配工具库中的脚本执行；脚本无法覆盖的简单交互可使用DOM工具辅助。
+
+注意：工具分阶段暴露。第1-2轮只有核心+探查工具（search_tools、read、find_text、get_element_info、get_interactive_elements、click、fill_input、wait、scroll、create_plan、navigate_to、go_back/forward、finish_task），第3轮起释放全部工具（hover、select_dropdown、press_key、screenshot、inject_script_*）。前2轮专注了解页面、定位数据、搜索脚本、制定计划。
+
+=== 任务规划（重要！复杂任务必须先规划再执行） ===
+- 对于需要3步以上操作的任务，第1轮就用 create_plan 制定计划
+- plan_items 是步骤列表，current_step 指示当前进度（从0开始）
+- 每完成一个计划步骤，再次调用 create_plan 更新 current_step
+- 如果
+
+[🔧 第1轮 工具(14个)]
+  search_tools
+  read_page_content
+  click_element
+  fill_input
+  wait_for_element
+  get_interactive_elements
+  find_text_on_page
+  get_element_info
+  extract_content
+  navigate_to
+  go_back
+  go_forward
+  create_plan
+  finish_task
+
+[📤 第1轮 发送LLM]
+{
+  "model": "qwen3-vl-plus",
+  "msgs": 3,
+  "lastRole": "user",
+  "tools": 14,
+  "msgSummary": [
+    {
+      "idx": 0,
+      "role": "system",
+      "preview": "你是AI Browser脚本调度器。分析用户需求，匹配工具库中的脚本执行；脚本无法覆盖的简单交互可使用DOM工具辅助。\n\n注意：工具分阶段暴露。第1-2轮只有核心+探查工具（search_tools、read、find_text、get_element_info、get_interactive_elements、click、fill_input、wait、scroll、create_plan、navigate_to、go_back/forward、finish_task），第3轮起释放全部工具（hover、select_dropdown、press_key、screenshot、inject_script_*）。前2轮专注了解页面、定位数据、搜索脚本、制定计划。\n\n=== 任务规划（重要！复杂任务必须先规划再执行） ===\n- 对于需要3步以上操作的任务，第1轮就用 create_plan 制定计划\n- plan_items 是步骤列表，current_step 指示当前进度（从0开始）\n- 每完成一个计划步骤，再次调用 create_plan 更新 current_step\n- 如果",
+      "len": 3138
+    },
+    {
+      "idx": 1,
+      "role": "user",
+      "preview": "采集这页新闻，内页也要采集，整理给我\n",
+      "len": 19
+    },
+    {
+      "idx": 2,
+      "role": "user",
+      "preview": "采集这页新闻，内页也要采集，整理给我\n",
+      "len": 19
+    }
+  ]
+}
+
+[📥 第1轮 LLM响应: tool_calls]
+read_page_content("{}")
+
+[⚙️ 工具结果: read_page_content]
+{"ok":true,"title":"经济 - 新闻中心 - 温州新闻网","url":"https://news.66wz.com/wenzhou/jingji/","content":"时政 | \n 温州 | \n 财经 | \n 文化 | \n 原创 | \n 视频 | \n 汽车 | \n 房产 | \n 教育 | \n 智慧 | \n 健康 \n \n \n 爆料 读报 \n \n 温州新闻网 新闻中心 \n 温州 \n \n 要闻 \n 经济 \n 社会 \n 科教文体 \n 人事 \n 县市 \n 外媒看温州 \n \n \n \n \n 您当前的位置 ： 温州网 > 新闻中
+
+[🔧 第2轮 工具(19个)]
+  search_tools
+  read_page_content
+  click_element
+  fill_input
+  wait_for_element
+  get_interactive_elements
+  find_text_on_page
+  get_element_info
+  extract_content
+  scroll_page
+  hover_element
+  select_dropdown
+  press_key
+  screenshot_visible
+  navigate_to
+  go_back
+  go_forward
+  create_plan
+  finish_task
+
+[📤 第2轮 发送LLM]
+{
+  "model": "qwen3-vl-plus",
+  "msgs": 5,
+  "lastRole": "tool",
+  "tools": 19,
+  "msgSummary": [
+    {
+      "idx": 0,
+      "role": "system",
+      "preview": "你是AI Browser脚本调度器。分析用户需求，匹配工具库中的脚本执行；脚本无法覆盖的简单交互可使用DOM工具辅助。\n\n注意：工具分阶段暴露。第1-2轮只有核心+探查工具（search_tools、read、find_text、get_element_info、get_interactive_elements、click、fill_input、wait、scroll、create_plan、navigate_to、go_back/forward、finish_task），第3轮起释放全部工具（hover、select_dropdown、press_key、screenshot、inject_script_*）。前2轮专注了解页面、定位数据、搜索脚本、制定计划。\n\n=== 任务规划（重要！复杂任务必须先规划再执行） ===\n- 对于需要3步以上操作的任务，第1轮就用 create_plan 制定计划\n- plan_items 是步骤列表，current_step 指示当前进度（从0开始）\n- 每完成一个计划步骤，再次调用 create_plan 更新 current_step\n- 如果",
+      "len": 3138
+    },
+    {
+      "idx": 1,
+      "role": "user",
+      "preview": "采集这页新闻，内页也要采集，整理给我\n",
+      "len": 19
+    },
+    {
+      "idx": 2,
+      "role": "user",
+      "preview": "采集这页新闻，内页也要采集，整理给我\n",
+      "len": 19
+    },
+    {
+      "idx": 3,
+      "role": "assistant",
+      "preview": "null",
+      "len": 4
+    },
+    {
+      "idx": 4,
+      "role": "tool",
+      "preview": "{\"ok\":true,\"title\":\"经济 - 新闻中心 - 温州新闻网\",\"url\":\"https://news.66wz.com/wenzhou/jingji/\",\"content\":\"时政 | \\n 温州 | \\n 财经 | \\n 文化 | \\n 原创 | \\n 视频 | \\n 汽车 | \\n 房产 | \\n 教育 | \\n 智慧 | \\n 健康 \\n \\n \\n 爆料 读报 \\n \\n 温州新闻网 新闻中心 \\n 温州 \\n \\n 要闻 \\n 经济 \\n 社会 \\n 科教文体 \\n 人事 \\n 县市 \\n 外媒看温州 \\n \\n \\n \\n \\n 您当前的位置 ： 温州网 > 新闻中心 > 温州 > 经济 \\n 文成杨梅：守好生态底色 结出共富佳果 \\n 经济 06-29 \\n 《2024年中国电器行业系列白皮书》发布 温州电气挑起“大梁” \\n 经济 06-29 \\n 中国品牌价值评价榜单出炉 雁荡山铁皮石斛泰顺三杯香入选 \\n 经济 06-29 \\n 深耕生态有机农业 乐清高山荒梯田变身村民“致富田” \\n 经济 06-29 \\n 从“一张皮”起步，平阳“毛孩子”的生意一",
+      "len": 1561,
+      "tc_id": "call_293d574c87e84ec88b5ab0e0"
+    }
+  ]
+}
+
+[📥 第2轮 LLM响应: tool_calls]
+get_interactive_elements("{\"selectorHint\": \"a\"}")
+
+[⚙️ 工具结果: get_interactive_elements]
+{"ok":true,"result":{"elements":[{"href":"https://news.66wz.com","index":0,"selector":"a","tag":"a","text":"时政","type":""},{"href":"https://news.66wz.com/wenzhou/","index":1,"selector":"a","tag":"a","text":"温州","type":""},{"href":"https://finance.66wz.com","index":2,"selector":"a","tag":"a","text":"
+
+[🔧 第3轮 工具(19个)]
+  search_tools
+  read_page_content
+  click_element
+  fill_input
+  wait_for_element
+  get_interactive_elements
+  find_text_on_page
+  get_element_info
+  extract_content
+  scroll_page
+  hover_element
+  select_dropdown
+  press_key
+  screenshot_visible
+  navigate_to
+  go_back
+  go_forward
+  create_plan
+  finish_task
+
+[📤 第3轮 发送LLM]
+{
+  "model": "qwen3-vl-plus",
+  "msgs": 7,
+  "lastRole": "tool",
+  "tools": 19,
+  "msgSummary": [
+    {
+      "idx": 0,
+      "role": "system",
+      "preview": "你是AI Browser脚本调度器。分析用户需求，匹配工具库中的脚本执行；脚本无法覆盖的简单交互可使用DOM工具辅助。\n\n注意：工具分阶段暴露。第1-2轮只有核心+探查工具（search_tools、read、find_text、get_element_info、get_interactive_elements、click、fill_input、wait、scroll、create_plan、navigate_to、go_back/forward、finish_task），第3轮起释放全部工具（hover、select_dropdown、press_key、screenshot、inject_script_*）。前2轮专注了解页面、定位数据、搜索脚本、制定计划。\n\n=== 任务规划（重要！复杂任务必须先规划再执行） ===\n- 对于需要3步以上操作的任务，第1轮就用 create_plan 制定计划\n- plan_items 是步骤列表，current_step 指示当前进度（从0开始）\n- 每完成一个计划步骤，再次调用 create_plan 更新 current_step\n- 如果",
+      "len": 3138
+    },
+    {
+      "idx": 1,
+      "role": "user",
+      "preview": "采集这页新闻，内页也要采集，整理给我\n",
+      "len": 19
+    },
+    {
+      "idx": 2,
+      "role": "user",
+      "preview": "采集这页新闻，内页也要采集，整理给我\n",
+      "len": 19
+    },
+    {
+      "idx": 3,
+      "role": "assistant",
+      "preview": "null",
+      "len": 4
+    },
+    {
+      "idx": 4,
+      "role": "tool",
+      "preview": "{\"ok\":true,\"title\":\"经济 - 新闻中心 - 温州新闻网\",\"url\":\"https://news.66wz.com/wenzhou/jingji/\",\"content\":\"时政 | \\n 温州 | \\n 财经 | \\n 文化 | \\n 原创 | \\n 视频 | \\n 汽车 | \\n 房产 | \\n 教育 | \\n 智慧 | \\n 健康 \\n \\n \\n 爆料 读报 \\n \\n 温州新闻网 新闻中心 \\n 温州 \\n \\n 要闻 \\n 经济 \\n 社会 \\n 科教文体 \\n 人事 \\n 县市 \\n 外媒看温州 \\n \\n \\n \\n \\n 您当前的位置 ： 温州网 > 新闻中心 > 温州 > 经济 \\n 文成杨梅：守好生态底色 结出共富佳果 \\n 经济 06-29 \\n 《2024年中国电器行业系列白皮书》发布 温州电气挑起“大梁” \\n 经济 06-29 \\n 中国品牌价值评价榜单出炉 雁荡山铁皮石斛泰顺三杯香入选 \\n 经济 06-29 \\n 深耕生态有机农业 乐清高山荒梯田变身村民“致富田” \\n 经济 06-29 \\n 从“一张皮”起步，平阳“毛孩子”的生意一",
+      "len": 1561,
+      "tc_id": "call_293d574c87e84ec88b5ab0e0"
+    },
+    {
+      "idx": 5,
+      "role": "assistant",
+      "preview": "null",
+      "len": 4
+    },
+    {
+      "idx": 6,
+      "role": "tool",
+      "preview": "{\"ok\":true,\"result\":{\"elements\":[{\"href\":\"https://news.66wz.com\",\"index\":0,\"selector\":\"a\",\"tag\":\"a\",\"text\":\"时政\",\"type\
+
+[📥 第3轮 LLM响应: tool_calls]
+extract_content("{\"attributes\": \"href\", \"selector\": \"div.list-item h3 a, .news-list a.title\", \"multiple\": )
+
+[⚙️ 工具结果: extract_content]
+{"ok":true,"result":[]}
+
+[🔧 第4轮 工具(19个)]
+  search_tools
+  read_page_content
+  click_element
+  fill_input
+  wait_for_element
+  get_interactive_elements
+  find_text_on_page
+  get_element_info
+  extract_content
+  scroll_page
+  hover_element
+  select_dropdown
+  press_key
+  screenshot_visible
+  navigate_to
+  go_back
+  go_forward
+  create_plan
+  finish_task
+
+[📤 第4轮 发送LLM]
+{
+  "model": "qwen3-vl-plus",
+  "msgs": 9,
+  "lastRole": "tool",
+  "tools": 19,
+  "msgSummary": [
+    {
+      "idx": 0,
+      "role": "system",
+      "preview": "你是AI Browser脚本调度器。分析用户需求，匹配工具库中的脚本执行；脚本无法覆盖的简单交互可使用DOM工具辅助。\n\n注意：工具分阶段暴露。第1-2轮只有核心+探查工具（search_tools、read、find_text、get_element_info、get_interactive_elements、click、fill_input、wait、scroll、create_plan、navigate_to、go_back/forward、finish_task），第3轮起释放全部工具（hover、select_dropdown、press_key、screenshot、inject_script_*）。前2轮专注了解页面、定位数据、搜索脚本、制定计划。\n\n=== 任务规划（重要！复杂任务必须先规划再执行） ===\n- 对于需要3步以上操作的任务，第1轮就用 create_plan 制定计划\n- plan_items 是步骤列表，current_step 指示当前进度（从0开始）\n- 每完成一个计划步骤，再次调用 create_plan 更新 current_step\n- 如果",
+      "len": 3138
+    },
+    {
+      "idx": 1,
+      "role": "user",
+      "preview": "采集这页新闻，内页也要采集，整理给我\n",
+      "len": 19
+    },
+    {
+      "idx": 2,
+      "role": "user",
+      "preview": "采集这页新闻，内页也要采集，整理给我\n",
+      "len": 19
+    },
+    {
+      "idx": 3,
+      "role": "assistant",
+      "preview": "null",
+      "len": 4
+    },
+    {
+      "idx": 4,
+      "role": "tool",
+      "preview": "{\"ok\":true,\"title\":\"经济 - 新闻中心 - 温州新闻网\",\"url\":\"https://news.66wz.com/wenzhou/jingji/\",\"content\":\"时政 | \\n 温州 | \\n 财经 | \\n 文化 | \\n 原创 | \\n 视频 | \\n 汽车 | \\n 房产 | \\n 教育 | \\n 智慧 | \\n 健康 \\n \\n \\n 爆料 读报 \\n \\n 温州新闻网 新闻中心 \\n 温州 \\n \\n 要闻 \\n 经济 \\n 社会 \\n 科教文体 \\n 人事 \\n 县市 \\n 外媒看温州 \\n \\n \\n \\n \\n 您当前的位置 ： 温州网 > 新闻中心 > 温州 > 经济 \\n 文成杨梅：守好生态底色 结出共富佳果 \\n 经济 06-29 \\n 《2024年中国电器行业系列白皮书》发布 温州电气挑起“大梁” \\n 经济 06-29 \\n 中国品牌价值评价榜单出炉 雁荡山铁皮石斛泰顺三杯香入选 \\n 经济 06-29 \\n 深耕生态有机农业 乐清高山荒梯田变身村民“致富田” \\n 经济 06-29 \\n 从“一张皮”起步，平阳“毛孩子”的生意一",
+      "len": 1561,
+      "tc_id": "call_293d574c87e84ec88b5ab0e0"
+    },
+    {
+      "idx": 5,
+      "role": "assistant",
+      "preview": "null",
+      "len": 4
+    },
+    {
+      "idx": 6,
+      "role": "tool",
+      "preview": "{\"ok\":true,\"result\":{\"elements\":[{\"href\":\"https://news.66wz.com\",\"index\":0,\"selector\":\"a\",\"tag\":\"a\",\"text\":\"时政\",\"type\
+
+[📥 第4轮 LLM响应: tool_calls]
+extract_content("{\"attributes\": \"href\", \"selector\": \"a[href*=\\\"/jingji/2024\\\"]\", \"multiple\": true}")
+
+[⚙️ 工具结果: extract_content]
+{"ok":true,"result":[]}
+
+[🔧 第5轮 工具(19个)]
+  search_tools
+  read_page_content
+  click_element
+  fill_input
+  wait_for_element
+  get_interactive_elements
+  find_text_on_page
+  get_element_info
+  extract_content
+  scroll_page
+  hover_element
+  select_dropdown
+  press_key
+  screenshot_visible
+  navigate_to
+  go_back
+  go_forward
+  create_plan
+  finish_task
+
+[📤 第5轮 发送LLM]
+{
+  "model": "qwen3-vl-plus",
+  "msgs": 11,
+  "lastRole": "tool",
+  "tools": 19,
+  "msgSummary": [
+    {
+      "idx": 0,
+      "role": "system",
+      "preview": "你是AI Browser脚本调度器。分析用户需求，匹配工具库中的脚本执行；脚本无法覆盖的简单交互可使用DOM工具辅助。\n\n注意：工具分阶段暴露。第1-2轮只有核心+探查工具（search_tools、read、find_text、get_element_info、get_interactive_elements、click、fill_input、wait、scroll、create_plan、navigate_to、go_back/forward、finish_task），第3轮起释放全部工具（hover、select_dropdown、press_key、screenshot、inject_script_*）。前2轮专注了解页面、定位数据、搜索脚本、制定计划。\n\n=== 任务规划（重要！复杂任务必须先规划再执行） ===\n- 对于需要3步以上操作的任务，第1轮就用 create_plan 制定计划\n- plan_items 是步骤列表，current_step 指示当前进度（从0开始）\n- 每完成一个计划步骤，再次调用 create_plan 更新 current_step\n- 如果",
+      "len": 3138
+    },
+    {
+      "idx": 1,
+      "role": "user",
+      "preview": "采集这页新闻，内页也要采集，整理给我\n",
+      "len": 19
+    },
+    {
+      "idx": 2,
+      "role": "user",
+      "preview": "采集这页新闻，内页也要采集，整理给我\n",
+      "len": 19
+    },
+    {
+      "idx": 3,
+      "role": "assistant",
+      "preview": "null",
+      "len": 4
+    },
+    {
+      "idx": 4,
+      "role": "tool",
+      "preview": "{\"ok\":true,\"title\":\"经济 - 新闻中心 - 温州新闻网\",\"url\":\"https://news.66wz.com/wenzhou/jingji/\",\"content\":\"时政 | \\n 温州 | \\n 财经 | \\n 文化 | \\n 原创 | \\n 视频 | \\n 汽车 | \\n 房产 | \\n 教育 | \\n 智慧 | \\n 健康 \\n \\n \\n 爆料 读报 \\n \\n 温州新闻网 新闻中心 \\n 温州 \\n \\n 要闻 \\n 经济 \\n 社会 \\n 科教文体 \\n 人事 \\n 县市 \\n 外媒看温州 \\n \\n \\n \\n \\n 您当前的位置 ： 温州网 > 新闻中心 > 温州 > 经济 \\n 文成杨梅：守好生态底色 结出共富佳果 \\n 经济 06-29 \\n 《2024年中国电器行业系列白皮书》发布 温州电气挑起“大梁” \\n 经济 06-29 \\n 中国品牌价值评价榜单出炉 雁荡山铁皮石斛泰顺三杯香入选 \\n 经济 06-29 \\n 深耕生态有机农业 乐清高山荒梯田变身村民“致富田” \\n 经济 06-29 \\n 从“一张皮”起步，平阳“毛孩子”的生意一",
+      "len": 1561,
+      "tc_id": "call_293d574c87e84ec88b5ab0e0"
+    },
+    {
+      "idx": 5,
+      "role": "assistant",
+      "preview": "null",
+      "len": 4
+    },
+    {
+      "idx": 6,
+      "role": "tool",
+      "preview": "{\"ok\":true,\"result\":{\"elements\":[{\"href\":\"https://news.66wz.com\",\"index\":0,\"selector\":\"a\",\"tag\":\"a\",\"text\":\"时政\",\"type
+
+[📥 第5轮 LLM响应: tool_calls]
+find_text_on_page("{\"query\": \"文成杨梅\"}")
+
+[⚙️ 工具结果: find_text_on_page]
+{"ok":true,"result":{"found":true,"hint":null,"matchCount":1,"previews":["...当前的位置 ： 温州网 > 新闻中心 > 温州 > 经济  文成杨梅：守好生态底色 结出共富佳果  经济 06-29  《202..."],"query":"文成杨梅"}}
+
+[🔧 第6轮 工具(19个)]
+  search_tools
+  read_page_content
+  click_element
+  fill_input
+  wait_for_element
+  get_interactive_elements
+  find_text_on_page
+  get_element_info
+  extract_content
+  scroll_page
+  hover_element
+  select_dropdown
+  press_key
+  screenshot_visible
+  navigate_to
+  go_back
+  go_forward
+  create_plan
+  finish_task
+
+[📤 第6轮 发送LLM]
+{
+  "model": "qwen3-vl-plus",
+  "msgs": 13,
+  "lastRole": "tool",
+  "tools": 19,
+  "msgSummary": [
+    {
+      "idx": 0,
+      "role": "system",
+      "preview": "你是AI Browser脚本调度器。分析用户需求，匹配工具库中的脚本执行；脚本无法覆盖的简单交互可使用DOM工具辅助。\n\n注意：工具分阶段暴露。第1-2轮只有核心+探查工具（search_tools、read、find_text、get_element_info、get_interactive_elements、click、fill_input、wait、scroll、create_plan、navigate_to、go_back/forward、finish_task），第3轮起释放全部工具（hover、select_dropdown、press_key、screenshot、inject_script_*）。前2轮专注了解页面、定位数据、搜索脚本、制定计划。\n\n=== 任务规划（重要！复杂任务必须先规划再执行） ===\n- 对于需要3步以上操作的任务，第1轮就用 create_plan 制定计划\n- plan_items 是步骤列表，current_step 指示当前进度（从0开始）\n- 每完成一个计划步骤，再次调用 create_plan 更新 current_step\n- 如果",
+      "len": 3138
+    },
+    {
+      "idx": 1,
+      "role": "user",
+      "preview": "采集这页新闻，内页也要采集，整理给我\n",
+      "len": 19
+    },
+    {
+      "idx": 2,
+      "role": "user",
+      "preview": "采集这页新闻，内页也要采集，整理给我\n",
+      "len": 19
+    },
+    {
+      "idx": 3,
+      "role": "assistant",
+      "preview": "null",
+      "len": 4
+    },
+    {
+      "idx": 4,
+      "role": "tool",
+      "preview": "{\"ok\":true,\"title\":\"经济 - 新闻中心 - 温州新闻网\",\"url\":\"https://news.66wz.com/wenzhou/jingji/\",\"content\":\"时政 | \\n 温州 | \\n 财经 | \\n 文化 | \\n 原创 | \\n 视频 | \\n 汽车 | \\n 房产 | \\n 教育 | \\n 智慧 | \\n 健康 \\n \\n \\n 爆料 读报 \\n \\n 温州新闻网 新闻中心 \\n 温州 \\n \\n 要闻 \\n 经济 \\n 社会 \\n 科教文体 \\n 人事 \\n 县市 \\n 外媒看温州 \\n \\n \\n \\n \\n 您当前的位置 ： 温州网 > 新闻中心 > 温州 > 经济 \\n 文成杨梅：守好生态底色 结出共富佳果 \\n 经济 06-29 \\n 《2024年中国电器行业系列白皮书》发布 温州电气挑起“大梁” \\n 经济 06-29 \\n 中国品牌价值评价榜单出炉 雁荡山铁皮石斛泰顺三杯香入选 \\n 经济 06-29 \\n 深耕生态有机农业 乐清高山荒梯田变身村民“致富田” \\n 经济 06-29 \\n 从“一张皮”起步，平阳“毛孩子”的生意一",
+      "len": 1561,
+      "tc_id": "call_293d574c87e84ec88b5ab0e0"
+    },
+    {
+      "idx": 5,
+      "role": "assistant",
+      "preview": "null",
+      "len": 4
+    },
+    {
+      "idx": 6,
+      "role": "tool",
+      "preview": "{\"ok\":true,\"result\":{\"elements\":[{\"href\":\"https://news.66wz.com\",\"index\":0,\"selector\":\"a\",\"tag\":\"a\",\"text\":\"时政\",\"type
+
+[📥 第6轮 LLM响应: tool_calls]
+extract_content("{\"attributes\": \"href\", \"selector\": \"a:contains(\\\"文成杨梅\\\"), a:contains(\\\"《2024年中国电器行业系列白)
+
+[⚙️ 工具结果: extract_content]
+{"ok":true,"result":null}
+
+[🔧 第7轮 工具(19个)]
+  search_tools
+  read_page_content
+  click_element
+  fill_input
+  wait_for_element
+  get_interactive_elements
+  find_text_on_page
+  get_element_info
+  extract_content
+  scroll_page
+  hover_element
+  select_dropdown
+  press_key
+  screenshot_visible
+  navigate_to
+  go_back
+  go_forward
+  create_plan
+  finish_task
+
+[📤 第7轮 发送LLM]
+{
+  "model": "qwen3-vl-plus",
+  "msgs": 16,
+  "lastRole": "system",
+  "tools": 19,
+  "msgSummary": [
+    {
+      "idx": 0,
+      "role": "system",
+      "preview": "你是AI Browser脚本调度器。分析用户需求，匹配工具库中的脚本执行；脚本无法覆盖的简单交互可使用DOM工具辅助。\n\n注意：工具分阶段暴露。第1-2轮只有核心+探查工具（search_tools、read、find_text、get_element_info、get_interactive_elements、click、fill_input、wait、scroll、create_plan、navigate_to、go_back/forward、finish_task），第3轮起释放全部工具（hover、select_dropdown、press_key、screenshot、inject_script_*）。前2轮专注了解页面、定位数据、搜索脚本、制定计划。\n\n=== 任务规划（重要！复杂任务必须先规划再执行） ===\n- 对于需要3步以上操作的任务，第1轮就用 create_plan 制定计划\n- plan_items 是步骤列表，current_step 指示当前进度（从0开始）\n- 每完成一个计划步骤，再次调用 create_plan 更新 current_step\n- 如果",
+      "len": 3138
+    },
+    {
+      "idx": 1,
+      "role": "user",
+      "preview": "采集这页新闻，内页也要采集，整理给我\n",
+      "len": 19
+    },
+    {
+      "idx": 2,
+      "role": "user",
+      "preview": "采集这页新闻，内页也要采集，整理给我\n",
+      "len": 19
+    },
+    {
+      "idx": 3,
+      "role": "assistant",
+      "preview": "null",
+      "len": 4
+    },
+    {
+      "idx": 4,
+      "role": "tool",
+      "preview": "{\"ok\":true,\"title\":\"经济 - 新闻中心 - 温州新闻网\",\"url\":\"https://news.66wz.com/wenzhou/jingji/\",\"content\":\"时政 | \\n 温州 | \\n 财经 | \\n 文化 | \\n 原创 | \\n 视频 | \\n 汽车 | \\n 房产 | \\n 教育 | \\n 智慧 | \\n 健康 \\n \\n \\n 爆料 读报 \\n \\n 温州新闻网 新闻中心 \\n 温州 \\n \\n 要闻 \\n 经济 \\n 社会 \\n 科教文体 \\n 人事 \\n 县市 \\n 外媒看温州 \\n \\n \\n \\n \\n 您当前的位置 ： 温州网 > 新闻中心 > 温州 > 经济 \\n 文成杨梅：守好生态底色 结出共富佳果 \\n 经济 06-29 \\n 《2024年中国电器行业系列白皮书》发布 温州电气挑起“大梁” \\n 经济 06-29 \\n 中国品牌价值评价榜单出炉 雁荡山铁皮石斛泰顺三杯香入选 \\n 经济 06-29 \\n 深耕生态有机农业 乐清高山荒梯田变身村民“致富田” \\n 经济 06-29 \\n 从“一张皮”起步，平阳“毛孩子”的生意一",
+      "len": 1561,
+      "tc_id": "call_293d574c87e84ec88b5ab0e0"
+    },
+    {
+      "idx": 5,
+      "role": "assistant",
+      "preview": "null",
+      "len": 4
+    },
+    {
+      "idx": 6,
+      "role": "tool",
+      "preview": "{\"ok\":true,\"result\":{\"elements\":[{\"href\":\"https://news.66wz.com\",\"index\":0,\"selector\":\"a\",\"tag\":\"a\",\"text\":\"时政\",\"ty
+
+[📥 第7轮 LLM响应: tool_calls]
+get_element_info("{\"selector\": \"a[href^=\\\"/jingji/\\\"]\", \"attributes\": \"href\"}")
+
+[⚙️ 工具结果: get_element_info]
+{"ok":true,"result":"共0个匹配，返回前0条:\n"}
+
+[🔧 第8轮 工具(19个)]
+  search_tools
+  read_page_content
+  click_element
+  fill_input
+  wait_for_element
+  get_interactive_elements
+  find_text_on_page
+  get_element_info
+  extract_content
+  scroll_page
+  hover_element
+  select_dropdown
+  press_key
+  screenshot_visible
+  navigate_to
+  go_back
+  go_forward
+  create_plan
+  finish_task
+
+[📤 第8轮 发送LLM]
+{
+  "model": "qwen3-vl-plus",
+  "msgs": 19,
+  "lastRole": "system",
+  "tools": 19,
+  "msgSummary": [
+    {
+      "idx": 0,
+      "role": "system",
+      "preview": "你是AI Browser脚本调度器。分析用户需求，匹配工具库中的脚本执行；脚本无法覆盖的简单交互可使用DOM工具辅助。\n\n注意：工具分阶段暴露。第1-2轮只有核心+探查工具（search_tools、read、find_text、get_element_info、get_interactive_elements、click、fill_input、wait、scroll、create_plan、navigate_to、go_back/forward、finish_task），第3轮起释放全部工具（hover、select_dropdown、press_key、screenshot、inject_script_*）。前2轮专注了解页面、定位数据、搜索脚本、制定计划。\n\n=== 任务规划（重要！复杂任务必须先规划再执行） ===\n- 对于需要3步以上操作的任务，第1轮就用 create_plan 制定计划\n- plan_items 是步骤列表，current_step 指示当前进度（从0开始）\n- 每完成一个计划步骤，再次调用 create_plan 更新 current_step\n- 如果",
+      "len": 3138
+    },
+    {
+      "idx": 1,
+      "role": "user",
+      "preview": "采集这页新闻，内页也要采集，整理给我\n",
+      "len": 19
+    },
+    {
+      "idx": 2,
+      "role": "user",
+      "preview": "采集这页新闻，内页也要采集，整理给我\n",
+      "len": 19
+    },
+    {
+      "idx": 3,
+      "role": "assistant",
+      "preview": "null",
+      "len": 4
+    },
+    {
+      "idx": 4,
+      "role": "tool",
+      "preview": "{\"ok\":true,\"title\":\"经济 - 新闻中心 - 温州新闻网\",\"url\":\"https://news.66wz.com/wenzhou/jingji/\",\"content\":\"时政 | \\n 温州 | \\n 财经 | \\n 文化 | \\n 原创 | \\n 视频 | \\n 汽车 | \\n 房产 | \\n 教育 | \\n 智慧 | \\n 健康 \\n \\n \\n 爆料 读报 \\n \\n 温州新闻网 新闻中心 \\n 温州 \\n \\n 要闻 \\n 经济 \\n 社会 \\n 科教文体 \\n 人事 \\n 县市 \\n 外媒看温州 \\n \\n \\n \\n \\n 您当前的位置 ： 温州网 > 新闻中心 > 温州 > 经济 \\n 文成杨梅：守好生态底色 结出共富佳果 \\n 经济 06-29 \\n 《2024年中国电器行业系列白皮书》发布 温州电气挑起“大梁” \\n 经济 06-29 \\n 中国品牌价值评价榜单出炉 雁荡山铁皮石斛泰顺三杯香入选 \\n 经济 06-29 \\n 深耕生态有机农业 乐清高山荒梯田变身村民“致富田” \\n 经济 06-29 \\n 从“一张皮”起步，平阳“毛孩子”的生意一",
+      "len": 1561,
+      "tc_id": "call_293d574c87e84ec88b5ab0e0"
+    },
+    {
+      "idx": 5,
+      "role": "assistant",
+      "preview": "null",
+      "len": 4
+    },
+    {
+      "idx": 6,
+      "role": "tool",
+      "preview": "{\"ok\":true,\"result\":{\"elements\":[{\"href\":\"https://news.66wz.com\",\"index\":0,\"selector\":\"a\",\"tag\":\"a\",\"text\":\"时政\",\"ty
+
+[📥 第8轮 LLM响应: tool_calls]
+extract_content("{\"attributes\": \"href\", \"selector\": \"div.news-list-item a, .list-item a, a[href*=\\\"/2024\\\)
+
+[⚙️ 工具结果: extract_content]
+{"ok":true,"result":[]}
+
+[🔧 第9轮 工具(19个)]
+  search_tools
+  read_page_content
+  click_element
+  fill_input
+  wait_for_element
+  get_interactive_elements
+  find_text_on_page
+  get_element_info
+  extract_content
+  scroll_page
+  hover_element
+  select_dropdown
+  press_key
+  screenshot_visible
+  navigate_to
+  go_back
+  go_forward
+  create_plan
+  finish_task
+
+[📤 第9轮 发送LLM]
+{
+  "model": "qwen3-vl-plus",
+  "msgs": 22,
+  "lastRole": "system",
+  "tools": 19,
+  "msgSummary": [
+    {
+      "idx": 0,
+      "role": "system",
+      "preview": "你是AI Browser脚本调度器。分析用户需求，匹配工具库中的脚本执行；脚本无法覆盖的简单交互可使用DOM工具辅助。\n\n注意：工具分阶段暴露。第1-2轮只有核心+探查工具（search_tools、read、find_text、get_element_info、get_interactive_elements、click、fill_input、wait、scroll、create_plan、navigate_to、go_back/forward、finish_task），第3轮起释放全部工具（hover、select_dropdown、press_key、screenshot、inject_script_*）。前2轮专注了解页面、定位数据、搜索脚本、制定计划。\n\n=== 任务规划（重要！复杂任务必须先规划再执行） ===\n- 对于需要3步以上操作的任务，第1轮就用 create_plan 制定计划\n- plan_items 是步骤列表，current_step 指示当前进度（从0开始）\n- 每完成一个计划步骤，再次调用 create_plan 更新 current_step\n- 如果",
+      "len": 3138
+    },
+    {
+      "idx": 1,
+      "role": "user",
+      "preview": "采集这页新闻，内页也要采集，整理给我\n",
+      "len": 19
+    },
+    {
+      "idx": 2,
+      "role": "user",
+      "preview": "采集这页新闻，内页也要采集，整理给我\n",
+      "len": 19
+    },
+    {
+      "idx": 3,
+      "role": "assistant",
+      "preview": "null",
+      "len": 4
+    },
+    {
+      "idx": 4,
+      "role": "tool",
+      "preview": "{\"ok\":true,\"title\":\"经济 - 新闻中心 - 温州新闻网\",\"url\":\"https://news.66wz.com/wenzhou/jingji/\",\"content\":\"时政 | \\n 温州 | \\n 财经 | \\n 文化 | \\n 原创 | \\n 视频 | \\n 汽车 | \\n 房产 | \\n 教育 | \\n 智慧 | \\n 健康 \\n \\n \\n 爆料 读报 \\n \\n 温州新闻网 新闻中心 \\n 温州 \\n \\n 要闻 \\n 经济 \\n 社会 \\n 科教文体 \\n 人事 \\n 县市 \\n 外媒看温州 \\n \\n \\n \\n \\n 您当前的位置 ： 温州网 > 新闻中心 > 温州 > 经济 \\n 文成杨梅：守好生态底色 结出共富佳果 \\n 经济 06-29 \\n 《2024年中国电器行业系列白皮书》发布 温州电气挑起“大梁” \\n 经济 06-29 \\n 中国品牌价值评价榜单出炉 雁荡山铁皮石斛泰顺三杯香入选 \\n 经济 06-29 \\n 深耕生态有机农业 乐清高山荒梯田变身村民“致富田” \\n 经济 06-29 \\n 从“一张皮”起步，平阳“毛孩子”的生意一",
+      "len": 1561,
+      "tc_id": "call_293d574c87e84ec88b5ab0e0"
+    },
+    {
+      "idx": 5,
+      "role": "assistant",
+      "preview": "null",
+      "len": 4
+    },
+    {
+      "idx": 6,
+      "role": "tool",
+      "preview": "{\"ok\":true,\"result\":{\"elements\":[{\"href\":\"https://news.66wz.com\",\"index\":0,\"selector\":\"a\",\"tag\":\"a\",\"text\":\"时政\",\"ty
+
+[📥 第9轮 LLM响应: tool_calls]
+extract_content("{\"attributes\": \"href\", \"selector\": \"a[href]\", \"multiple\": true}")
+
+[⚙️ 工具结果: extract_content]
+{"ok":true,"result":[{"attrs":{"href":"https://news.66wz.com"},"text":"时政"},{"attrs":{"href":"https://news.66wz.com/wenzhou/"},"text":"温州"},{"attrs":{"href":"https://finance.66wz.com"},"text":"财经"},{"attrs":{"href":"https://culture.66wz.com/"},"text":"文化"},{"attrs":{"href":"https://news.66wz.com/rep
+
+[🔧 第10轮 工具(19个)]
+  search_tools
+  read_page_content
+  click_element
+  fill_input
+  wait_for_element
+  get_interactive_elements
+  find_text_on_page
+  get_element_info
+  extract_content
+  scroll_page
+  hover_element
+  select_dropdown
+  press_key
+  screenshot_visible
+  navigate_to
+  go_back
+  go_forward
+  create_plan
+  finish_task
+
+[📤 第10轮 发送LLM]
+{
+  "model": "qwen3-vl-plus",
+  "msgs": 25,
+  "lastRole": "system",
+  "tools": 19,
+  "msgSummary": [
+    {
+      "idx": 0,
+      "role": "system",
+      "preview": "你是AI Browser脚本调度器。分析用户需求，匹配工具库中的脚本执行；脚本无法覆盖的简单交互可使用DOM工具辅助。\n\n注意：工具分阶段暴露。第1-2轮只有核心+探查工具（search_tools、read、find_text、get_element_info、get_interactive_elements、click、fill_input、wait、scroll、create_plan、navigate_to、go_back/forward、finish_task），第3轮起释放全部工具（hover、select_dropdown、press_key、screenshot、inject_script_*）。前2轮专注了解页面、定位数据、搜索脚本、制定计划。\n\n=== 任务规划（重要！复杂任务必须先规划再执行） ===\n- 对于需要3步以上操作的任务，第1轮就用 create_plan 制定计划\n- plan_items 是步骤列表，current_step 指示当前进度（从0开始）\n- 每完成一个计划步骤，再次调用 create_plan 更新 current_step\n- 如果",
+      "len": 3138
+    },
+    {
+      "idx": 1,
+      "role": "user",
+      "preview": "采集这页新闻，内页也要采集，整理给我\n",
+      "len": 19
+    },
+    {
+      "idx": 2,
+      "role": "user",
+      "preview": "采集这页新闻，内页也要采集，整理给我\n",
+      "len": 19
+    },
+    {
+      "idx": 3,
+      "role": "assistant",
+      "preview": "null",
+      "len": 4
+    },
+    {
+      "idx": 4,
+      "role": "tool",
+      "preview": "{\"ok\":true,\"title\":\"经济 - 新闻中心 - 温州新闻网\",\"url\":\"https://news.66wz.com/wenzhou/jingji/\",\"content\":\"时政 | \\n 温州 | \\n 财经 | \\n 文化 | \\n 原创 | \\n 视频 | \\n 汽车 | \\n 房产 | \\n 教育 | \\n 智慧 | \\n 健康 \\n \\n \\n 爆料 读报 \\n \\n 温州新闻网 新闻中心 \\n 温州 \\n \\n 要闻 \\n 经济 \\n 社会 \\n 科教文体 \\n 人事 \\n 县市 \\n 外媒看温州 \\n \\n \\n \\n \\n 您当前的位置 ： 温州网 > 新闻中心 > 温州 > 经济 \\n 文成杨梅：守好生态底色 结出共富佳果 \\n 经济 06-29 \\n 《2024年中国电器行业系列白皮书》发布 温州电气挑起“大梁” \\n 经济 06-29 \\n 中国品牌价值评价榜单出炉 雁荡山铁皮石斛泰顺三杯香入选 \\n 经济 06-29 \\n 深耕生态有机农业 乐清高山荒梯田变身村民“致富田” \\n 经济 06-29 \\n 从“一张皮”起步，平阳“毛孩子”的生意一",
+      "len": 1561,
+      "tc_id": "call_293d574c87e84ec88b5ab0e0"
+    },
+    {
+      "idx": 5,
+      "role": "assistant",
+      "preview": "null",
+      "len": 4
+    },
+    {
+      "idx": 6,
+      "role": "tool",
+      "preview": "{\"ok\":true,\"result\":{\"elements\":[{\"href\":\"https://news.66wz.com\",\"index\":0,\"selector\":\"a\",\"tag\":\"a\",\"text\":\"时政\",\"ty
+
+[📥 第10轮 LLM响应: tool_calls]
+search_tools("{\"query\": \"温州新闻\"}")
+
+[⚙️ 工具结果: search_tools]
+[{"id":9,"name":"百度新闻","description":"自动生成的页面采集脚本\r\n目标URL: https://news.baidu.com\r\n生成时间: 2026/6/30 11:45:03","toolType":"js","toolConfig":"已配置"},{"id":6,"name":"获取最新热点新闻聚合","description":"获取最新热点新闻聚合。涵盖今日头条、微博热搜、抖音热点、东方财富、同花顺、新浪新闻、网易新闻共7大平台的热点话题排行。","toolType":"api","toolConfig":"已配置"},{"id":4,"na
+
+[🔧 第11轮 工具(23个)]
+  search_tools
+  read_page_content
+  click_element
+  fill_input
+  wait_for_element
+  get_interactive_elements
+  find_text_on_page
+  get_element_info
+  extract_content
+  scroll_page
+  hover_element
+  select_dropdown
+  press_key
+  screenshot_visible
+  navigate_to
+  go_back
+  go_forward
+  inject_script_6
+  inject_script_4
+  inject_script_2
+  inject_script_10
+  create_plan
+  finish_task
+
+[📤 第11轮 发送LLM]
+{
+  "model": "qwen3-vl-plus",
+  "msgs": 28,
+  "lastRole": "system",
+  "tools": 23,
+  "msgSummary": [
+    {
+      "idx": 0,
+      "role": "system",
+      "preview": "你是AI Browser脚本调度器。分析用户需求，匹配工具库中的脚本执行；脚本无法覆盖的简单交互可使用DOM工具辅助。\n\n注意：工具分阶段暴露。第1-2轮只有核心+探查工具（search_tools、read、find_text、get_element_info、get_interactive_elements、click、fill_input、wait、scroll、create_plan、navigate_to、go_back/forward、finish_task），第3轮起释放全部工具（hover、select_dropdown、press_key、screenshot、inject_script_*）。前2轮专注了解页面、定位数据、搜索脚本、制定计划。\n\n=== 任务规划（重要！复杂任务必须先规划再执行） ===\n- 对于需要3步以上操作的任务，第1轮就用 create_plan 制定计划\n- plan_items 是步骤列表，current_step 指示当前进度（从0开始）\n- 每完成一个计划步骤，再次调用 create_plan 更新 current_step\n- 如果",
+      "len": 3138
+    },
+    {
+      "idx": 1,
+      "role": "user",
+      "preview": "采集这页新闻，内页也要采集，整理给我\n",
+      "len": 19
+    },
+    {
+      "idx": 2,
+      "role": "user",
+      "preview": "采集这页新闻，内页也要采集，整理给我\n",
+      "len": 19
+    },
+    {
+      "idx": 3,
+      "role": "assistant",
+      "preview": "null",
+      "len": 4
+    },
+    {
+      "idx": 4,
+      "role": "tool",
+      "preview": "{\"ok\":true,\"title\":\"经济 - 新闻中心 - 温州新闻网\",\"url\":\"https://news.66wz.com/wenzhou/jingji/\",\"content\":\"时政 | \\n 温州 | \\n 财经 | \\n 文化 | \\n 原创 | \\n 视频 | \\n 汽车 | \\n 房产 | \\n 教育 | \\n 智慧 | \\n 健康 \\n \\n \\n 爆料 读报 \\n \\n 温州新闻网 新闻中心 \\n 温州 \\n \\n 要闻 \\n 经济 \\n 社会 \\n 科教文体 \\n 人事 \\n 县市 \\n 外媒看温州 \\n \\n \\n \\n \\n 您当前的位置 ： 温州网 > 新闻中心 > 温州 > 经济 \\n 文成杨梅：守好生态底色 结出共富佳果 \\n 经济 06-29 \\n 《2024年中国电器行业系列白皮书》发布 温州电气挑起“大梁” \\n 经济 06-29 \\n 中国品牌价值评价榜单出炉 雁荡山铁皮石斛泰顺三杯香入选 \\n 经济 06-29 \\n 深耕生态有机农业 乐清高山荒梯田变身村民“致富田” \\n 经济 06-29 \\n 从“一张皮”起步，平阳“毛孩子”的生意一",
+      "len": 1561,
+      "tc_id": "call_293d574c87e84ec88b5ab0e0"
+    },
+    {
+      "idx": 5,
+      "role": "assistant",
+      "preview": "null",
+      "len": 4
+    },
+    {
+      "idx": 6,
+      "role": "tool",
+      "preview": "{\"ok\":true,\"result\":{\"elements\":[{\"href\":\"https://news.66wz.com\",\"index\":0,\"selector\":\"a\",\"tag\":\"a\",\"text\":\"时政\",\"ty
+
+[📥 第11轮 LLM响应: tool_calls]
+inject_script_6("{}")
+
+[⚙️ 工具结果: inject_script_6]
+{"ok":true,"result":{"success":true,"data":{"updatedAt":"2026-06-30 23:08:04","count":70,"sources":[{"name":"东方财富网","url":"https://www.eastmoney.com","items":[{"title":"据报道 美国最高法院法官塞缪尔·阿利托（Samuel Alito）从美国最高法院退休\n                        23:08","heat":"","link":"https://finance.eastmoney.com/a/202606
+
+[🔧 第12轮 工具(23个)]
+  search_tools
+  read_page_content
+  click_element
+  fill_input
+  wait_for_element
+  get_interactive_elements
+  find_text_on_page
+  get_element_info
+  extract_content
+  scroll_page
+  hover_element
+  select_dropdown
+  press_key
+  screenshot_visible
+  navigate_to
+  go_back
+  go_forward
+  inject_script_6
+  inject_script_4
+  inject_script_2
+  inject_script_10
+  create_plan
+  finish_task
+
+[📤 第12轮 发送LLM]
+{
+  "model": "qwen3-vl-plus",
+  "msgs": 30,
+  "lastRole": "system",
+  "tools": 23,
+  "msgSummary": [
+    {
+      "idx": 0,
+      "role": "system",
+      "preview": "你是AI Browser脚本调度器。分析用户需求，匹配工具库中的脚本执行；脚本无法覆盖的简单交互可使用DOM工具辅助。\n\n注意：工具分阶段暴露。第1-2轮只有核心+探查工具（search_tools、read、find_text、get_element_info、get_interactive_elements、click、fill_input、wait、scroll、create_plan、navigate_to、go_back/forward、finish_task），第3轮起释放全部工具（hover、select_dropdown、press_key、screenshot、inject_script_*）。前2轮专注了解页面、定位数据、搜索脚本、制定计划。\n\n=== 任务规划（重要！复杂任务必须先规划再执行） ===\n- 对于需要3步以上操作的任务，第1轮就用 create_plan 制定计划\n- plan_items 是步骤列表，current_step 指示当前进度（从0开始）\n- 每完成一个计划步骤，再次调用 create_plan 更新 current_step\n- 如果",
+      "len": 3138
+    },
+    {
+      "idx": 1,
+      "role": "user",
+      "preview": "采集这页新闻，内页也要采集，整理给我\n",
+      "len": 19
+    },
+    {
+      "idx": 2,
+      "role": "assistant",
+      "preview": "null",
+      "len": 4
+    },
+    {
+      "idx": 3,
+      "role": "tool",
+      "preview": "{\"ok\":true,\"title\":\"经济 - 新闻中心 - 温州新闻网\",\"url\":\"https://news.66wz.com/wenzhou/jingji/\",\"content\":\"时政 | \\n 温州 | \\n 财经 | \\n 文化 | \\n 原创 | \\n 视频 | \\n 汽车 | \\n 房产 | \\n 教育 | \\n 智慧 | \\n 健康 \\n \\n \\n 爆料 读报 \\n \\n 温州新闻网 新闻中心 \\n 温州 \\n \\n 要闻 \\n 经济 \\n 社会 \\n 科教文体 \\n 人事 \\n 县市 \\n 外媒看温州 \\n \\n \\n \\n \\n 您当前的位置 ： 温州网 > 新闻中心 > 温州 > 经济 \\n 文成杨梅：守好生态底色 结出共富佳果 \\n 经济 06-29 \\n 《2024年中国电器行业系列白皮书》发布 温州电气挑起“大梁” \\n 经济 06-29 \\n 中国品牌价值评价榜单出炉 雁荡山铁皮石斛泰顺三杯香入选 \\n 经济 06-29 \\n 深耕生态有机农业 乐清高山荒梯田变身村民“致富田” \\n 经济 06-29 \\n 从“一张皮”起步，平阳“毛孩子”的生意一",
+      "len": 1561,
+      "tc_id": "call_293d574c87e84ec88b5ab0e0"
+    },
+    {
+      "idx": 4,
+      "role": "assistant",
+      "preview": "null",
+      "len": 4
+    },
+    {
+      "idx": 5,
+      "role": "tool",
+      "preview": "{\"ok\":true,\"result\":{\"elements\":[{\"href\":\"https://news.66wz.com\",\"index\":0,\"selector\":\"a\",\"tag\":\"a\",\"text\":\"时政\",\"type\":\"\"},{\"href\":\"https://news.66wz.com/wenzhou/\",\"index\":1,\"selector\":\"a\",\"tag\":\"a\",\"text\
+

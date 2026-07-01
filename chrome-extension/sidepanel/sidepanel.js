@@ -295,6 +295,27 @@ let _debugLogReady = false     // 外部窗口就绪标志
 let _debugLogQueue = []        // 就绪前的消息队列
 let _debugLogFlushTimer = null // 定时刷新队列
 
+// ===== Todo Tracker 窗口 =====
+let _todoWindow = null
+let _todoReady = false
+let _todoQueue = []
+// BroadcastChannel 用于向 Todo 窗口发送消息（同源通信，不依赖 window.opener）
+const _todoChannel = new BroadcastChannel('ai-browser-todo')
+// 监听 Todo 窗口就绪信号
+const _todoReadyChannel = new BroadcastChannel('ai-browser-todo-ready')
+_todoReadyChannel.addEventListener('message', (e) => {
+  if (e.data?.type === 'todoViewerReady') {
+    _todoReady = true
+    // 刷新队列
+    if (_todoQueue.length > 0) {
+      for (const m of _todoQueue) {
+        _todoChannel.postMessage(m)
+      }
+      _todoQueue = []
+    }
+  }
+})
+
 function appendDebugLog(label, detail, level) {
   // 转发到外部 Log 窗口
   if (_debugLogWindow && !_debugLogWindow.closed) {
@@ -336,6 +357,58 @@ function openDebugLogWindow() {
     'width=800,height=700,left=100,top=50,menubar=no,toolbar=no,location=no,status=no'
   )
 }
+
+// 打开 Todo Tracker 窗口
+function openTodoWindow() {
+  if (_todoWindow && !_todoWindow.closed) {
+    _todoWindow.focus()
+    return
+  }
+  _todoReady = false
+  _todoQueue = []
+  const url = chrome.runtime.getURL('sidepanel/todo-viewer.html')
+  // 优先使用 chrome.windows.create（更可靠，不会被拦截）
+  if (chrome.windows?.create) {
+    chrome.windows.create({
+      url,
+      type: 'popup',
+      width: 700,
+      height: 650,
+      focused: true
+    }).then((win) => {
+      // 保存窗口引用（通过 tab id 跟踪）
+      const tabId = win.tabs?.[0]?.id
+      if (tabId) {
+        _todoWindow = { closed: false, focus: () => chrome.windows.update(win.id, { focused: true }) }
+        // 监听窗口关闭
+        chrome.windows.onRemoved.addListener(function onRemoved(winId) {
+          if (winId === win.id) {
+            _todoWindow = null
+            chrome.windows.onRemoved.removeListener(onRemoved)
+          }
+        })
+      }
+    }).catch(() => {
+      // 备选：window.open
+      _todoWindow = window.open(url, 'todoPopup', 'width=700,height=650,left=920,top=50,menubar=no,toolbar=no,location=no,status=no')
+    })
+  } else {
+    _todoWindow = window.open(url, 'todoPopup', 'width=700,height=650,left=920,top=50,menubar=no,toolbar=no,location=no,status=no')
+  }
+}
+
+// 转发 agentTodoUpdate 消息到 Todo 窗口，窗口未打开时自动打开
+function forwardTodoUpdate(data) {
+  if (!_todoWindow || _todoWindow.closed) {
+    openTodoWindow()
+  }
+  const msg = { type: 'agentTodoUpdate', data }
+  if (_todoReady) {
+    _todoChannel.postMessage(msg)
+  } else {
+    _todoQueue.push(msg)
+  }
+}
 // 接收外部窗口的就绪信号
 window.addEventListener('message', (e) => {
   if (e.data?.type === 'debugLogReady') {
@@ -352,10 +425,17 @@ window.addEventListener('message', (e) => {
       _debugLogFlushTimer = null
     }
   }
+  if (e.data?.type === 'todoViewerReady') {
+    // 已由 BroadcastChannel 处理，此处保留兼容
+  }
 })
 
 document.getElementById('floatDebugLogBtn')?.addEventListener('click', () => {
   openDebugLogWindow()
+})
+
+document.getElementById('floatTodoBtn')?.addEventListener('click', () => {
+  openTodoWindow()
 })
 
 function renderMarkdown(text) {
@@ -685,6 +765,7 @@ async function loadAgentMode() {
       let fullContent = ''
       let toolResults = []
       currentPort.onMessage.addListener((msg) => {
+        if (msg.type === 'agentTodoUpdate') { forwardTodoUpdate(msg.data); return }
         if (msg.type === 'agentStart') {
           card.querySelector('.agent-step-title').textContent = 'Agent 已启动，分析需求中...'
           openDebugLogWindow()
@@ -837,6 +918,7 @@ async function runAgent(userText, pageContext) {
 
     // 先注册消息监听器，再发送 agentStart（避免响应比监听器先到达）
     currentPort.onMessage.addListener((msg) => {
+      if (msg.type === 'agentTodoUpdate') { forwardTodoUpdate(msg.data); return }
       if (msg.type === 'agentStart') {
         card.querySelector('.agent-step-title').textContent = 'Agent 已启动，分析需求中...'
         openDebugLogWindow()

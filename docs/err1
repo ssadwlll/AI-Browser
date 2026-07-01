@@ -1,0 +1,15 @@
+[Stage 1 DOM工具] DOM工具提取列表
+  ✅ [s1-1] get_interactive_elements: 了解页面结构，定位新闻列表区域
+       out: page_structure
+  ✅ [s1-2] extract_content: 提取所有新闻条目的标题、链接和日期
+       out: news_list
+
+[Stage 2 远程脚本] 远程脚本批量采集内页
+  ✅ [s2-1] inject_script_10: 批量采集所有内页正文内容
+       out: news_details
+       dep: news_list
+
+[Stage 3 数据汇总] 数据汇总
+  ⏳ [s3-1] finish_task: 汇总所有采集结果并汇报
+       dep: news_list, news_details
+

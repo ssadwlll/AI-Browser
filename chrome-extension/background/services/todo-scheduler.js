@@ -103,8 +103,23 @@ Stage 3（数据汇总）：输出最终结果（固定1个）
   submitTodo(stages) {
     const errors = []
 
+    // 容错：LLM 有时会将 stages 序列化为 JSON 字符串而非数组
+    if (typeof stages === 'string') {
+      try {
+        const trimmed = stages.trim()
+        const parsed = JSON.parse(trimmed)
+        if (Array.isArray(parsed)) {
+          stages = parsed
+        } else {
+          return { ok: false, error: 'stages 必须是数组类型，你传入了一个非数组的JSON。请直接传入数组而非字符串，例如: {"stages": [{"stage": 1, "subTodos": [...]}]}' }
+        }
+      } catch (e) {
+        return { ok: false, error: `stages 解析失败：传入的是字符串而非数组。请直接传入JSON数组，不要用字符串包裹。错误: ${e.message}` }
+      }
+    }
+
     if (!Array.isArray(stages) || stages.length === 0) {
-      return { ok: false, error: 'stages 必须是非空数组' }
+      return { ok: false, error: 'stages 必须是非空数组（type: array），你传入了 ' + typeof stages + ' 类型。请确保 stages 的值是 JSON 数组 [...] 而非字符串 "[...]"' }
     }
 
     // 收集所有 dataOutputKey（用于依赖校验）
@@ -200,6 +215,8 @@ Stage 3（数据汇总）：输出最终结果（固定1个）
     if (!todo) return
 
     if (status === 'done') {
+      // 设置待办状态标记（用于UI渲染）
+      todo._status = 'done'
       this.totalCompleted++
       // 失败计数由 recordProgress() 统一管理，此处不重复
 
@@ -220,6 +237,7 @@ Stage 3（数据汇总）：输出最终结果（固定1个）
         }
       }
     } else if (status === 'failed') {
+      todo._status = 'failed'
       // 失败计数由 recordNoProgress() 统一管理，此处仅记录日志
       console.log(`[TodoScheduler] todo ${todo.id} failed (action: ${todo.action})`)
     }
@@ -279,8 +297,9 @@ Stage 3（数据汇总）：输出最终结果（固定1个）
     // inject_script_ 前缀匹配
     if (todo.action?.startsWith('inject_script_') && funcName?.startsWith('inject_script_')) return todo
 
-    // search_tools 可以在任何阶段被调用
-    if (funcName === 'search_tools') return todo
+    // search_tools / recall_data 是辅助工具，不应匹配到业务待办
+    // 它们可以自由调用，但不影响待办进度
+    if (funcName === 'search_tools' || funcName === 'recall_data') return null
 
     // finish_task 可以在任何阶段被调用
     if (funcName === 'finish_task') return todo
@@ -382,6 +401,8 @@ Stage 3（数据汇总）：输出最终结果（固定1个）
     if (remaining.length > 0) {
       const current = remaining[0]
       context += `当前待办: ${current.id} - ${current.description} (action: ${current.action})\n`
+      // 强制引导 LLM 执行当前待办的 action
+      context += `▶ 请调用 ${current.action} 完成此待办。不要调用其他工具。\n`
       if (current.dataDependKeys?.length > 0) {
         const satisfied = current.dataDependKeys.every(k => this.globalDataStore.has(k))
         context += `数据依赖: ${current.dataDependKeys.join(', ')} ${satisfied ? '✓已满足' : '✗未满足'}\n`

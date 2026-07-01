@@ -62,7 +62,7 @@ async function analyzePageForForge() {
     // 缓存建议元数据用于保存
     codeArea.__suggestedMeta = meta
     codeArea.__suggestedName = data.result.suggestedName
-    saveBtn.classList.remove('hidden')
+    saveBtn.style.display = ''
     toast('页面分析完成' + (data.result.usedAI ? ' (AI生成)' : ' (模板)'), 'success')
   } catch (e) {
     errorEl.textContent = '网络错误: ' + e.message
@@ -104,7 +104,7 @@ async function saveForgedScript() {
     if (res.success) {
       toast('脚本「' + name + '」已保存到工具库', 'success')
       document.getElementById('forgeResult').classList.add('hidden')
-      document.getElementById('forgeSaveBtn').classList.add('hidden')
+      document.getElementById('forgeSaveBtn').style.display = 'none'
     } else {
       toast('保存失败: ' + (res.message || res.error), 'error')
     }

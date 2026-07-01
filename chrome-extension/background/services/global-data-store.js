@@ -149,6 +149,50 @@ export class GlobalDataStore {
   }
 
   /**
+   * 兼容 PayloadStore.query 接口，供 recall_data 回退查询
+   */
+  query(options = {}) {
+    // 按 entry_id 查询（映射为 key）
+    if (options.entry_id) {
+      const ids = options.entry_id.split(',').map(s => s.trim())
+      if (ids.includes('all')) {
+        return this._formatAll()
+      }
+      const matched = []
+      for (const id of ids) {
+        if (this.entries.has(id)) {
+          const entry = this.entries.get(id)
+          matched.push({ id, key: id, value: entry.value, summary: entry.summary, source: entry.sourceTodo })
+        }
+      }
+      if (matched.length === 0) return { error: '未找到匹配数据', queriedKeys: ids }
+      return { entries: matched, count: matched.length, source: 'GlobalDataStore' }
+    }
+    // 按 tool_name 查询（匹配 key 前缀或 sourceTodo）
+    if (options.tool_name) {
+      const matched = []
+      for (const [key, entry] of this.entries) {
+        if (key.startsWith(options.tool_name) || entry.sourceTodo === options.tool_name) {
+          matched.push({ id: key, key, value: entry.value, summary: entry.summary, source: entry.sourceTodo })
+        }
+      }
+      if (matched.length === 0) return { error: '未找到匹配数据', toolName: options.tool_name }
+      return { entries: matched, count: matched.length, source: 'GlobalDataStore' }
+    }
+    // 查全部
+    return this._formatAll()
+  }
+
+  _formatAll() {
+    const entries = []
+    for (const [key, entry] of this.entries) {
+      entries.push({ id: key, key, summary: entry.summary, source: entry.sourceTodo, timestamp: entry.timestamp })
+    }
+    if (entries.length === 0) return { error: '全局存储为空', count: 0 }
+    return { entries, count: entries.length, source: 'GlobalDataStore' }
+  }
+
+  /**
    * 清空（任务结束时释放内存）
    */
   clear() {
