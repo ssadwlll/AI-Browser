@@ -313,9 +313,13 @@ function openDebugLogWindow() {
   )
 }
 
-// 转发 agentTodoUpdate 消息到 content script（注入到页面的待办面板）
+// 转发 agentTodoUpdate 消息到 content script 和 todo-viewer 窗口
+let _todoChannel = null
+try { _todoChannel = new BroadcastChannel('ai-browser-todo') } catch {}
+
 async function forwardTodoUpdate(data) {
   try {
+    // 发送给 content script（页面内嵌待办面板）
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
     if (tab?.id) {
       chrome.runtime.sendMessage({
@@ -323,6 +327,10 @@ async function forwardTodoUpdate(data) {
         tabId: tab.id,
         data: data
       }).catch(() => {})
+    }
+    // 发送给 todo-viewer 窗口（BroadcastChannel）
+    if (_todoChannel) {
+      _todoChannel.postMessage({ type: 'agentTodoUpdate', data: data })
     }
   } catch (e) {
     console.warn('[Sidepanel] forwardTodoUpdate failed:', e)
