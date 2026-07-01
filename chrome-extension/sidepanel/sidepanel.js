@@ -346,16 +346,24 @@ async function openTodoWindow() {
   const todoWidth = 380
   const todoHeight = 520
   let left = 100, top = 100
-  try {
-    const currentWin = await chrome.windows.getCurrent()
-    if (currentWin) {
-      // sidepanel 在浏览器窗口右侧，todo窗口紧贴浏览器窗口左侧
-      left = currentWin.left + 10
-      top = currentWin.top + Math.max(10, (currentWin.height - todoHeight) / 3)
+
+  // 方案1：通过 window.screenX 获取 sidepanel 的屏幕位置（最精确）
+  if (window.screenX && window.screenX > 0) {
+    left = window.screenX - todoWidth
+    top = window.screenY + 60  // 偏下一点
+  } else {
+    // 方案2：fallback 到 chrome.windows.getCurrent()
+    try {
+      const currentWin = await chrome.windows.getCurrent()
+      if (currentWin) {
+        left = currentWin.left + 10
+        top = currentWin.top + Math.max(10, (currentWin.height - todoHeight) / 3)
+      }
+    } catch (e) {
+      console.warn('[TodoWindow] 获取窗口位置失败，使用默认位置', e)
     }
-  } catch (e) {
-    console.warn('[TodoWindow] 获取窗口位置失败，使用默认位置', e)
   }
+
   if (chrome.windows?.create) {
     try {
       const win = await chrome.windows.create({ url, type: 'popup', width: todoWidth, height: todoHeight, left, top, focused: true })
@@ -381,14 +389,23 @@ async function openTodoWindow() {
 function repositionTodoWindow() {
   if (!_todoWindow || _todoWindow.closed || !_todoWindow._winId) return
   const todoWidth = 380
-  const todoHeight = 520
-  chrome.windows.getCurrent().then(currentWin => {
-    if (!currentWin) return
-    chrome.windows.update(_todoWindow._winId, {
-      left: currentWin.left + 10,
-      top: currentWin.top + Math.max(10, (currentWin.height - todoHeight) / 3)
+  let left = 100, top = 100
+
+  if (window.screenX && window.screenX > 0) {
+    left = window.screenX - todoWidth
+    top = window.screenY + 60
+  } else {
+    chrome.windows.getCurrent().then(currentWin => {
+      if (!currentWin) return
+      chrome.windows.update(_todoWindow._winId, {
+        left: currentWin.left + 10,
+        top: currentWin.top + Math.max(10, (currentWin.height - 520) / 3)
+      }).catch(() => {})
     }).catch(() => {})
-  }).catch(() => {})
+    return
+  }
+
+  chrome.windows.update(_todoWindow._winId, { left, top }).catch(() => {})
 }
 
 // 监听侧边栏窗口变化，同步 Todo 窗口位置
