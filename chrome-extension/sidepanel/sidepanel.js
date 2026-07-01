@@ -776,7 +776,7 @@ function formatToolArgs(toolName, toolArgs) {
     case 'finish_task':
       return a.summary || '任务完成'
     default:
-      if (toolName.startsWith('inject_script_')) {
+      if (toolName?.startsWith('inject_script_')) {
         return `执行脚本：${a.scriptName || '工具库脚本'}`
       }
       // 其他工具，用简洁的键值对展示
@@ -855,7 +855,7 @@ function summarizeToolResult(toolName, rawResult) {
     case 'finish_task':
       return parsed || '任务完成'
     default:
-      if (toolName.startsWith('inject_script_')) {
+      if (toolName?.startsWith('inject_script_')) {
         if (parsed) {
           if (parsed.ok === false) return '脚本执行失败：' + (parsed.error || '未知错误')
           if (Array.isArray(parsed)) return `脚本执行完成，返回 ${parsed.length} 条结果`

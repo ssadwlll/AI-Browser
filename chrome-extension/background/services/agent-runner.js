@@ -567,7 +567,7 @@ ${allData.length > 0 ? allData.join('\n') : '（无数据）'}`
             }
             const summary = funcArgs.summary || '任务已完成'
             messages.push({ role: 'tool', tool_call_id: toolCall.id, content: JSON.stringify({ ok: true, summary }) })
-            postToUI(tabId, { type: 'agentStepResult', step: totalToolCalls, result: summary, done: true })
+            postToUI(tabId, { type: 'agentStepResult', step: totalToolCalls, toolName: 'finish_task', result: summary, done: true })
             for (const char of summary) {
               postToUI(tabId, { type: 'streamChunk', content: char })
               await new Promise(r => setTimeout(r, 15))
