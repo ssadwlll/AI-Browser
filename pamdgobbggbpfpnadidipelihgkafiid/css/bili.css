@@ -1,0 +1,185 @@
+.guid_dialog {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    z-index: 101;
+    background-color: rgba(0, 0, 0, 0.5) !important;
+    background-color: #000;
+    filter: Alpha(opacity=50);
+    user-select:none;
+    display: none;
+  }
+  .d-content {
+    padding: 10px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+  .d-content .top {
+    height: 40px;
+    display: flex;
+    align-items: center;
+  }
+  .d-content .top .title {
+    color: #000;
+    font-size: 18px;
+    font-weight: 600;
+    margin-left: 6px;
+  }
+  .d-content .middle1 {
+    display: flex;
+    align-items: center;
+  }
+  .d-content .middle1 .img{
+    width: 24px;
+    height: 24px;
+    margin-right: 10px;
+  }
+  .d-content .middle1 .ext-name{
+    font-size: 15px;
+  }
+  .d-content .middle2 {
+    margin-top: 10px;
+    margin-bottom: 10px;
+}
+.d-content .middle2 .ext-desc{
+  color: #1d98fc;
+  font-size: 14px;
+  text-decoration: underline;
+  cursor: pointer;
+}
+.d-content .bott{
+    width: 100%;
+    margin-bottom: 10px;
+    display: flex;
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: center;
+}
+.d-content .bott .later{
+    color: #999;
+    font-size: 13px;
+    text-decoration: underline;
+    cursor: pointer;
+}
+.d-content .bott .go-try{
+    width: 60px;
+    height: 28px;
+    background-color: #1d98fc;
+    line-height: 28px;
+    text-align: center;
+    color: white;
+    font-size: 12px;
+    cursor: pointer;
+    border-radius: 4px;
+
+}
+.d-content .bott .go-try:hover{
+    background-color: #3aa1f5;
+    
+}
+.toAIBlock {
+    width: 100%;
+}
+.toAIExtension {
+    text-align: center;
+    color: rgb(230, 116, 138);
+    font-size: 10px;
+    cursor: pointer;
+    font-weight: 800;
+    margin-top: 10px;
+}
+.summaryLink {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    margin-bottom: 5px;
+    margin-top: 15px;
+    font-weight: 400;
+}
+.summaryLinkAI {
+    border-radius: 5px;
+    border: 1px solid rgb(230, 116, 138);
+    padding: 3px 5px;
+    position: relative;
+    display: inline-block;
+    cursor: pointer;
+    margin-right: -20px;
+}
+.summaryLinkNew {
+    position: relative;
+    top: -20px;
+    right: 109px;
+    color: #fb130c;
+    font-size: 12px;
+    font-weight: 600;
+    padding: 2px 6px;
+}
+.copySubtitle {
+    display: inline-block;
+    cursor: pointer;
+    border: 1px solid rgb(230, 116, 138);
+    padding: 3px 5px;
+    border-radius: 5px;
+}
+.dividingLine {
+    border-bottom: 1px dashed #d0d3d6;
+    width: 100%;
+}
+.summaryGuideHead {
+    height: 30px;
+    line-height: 30px;
+    display: flex;
+    font-size: 12px;
+}
+.summaryGuideHeadNew {
+    background: rgb(230, 116, 138);
+    margin-left: 10px;
+    padding: 0 3px;
+    color: white;
+    border-radius: 0 0 5px 5px;
+}
+.summaryGuideHeadText {
+    margin-left: 5px;
+    color: #287ebd;
+    cursor: pointer;
+    font-weight: 800;
+}
+.summaryGuideHeadCollapse {
+    position: absolute;
+    right: 10px;
+    cursor: pointer;
+    color: #6c6a6a;
+}
+.summaryGuideTip {
+    display: none;
+    text-align: left;
+    width: 91%;
+    margin: 10px auto auto;
+    font-size: 12px;
+}
+.summaryGuideTipH2 {
+    font-size: 18px;
+    font-weight: 500;
+    margin-bottom: 5px;
+}
+.summaryGuideTipP {
+    height: 20px;
+}
+.summaryGuideTipP2, .summaryGuideTipP3 {
+    height: 40px;
+}
+.summaryGuideTipPSpan1 {
+    color: #287ebd;
+    cursor: pointer;
+    font-weight: 600;
+}
+.summaryGuideTipPSpan2 {
+    font-weight: 600;
+    cursor: pointer;
+}
+.summaryGuideTipPSpan3 {
+    font-weight: 600;
+}

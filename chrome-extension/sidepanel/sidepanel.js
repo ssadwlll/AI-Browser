@@ -571,7 +571,7 @@ async function sendMessage(text) {
         }
         chatHistory.push({ role: 'assistant', content: fullContent })
         recentlyStreamedContent = fullContent
-        setTimeout(() => { recentlyStreamedContent = '' }, 1000)
+        setTimeout(() => { recentlyStreamedContent = '' }, 5000)
         callService('storageService', 'saveChatHistory', chatHistory)
         isStreaming = false
         sendBtn.disabled = false
@@ -924,7 +924,7 @@ async function runAgent(userText, pageContext) {
         }
         chatHistory.push(agentRecord)
         recentlyStreamedContent = fullContent
-        setTimeout(() => { recentlyStreamedContent = '' }, 1000)
+        setTimeout(() => { recentlyStreamedContent = '' }, 5000)
         isStreaming = false
         sendBtn.disabled = false
         currentPort = null
@@ -1912,8 +1912,15 @@ chrome.storage.onChanged.addListener((changes, area) => {
             sendBtn.disabled = false
             currentPort = null
           }
-          // 只有当 streamDone 未通过 port 送达时（recentlyStreamedContent 为空），才补充 UI
-          if (!recentlyStreamedContent) {
+          // 检查最后一条 assistant 消息是否已经通过 streamDone 渲染过
+          // recentlyStreamedContent 记录了最近流式输出的内容（5秒窗口）
+          // 同时检查 DOM 中是否已有相同内容的消息气泡，防止重复渲染
+          const lastAssistantMsg = newMsgs.filter(m => m.role === 'assistant').pop()
+          const alreadyRendered = recentlyStreamedContent ||
+            (lastAssistantMsg && chatMessages.querySelectorAll('.ai-msg').length > 0 &&
+             Array.from(chatMessages.querySelectorAll('.ai-msg .msg-text')).some(el =>
+               el.textContent.trim() === (lastAssistantMsg.content || '').trim().slice(0, 200)))
+          if (!alreadyRendered) {
             // 移除残留的 streaming typing 动画 div（端口断开导致 streamChunk 未送达）
             const typingIndicators = chatMessages.querySelectorAll('.typing-indicator')
             typingIndicators.forEach(el => {

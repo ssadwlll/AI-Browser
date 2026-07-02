@@ -255,6 +255,23 @@ Stage 3（结果汇总）：整理并输出结果
     ? [systemMsg, ...cleanHistory]
     : [systemMsg, ...cleanHistory, { role: 'user', content: userMessage }]
 
+  // ===== 注入 payloadStore 历史数据摘要（供第二次对话复用） =====
+  const payloadSummary = payloadStore.getSummaryForFinish()
+  const globalSummaries = todoScheduler.globalDataStore.getAllSummaries()
+  if (payloadSummary || globalSummaries.length > 0) {
+    const parts = []
+    if (payloadSummary) {
+      parts.push(`上轮工具执行结果（${payloadSummary.count}条）：`)
+      for (const item of payloadSummary.items) {
+        parts.push(`  - ${item.id}(${item.toolName}): ${item.summary}`)
+      }
+    }
+    if (globalSummaries.length > 0) {
+      parts.push(`\n全局存储数据：\n${globalSummaries.join('\n')}`)
+    }
+    _injections.push(`=== 上轮任务数据（可复用） ===\n${parts.join('\n')}\n\n如果用户要求导出/保存/格式化之前的结果，请直接用 recall_data(entry_id="all") 获取数据后调用 finish_task 输出，无需重新执行页面操作。`)
+  }
+
   postToUI(tabId, { type: 'agentStart' })
   _debugLog('🐛 调试模式已开启', '待办调度系统：系统驱动进度追踪、收敛提示、阶段切换')
   _debugLog('⚙️ Agent配置', { maxRounds, enableJudge, debug })

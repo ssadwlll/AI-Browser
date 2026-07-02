@@ -657,6 +657,7 @@ function createScheduledTaskPanel(callService) {
 // ============ 调试日志 ============
 
 let _debugLogPanel = null
+const _debugLogBuffer = [] // 日志缓存，面板未初始化时暂存，创建后回放
 
 function createDebugLogPanel() {
   const div = document.createElement('div')
@@ -758,6 +759,11 @@ function createDebugLogPanel() {
   // 注册全局日志接收器
   if (!_debugLogPanel) {
     _debugLogPanel = { appendLog, logBody }
+    // 回放缓存的日志
+    for (const entry of _debugLogBuffer) {
+      appendLog(entry.label, entry.detail, entry.level)
+    }
+    _debugLogBuffer.length = 0
   }
 
   return {
@@ -769,8 +775,12 @@ function createDebugLogPanel() {
 
 // 全局日志追加函数（供 sidepanel.js 调用）
 export function appendDebugLogToPanel(label, detail, level) {
+  // 始终缓存日志，确保面板创建后能回放
+  _debugLogBuffer.push({ label, detail, level })
   if (_debugLogPanel) {
     _debugLogPanel.appendLog(label, detail, level)
+    // 已回放的日志从缓存中移除
+    _debugLogBuffer.length = 0
   }
 }
 
