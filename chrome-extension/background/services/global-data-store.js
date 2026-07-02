@@ -95,6 +95,58 @@ export class GlobalDataStore {
   }
 
   /**
+   * 查询数据（支持 recall_data 调用）
+   * @param {object} options - { entry_id, fields, filter }
+   */
+  query(options = {}) {
+    const entryId = options.entry_id?.trim() || ''
+    let results = []
+
+    // "all" 表示查询所有条目
+    if (entryId === 'all') {
+      for (const [key, entry] of this.entries) {
+        results.push({ id: key, toolName: entry.sourceTodo || key, data: entry.value, summary: entry.summary })
+      }
+    }
+    // 指定 key 列表
+    else if (entryId) {
+      const keys = entryId.split(',').map(s => s.trim())
+      for (const k of keys) {
+        const entry = this.entries.get(k)
+        if (entry) {
+          results.push({ id: k, toolName: entry.sourceTodo || k, data: entry.value, summary: entry.summary })
+        }
+      }
+    }
+    // 无参数返回汇总
+    else {
+      return {
+        summary: this.getAllSummaries().join('\n') || '无存储数据',
+        hint: '调用 recall_data(entry_id="xxx") 查询具体条目'
+      }
+    }
+
+    if (results.length === 0) {
+      return { error: '未找到匹配数据', entries: [], queriedKeys: entryId ? entryId.split(',') : [] }
+    }
+
+    // 格式化返回（与 PayloadStore 保持一致的结构）
+    const formatted = {
+      count: results.length,
+      entries: results.map(r => ({ id: r.id, toolName: r.toolName, count: Array.isArray(r.data) ? r.data.length : 1 })),
+      data: results.map(r => {
+        // 对 data 进行摘要截断
+        const dataStr = typeof r.data === 'string' ? r.data : JSON.stringify(r.data)
+        if (dataStr.length > 500) {
+          return r.summary || dataStr.slice(0, 500)
+        }
+        return r.data
+      }),
+    }
+    return formatted
+  }
+
+  /**
    * 生成数据摘要
    */
   _generateSummary(value) {

@@ -34,8 +34,14 @@ export class PayloadStore {
 
     // 按 entry_id 查询
     if (options.entry_id) {
-      const ids = options.entry_id.split(',').map(s => s.trim())
-      results = this.entries.filter(e => ids.includes(e.id))
+      const entryId = options.entry_id.trim()
+      // "all" 表示查询所有条目的完整数据
+      if (entryId === 'all') {
+        results = this.entries.slice() // 返回所有条目
+      } else {
+        const ids = entryId.split(',').map(s => s.trim())
+        results = this.entries.filter(e => ids.includes(e.id))
+      }
     }
     // 按 tool_name 查询最新
     else if (options.tool_name) {
