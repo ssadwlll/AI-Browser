@@ -153,13 +153,12 @@ Stage 3（结果汇总）：整理并输出结果
 - 自然语言总结结果，不输出原始JSON
 - 错误时分析原因并在finish_task中告知
 
-=== 复用历史结果 ===
-如果用户的要求是"导出/下载/保存之前的结果"或类似表述，且之前已执行过任务：
-1. 先调用 recall_data(entry_id="all") 查询上轮存储的数据
-2. 根据用户需求选择合适的输出方式：
-   - 简单导出（CSV/Markdown等）：直接用 finish_task 输出格式化文本
-   - 复杂导出（如需要特殊格式转换、文件打包）：检查是否有专用导出工具可用
-3. 如果无历史数据可查，再正常执行任务`
+=== 对话上下文 ===
+你正在与用户进行连续对话。如果上下文中存在"上轮任务数据"或"历史存储数据"，表示之前已执行过任务并产生了结果。
+- 这些数据可供你参考和使用，无需重新执行页面操作
+- 用户的新需求可能是：继续处理、补充信息、导出结果、修改格式等任何合理请求
+- 根据实际需求选择：直接复用历史数据，或执行新操作获取新数据
+- 获取历史数据：recall_data(entry_id="all")`
 
   const systemMsg = { role: 'system', content: phase1SystemPrompt }
 
@@ -257,13 +256,13 @@ Stage 3（结果汇总）：整理并输出结果
     ? [systemMsg, ...cleanHistory]
     : [systemMsg, ...cleanHistory, { role: 'user', content: userMessage }]
 
-  // ===== 注入 payloadStore 历史数据摘要（供第二次对话复用） =====
+  // ===== 注入 payloadStore 历史数据摘要（供第二轮对话理解上下文） =====
   const payloadSummary = payloadStore.getSummaryForFinish()
   const globalSummaries = todoScheduler.globalDataStore.getAllSummaries()
   if (payloadSummary || globalSummaries.length > 0) {
     const parts = []
     if (payloadSummary) {
-      parts.push(`上轮工具执行结果（${payloadSummary.count}条）：`)
+      parts.push(`上一轮执行的工具及结果（${payloadSummary.count}条）：`)
       for (const item of payloadSummary.items) {
         // 显示完整摘要，帮助LLM理解数据内容
         parts.push(`  - ${item.id}(${item.toolName}): ${item.summary}`)
@@ -272,8 +271,7 @@ Stage 3（结果汇总）：整理并输出结果
     if (globalSummaries.length > 0) {
       parts.push(`\n全局存储数据：\n${globalSummaries.join('\n')}`)
     }
-    const detailedHint = `\n\n用户要求处理这些数据时（如导出/保存/格式化），请先用 recall_data(entry_id="all") 获取完整数据，然后选择合适的输出方式。`
-    _injections.push(`=== 上轮任务数据（可复用） ===\n${parts.join('\n')}${detailedHint}`)
+    _injections.push(`=== 上轮任务数据 ===\n${parts.join('\n')}\n\n你可以用 recall_data(entry_id="all") 获取完整数据，根据用户需求决定如何使用。`)
   }
 
   postToUI(tabId, { type: 'agentStart' })
