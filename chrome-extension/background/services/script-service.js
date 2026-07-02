@@ -1,4 +1,6 @@
 // ============ ScriptService ============
+import { fetchWithTimeout, globToRegex, isSystemUrl } from '../../shared/utils.js'
+
 export class ScriptService {
   constructor(configService) {
     this.configService = configService
@@ -24,9 +26,9 @@ export class ScriptService {
     try {
       const auth = await this.configService.getAppAuth()
       const authHeaders = await this.configService.generateAuthHeaders(auth.appKey, auth.appSecret)
-      const res = await fetch(`${config.serverUrl}/api/scripts?pageSize=100`, {
+      const res = await fetchWithTimeout(`${config.serverUrl}/api/scripts?pageSize=100`, {
         headers: authHeaders,
-      })
+      }, 15000, 1)
       if (!res.ok) {
         const text = await res.text()
         await chrome.storage.local.set({ syncError: `HTTP ${res.status}` })
@@ -71,9 +73,9 @@ export class ScriptService {
     try {
       const auth = await this.configService.getAppAuth()
       const authHeaders = await this.configService.generateAuthHeaders(auth.appKey, auth.appSecret)
-      const res = await fetch(`${config.serverUrl}/api/scripts/${scriptId}/inject`, {
+      const res = await fetchWithTimeout(`${config.serverUrl}/api/scripts/${scriptId}/inject`, {
         headers: authHeaders,
-      })
+      }, 15000, 0)
       const data = await res.json()
       if (data.success && data.data) return data.data
     } catch (e) {
@@ -86,16 +88,14 @@ export class ScriptService {
     if (!urlPattern || urlPattern === '*') return true
     const patterns = urlPattern.split(',').map(p => p.trim()).filter(Boolean)
     return patterns.some(pattern => {
-      const regexStr = pattern
-        .replace(/[.+^${}()|[\]\\]/g, '\\$&')
-        .replace(/\*/g, '.*')
-        .replace(/\?/g, '.')
-      try { return new RegExp('^' + regexStr + '$').test(url) } catch { return false }
+      // 使用共享 globToRegex：压缩连续 * 防 ReDoS
+      const regex = globToRegex(pattern)
+      return regex ? regex.test(url) : false
     })
   }
 
   async injectScriptsForTab(tabId, url) {
-    if (!url || url.startsWith('chrome://') || url.startsWith('chrome-extension://')) return
+    if (!url || isSystemUrl(url)) return
     const config = await this.configService.getSyncConfig()
     if (!config.enabled) return
 

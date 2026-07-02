@@ -5,6 +5,8 @@ export class PayloadStore {
     this.entries = []
     this.maxEntries = 20
     this.maxRecallChars = 5000  // recall_data 单次返回上限
+    // 单调递增计数器，避免 FIFO 淘汰后 ID 复用导致数据错乱
+    this._idCounter = 0
   }
 
   // 存储数据
@@ -12,8 +14,10 @@ export class PayloadStore {
     if (this.entries.length >= this.maxEntries) {
       this.entries.shift()  // FIFO淘汰
     }
+    // 使用单调递增计数器生成 ID，永不复用
+    this._idCounter++
     const entry = {
-      id: `p${this.entries.length + 1}`,
+      id: `p${this._idCounter}`,
       toolName,
       timestamp: Date.now(),
       data,
@@ -98,8 +102,12 @@ export class PayloadStore {
         filtered = data.slice(0, parsed.n)
       } else if (parsed.type === 'keyword') {
         filtered = data.filter(item => {
-          const text = item.text || item.title || item.content || JSON.stringify(item)
-          return text.includes(parsed.keyword)
+          // 防御循环引用导致 JSON.stringify 崩溃
+          let text = item.text || item.title || item.content
+          if (!text) {
+            try { text = JSON.stringify(item) } catch { text = String(item) }
+          }
+          return String(text).includes(parsed.keyword)
         })
       }
 
@@ -149,17 +157,21 @@ export class PayloadStore {
 
   // 格式化结果
   _formatResult(entries) {
-    if (entries.length === 0) return { error: '未找到匹配数据' }
+    if (entries.length === 0) return { error: '未找到匹配数据', entries: [], queriedKeys: [] }
 
     const allData = entries.flatMap(e => Array.isArray(e.data) ? e.data : [e.data])
 
     if (entries.length === 1 && allData.length <= 10) {
-      return allData
+      return {
+        count: allData.length,
+        entries: entries.map(e => ({ id: e.id, toolName: e.toolName, count: Array.isArray(e.data) ? e.data.length : 1 })),
+        data: allData
+      }
     }
 
     return {
       count: allData.length,
-      entries: entries.map(e => ({ id: e.id, count: Array.isArray(e.data) ? e.data.length : 1 })),
+      entries: entries.map(e => ({ id: e.id, toolName: e.toolName, count: Array.isArray(e.data) ? e.data.length : 1 })),
       data: allData
     }
   }
@@ -212,6 +224,7 @@ export class PayloadStore {
   // 清空
   clear() {
     this.entries = []
+    this._idCounter = 0
   }
 
   // 列出所有条目ID（用于阶段2上下文注入）

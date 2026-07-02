@@ -9,6 +9,12 @@ import { ScriptService } from './services/script-service.js'
 import { SidebarService, PageService } from './services/sidebar-page-service.js'
 import { ToolService } from './services/tool-service.js'
 import { AgentService } from './services/agent-service.js'
+import { DBService } from './services/db-service.js'
+import { TaskTemplateService } from './services/task-template-service.js'
+import { ToolRecordingService } from './services/tool-recording-service.js'
+import { ScheduledTaskService } from './services/scheduled-task-service.js'
+import { AgentResumeService } from './services/agent-resume-service.js'
+import { HumanInterventionService } from './services/human-intervention-service.js'
 
 // ============ 常量 ============
 const MSG_TYPES = {
@@ -34,7 +40,34 @@ const scriptService = new ScriptService(configService)
 const sidebarService = new SidebarService()
 const pageService = new PageService(scriptService)
 const toolService = new ToolService(configService)
-const agentService = new AgentService(configService, toolService, pageService, scriptService)
+
+// Feature 1/4/6/7/9/23/24: 新增服务（需先于 agentService 实例化，以便注入）
+const toolRecordingService = new ToolRecordingService()
+const agentResumeService = new AgentResumeService()
+const agentService = new AgentService(configService, toolService, pageService, scriptService, toolRecordingService, agentResumeService)
+const taskTemplateService = new TaskTemplateService()
+const humanInterventionService = new HumanInterventionService((request) => {
+  // 人工介入请求回调：转发到 sidepanel
+  try {
+    chrome.runtime.sendMessage({ type: 'humanInterventionRequest', data: request }).catch(() => {})
+  } catch {}
+})
+const scheduledTaskService = new ScheduledTaskService({
+  navigate: async (url) => {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
+    if (tab?.id) await chrome.tabs.update(tab.id, { url })
+    else await chrome.tabs.create({ url })
+  },
+  injectScript: async (scriptId) => {
+    return await scriptService.injectScriptsForTab(
+      (await chrome.tabs.query({ active: true, currentWindow: true }))[0]?.id,
+      (await chrome.tabs.query({ active: true, currentWindow: true }))[0]?.url
+    )
+  },
+  sendAgentMessage: async (message) => {
+    chrome.runtime.sendMessage({ type: 'scheduledAgentMessage', data: message }).catch(() => {})
+  },
+})
 
 const services = {
   configService,
@@ -45,6 +78,12 @@ const services = {
   pageService,
   toolService,
   agentService,
+  toolRecordingService,
+  taskTemplateService,
+  agentResumeService,
+  humanInterventionService,
+  scheduledTaskService,
+  dbService: DBService,
 }
 
 // ============ 消息路由 ============
@@ -60,9 +99,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       sendResponse({ error: `Method not found: ${service}.${method}`, data: null })
       return true
     }
-    svc[method](...(args || []))
+    // 使用 Promise.resolve 包装，兼容同步和异步方法返回值
+    Promise.resolve(svc[method](...(args || [])))
       .then(data => sendResponse({ error: null, data }))
-      .catch(err => sendResponse({ error: err.message, data: null }))
+      .catch(err => sendResponse({ error: err?.message || String(err), data: null }))
     return true
   }
 
@@ -150,6 +190,16 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return false
   }
 
+  // Feature 9: 人工介入响应
+  if (msg.type === 'humanInterventionRespond') {
+    humanInterventionService.respond(msg.requestId, msg.answer).then(() => {
+      sendResponse({ ok: true })
+    }).catch(e => {
+      sendResponse({ ok: false, error: e.message })
+    })
+    return true
+  }
+
   return false
 })
 
@@ -202,11 +252,20 @@ chrome.runtime.onInstalled.addListener(() => {
     chrome.contextMenus.create({ id: 'ai-browser-translate', title: '翻译此页面', contexts: ['page'] })
     chrome.contextMenus.create({ id: 'ai-browser-explain', title: 'AI 解释选中文字', contexts: ['selection'] })
   })
+
+  // Feature 23: 启动定时任务闹钟监听
+  scheduledTaskService.setupAlarmListener()
+  // Feature 6: 清理过期的 Agent 快照
+  agentResumeService.cleanupExpired().catch(() => {})
 })
 
-chrome.alarms.onAlarm.addListener((alarm) => {
+chrome.alarms.onAlarm.addListener(async (alarm) => {
   if (alarm.name === 'sync-scripts') {
     scriptService.syncScripts()
+  }
+  // Feature 23: 定时任务检查
+  if (alarm.name === 'scheduled-task-check') {
+    await scheduledTaskService.checkAndRunDueTasks()
   }
 })
 

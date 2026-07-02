@@ -1,6 +1,14 @@
 const pool = require('../config/db')
 const { success, error, paginated } = require('../utils/response')
 
+// 获取本地日期字符串 YYYY-MM-DD（避免 toISOString 返回 UTC 日期）
+function getLocalDateString(date) {
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
 /**
  * GET /api/ai-call-logs
  * 查询参数:
@@ -76,14 +84,14 @@ exports.dailyStats = async (req, res) => {
   try {
     let { start_date, end_date, provider_id, model, app_key_id } = req.query
 
-    // 默认最近 30 天
+    // 默认最近 30 天（使用本地日期，避免 UTC 时区偏差）
     if (!end_date) {
-      end_date = new Date().toISOString().slice(0, 10)
+      end_date = getLocalDateString(new Date())
     }
     if (!start_date) {
       const d = new Date()
       d.setDate(d.getDate() - 29)
-      start_date = d.toISOString().slice(0, 10)
+      start_date = getLocalDateString(d)
     }
 
     const where = ['DATE(l.created_at) BETWEEN ? AND ?']

@@ -1,7 +1,11 @@
 // ============ ToolService ============
+import { fetchWithTimeout, AppError, ERROR_CODES, LRUCache } from '../../shared/utils.js'
+
 export class ToolService {
   constructor(configService) {
     this.configService = configService
+    // Feature 3: 脚本执行结果 LRU 缓存，避免相同参数重复执行
+    this._resultCache = new LRUCache(30)
   }
 
   async searchScripts(query) {
@@ -12,9 +16,10 @@ export class ToolService {
     try {
       const auth = await this.configService.getAppAuth()
       const authHeaders = await this.configService.generateAuthHeaders(auth.appKey, auth.appSecret)
-      const res = await fetch(
+      const res = await fetchWithTimeout(
         `${config.serverUrl}/api/scripts/search?q=${encodeURIComponent(query)}&limit=5`,
-        { headers: authHeaders }
+        { headers: authHeaders },
+        15000, 0
       )
       const data = await res.json()
       if (data.success && Array.isArray(data.data)) {
@@ -43,9 +48,9 @@ export class ToolService {
     try {
       const auth = await this.configService.getAppAuth()
       const authHeaders = await this.configService.generateAuthHeaders(auth.appKey, auth.appSecret)
-      const res = await fetch(`${config.serverUrl}/api/scripts/${scriptId}/inject`, {
+      const res = await fetchWithTimeout(`${config.serverUrl}/api/scripts/${scriptId}/inject`, {
         headers: authHeaders,
-      })
+      }, 15000, 0)
       const data = await res.json()
       if (data.success && data.data) return data.data
     } catch (e) {
@@ -66,12 +71,43 @@ export class ToolService {
     const toolConfig = injectData.tool_config || tool.toolConfig || {}
     const toolType = injectData.tool_type || tool.toolType || 'js'
 
-    if (toolType === 'api' && toolConfig.apiEndpoint) {
-      console.log('[ToolService] API调用:', toolConfig.apiEndpoint, toolConfig.apiMethod || 'GET')
-      return await this.executeAPITool(toolConfig, tool.name, funcArgs)
+    // Feature 3: 结果缓存 — toolConfig.cacheable 为 true 时缓存结果
+    // 缓存键：toolId + 参数摘要，避免相同参数重复执行
+    if (toolConfig.cacheable === true) {
+      const cacheKey = `${tool.id}|${JSON.stringify(funcArgs || {})}`
+      const cached = this._resultCache.get(cacheKey)
+      if (cached) {
+        console.log('[ToolService] 命中结果缓存:', tool.id)
+        return cached
+      }
+      // 暂存 cacheKey 供执行后写入
+      this._pendingCacheKey = cacheKey
+    } else {
+      this._pendingCacheKey = null
     }
 
-    return await this.executeJSTool(injectData.code, toolConfig, tabId, tool.name, funcArgs)
+    let result
+    if (toolType === 'api' && toolConfig.apiEndpoint) {
+      console.log('[ToolService] API调用:', toolConfig.apiEndpoint, toolConfig.apiMethod || 'GET')
+      result = await this.executeAPITool(toolConfig, tool.name, funcArgs)
+    } else {
+      result = await this.executeJSTool(injectData.code, toolConfig, tabId, tool.name, funcArgs)
+    }
+
+    // 执行成功后写入缓存
+    if (this._pendingCacheKey && result?.ok) {
+      this._resultCache.set(this._pendingCacheKey, result)
+      this._pendingCacheKey = null
+    }
+
+    return result
+  }
+
+  /**
+   * 清空结果缓存（任务结束时调用）
+   */
+  clearCache() {
+    this._resultCache.clear()
   }
 
   async executeJSTool(code, toolConfig, tabId, toolName) {
@@ -79,22 +115,29 @@ export class ToolService {
       const results = await chrome.scripting.executeScript({
         target: { tabId },
         func: (scriptCode, config) => {
+          // 使用 finally 确保 __TOOL_CONFIG__ 总是被清理，避免异常时残留污染下一工具
           try {
             window.__TOOL_CONFIG__ = config || {}
             const fn = new Function('config', scriptCode)
             const result = fn(config || {})
-            delete window.__TOOL_CONFIG__
             return { ok: true, result: result !== undefined ? result : '执行成功' }
           } catch (e) {
             return { ok: false, error: e.message }
+          } finally {
+            // 无论如何都清理全局配置，防止异常时残留
+            try { delete window.__TOOL_CONFIG__ } catch {}
           }
         },
         args: [code, toolConfig],
         world: 'MAIN',
       })
-      const result = results[0]?.result
-      if (!result.ok) {
-        return { ok: false, error: result.error }
+      // 防御空结果（tab 已关闭、frame 未匹配等场景）
+      const result = results?.[0]?.result
+      if (!result) {
+        return { ok: false, error: '脚本执行无返回结果（目标标签页可能已关闭或正在导航中）' }
+      }
+      if (result.ok === false) {
+        return { ok: false, error: result.error || '脚本执行失败' }
       }
       return { ok: true, result: result.result }
     } catch (e) {
@@ -139,7 +182,7 @@ export class ToolService {
       if (apiMethod !== 'GET' && Object.keys(finalBody).length > 0) {
         fetchOptions.body = JSON.stringify(finalBody)
       }
-      const res = await fetch(apiEndpoint, fetchOptions)
+      const res = await fetchWithTimeout(apiEndpoint, fetchOptions, 30000, 0)
       console.log('[ToolService] API响应状态:', res.status, res.statusText)
       const data = await res.json()
       console.log('[ToolService] API返回数据类型:', typeof data, 'keys:', Object.keys(data || {}).join(','))
@@ -149,7 +192,8 @@ export class ToolService {
       if (extractor && typeof extractor === 'string') {
         result = extractor.split('.').reduce((obj, key) => obj?.[key], data)
       }
-      const finalResult = result || data
+      // 用 ?? 替代 ||，避免 0/false/'' 等合法 falsy 值被误判为"未提取到"而回退到原始 data
+      const finalResult = (result === undefined || result === null) ? data : result
       console.log('[ToolService] 最终结果长度:', JSON.stringify(finalResult).length)
       return { ok: true, result: finalResult }
     } catch (e) {

@@ -157,24 +157,16 @@
   }
 
   function generateSelector(el) {
-    // 如果有唯一id，直接用 #id
-    if (el.id) {
-      var idTest = document.querySelectorAll('#' + cssEscape(el.id));
-      if (idTest.length === 1) {
-        return '#' + cssEscape(el.id);
-      }
-    }
-
-    // 尝试 tag.className
     var tag = el.tagName.toLowerCase();
     var meaningfulClasses = getMeaningfulClasses(el);
 
+    // 策略1: 优先使用 tag.className 匹配多个同结构元素（批量提取核心）
     if (meaningfulClasses.length > 0) {
-      // 尝试每个有意义的类
+      // 尝试每个有意义的类，优先返回匹配多个元素的选择器
       for (var i = 0; i < meaningfulClasses.length; i++) {
         var sel = tag + '.' + cssEscape(meaningfulClasses[i]);
         var matches = document.querySelectorAll(sel);
-        if (matches.length > 0 && matches.length <= 100) {
+        if (matches.length > 1 && matches.length <= 500) {
           // 验证选中元素中包含目标
           for (var j = 0; j < matches.length; j++) {
             if (matches[j] === el) {
@@ -186,7 +178,7 @@
       // 组合所有有意义的类
       var fullClassSel = tag + '.' + meaningfulClasses.map(function (c) { return cssEscape(c); }).join('.');
       var fullMatches = document.querySelectorAll(fullClassSel);
-      if (fullMatches.length > 0 && fullMatches.length <= 100) {
+      if (fullMatches.length > 1 && fullMatches.length <= 500) {
         for (var k = 0; k < fullMatches.length; k++) {
           if (fullMatches[k] === el) {
             return fullClassSel;
@@ -195,14 +187,51 @@
       }
     }
 
-    // 寻找重复结构的容器，生成相对选择器
+    // 策略2: 寻找重复结构的容器，生成相对选择器（兄弟元素批量匹配）
     var relSelector = findRelativeSelector(el);
     if (relSelector) {
       return relSelector;
     }
 
-    // 回退: 完整路径 nth-child
+    // 策略3: 如果没有同类兄弟，尝试向上查找有 ID 的祖先 + tag 选择器
+    var ancestorSel = findAncestorWithId(el, tag);
+    if (ancestorSel) {
+      return ancestorSel;
+    }
+
+    // 策略4: 回退到 #id（如果有且唯一，至少保证选中目标）
+    if (el.id) {
+      var idTest = document.querySelectorAll('#' + cssEscape(el.id));
+      if (idTest.length === 1) {
+        return '#' + cssEscape(el.id);
+      }
+    }
+
+    // 策略5: 最终回退 - 完整路径 nth-child
     return buildFullPath(el);
+  }
+
+  // 向上查找有 ID 的祖先元素，用 #ancestor tag 形式匹配同类元素
+  function findAncestorWithId(el, tag) {
+    var parent = el.parentElement;
+    for (var depth = 0; depth < 5 && parent; depth++) {
+      if (parent.id) {
+        var sel = '#' + cssEscape(parent.id) + ' ' + tag;
+        try {
+          var matches = document.querySelectorAll(sel);
+          if (matches.length >= 1 && matches.length <= 500) {
+            // 验证目标在结果中
+            for (var i = 0; i < matches.length; i++) {
+              if (matches[i] === el) {
+                return sel;
+              }
+            }
+          }
+        } catch (e) {}
+      }
+      parent = parent.parentElement;
+    }
+    return null;
   }
 
   function findRelativeSelector(el) {
@@ -237,7 +266,7 @@
             if (parentSel) {
               var combined = parentSel + ' > ' + candidateSelectors[si];
               var combinedMatches = document.querySelectorAll(combined);
-              if (combinedMatches.length > 1 && combinedMatches.length <= 200) {
+              if (combinedMatches.length > 1 && combinedMatches.length <= 500) {
                 return combined;
               }
             }

@@ -1,5 +1,9 @@
 // AI Browser Chrome Extension - SidePanel Logic
 
+import { fetchWithTimeout, callServiceWithTimeout } from '../shared/utils.js'
+import { initFeaturePanels, renderExecutionGraph, appendDebugLogToPanel } from './feature-panels.js'
+import { ExportService } from '../shared/export-service.js'
+
 const MSG_TYPES = {
   CALL_SERVICE: 'callService',
   STREAM_CHUNK: 'streamChunk',
@@ -87,20 +91,19 @@ async function callService(service, method, ...args) {
     console.warn('[RPC] Extension context invalidated, cannot call', service, method)
     throw new Error('扩展上下文已失效，请关闭侧边栏后重新打开')
   }
-  try {
-    const res = await chrome.runtime.sendMessage({
-      type: MSG_TYPES.CALL_SERVICE,
-      service, method, args,
-    })
-    if (res?.error) throw new Error(res.error)
-    return res?.data
-  } catch (e) {
-    if (e.message?.includes('Extension context invalidated') || e.message?.includes('Could not establish connection')) {
+  // Feature 10: 统一 callService 超时保护（30s），避免 SW 无响应时永久挂起
+  const { error, data } = await callServiceWithTimeout({
+    type: MSG_TYPES.CALL_SERVICE,
+    service, method, args,
+  }, 30000)
+  if (error) {
+    if (error.includes('Extension context invalidated') || error.includes('Could not establish connection')) {
       console.warn('[RPC] 扩展已重载，请重新打开侧边栏')
       throw new Error('扩展已重载，请关闭侧边栏后重新打开')
     }
-    throw e
+    throw new Error(error)
   }
+  return data
 }
 
 // ============ 视图切换 ============
@@ -266,51 +269,9 @@ const chatInput = document.getElementById('chatInput')
 const sendBtn = document.getElementById('sendBtn')
 
 // ===== Debug Log 面板 =====
-let _debugLogWindow = null
-let _debugLogReady = false     // 外部窗口就绪标志
-let _debugLogQueue = []        // 就绪前的消息队列
-let _debugLogFlushTimer = null // 定时刷新队列
-
 function appendDebugLog(label, detail, level) {
-  // 转发到外部 Log 窗口
-  if (_debugLogWindow && !_debugLogWindow.closed) {
-    const msg = { type: 'agentDebug', label, detail }
-    if (_debugLogReady) {
-      try { _debugLogWindow.postMessage(msg, '*') } catch {}
-    } else {
-      _debugLogQueue.push(msg)
-      // 每 500ms 重试发送（等待窗口加载完成）
-      if (!_debugLogFlushTimer) {
-        _debugLogFlushTimer = setInterval(() => {
-          if (_debugLogReady && _debugLogQueue.length > 0) {
-            for (const m of _debugLogQueue) {
-              try { _debugLogWindow.postMessage(m, '*') } catch {}
-            }
-            _debugLogQueue = []
-            clearInterval(_debugLogFlushTimer)
-            _debugLogFlushTimer = null
-          }
-        }, 500)
-      }
-    }
-  }
-}
-// 打开外部 Log 窗口
-function openDebugLogWindow() {
-  // 仅调试模式开启时才弹出
-  const debugToggle = document.getElementById('agentDebugToggle')
-  if (!debugToggle || !debugToggle.classList.contains('on')) return
-  if (_debugLogWindow && !_debugLogWindow.closed) {
-    _debugLogWindow.focus()
-    return
-  }
-  _debugLogReady = false
-  _debugLogQueue = []
-  _debugLogWindow = window.open(
-    chrome.runtime.getURL('sidepanel/debug-log-viewer.html'),
-    'debugLogPopup',
-    'width=800,height=700,left=100,top=50,menubar=no,toolbar=no,location=no,status=no'
-  )
+  // 转发到内置工具面板的调试日志标签
+  appendDebugLogToPanel(label, detail, level)
 }
 
 // 转发 agentTodoUpdate 消息到 content script 和 todo-viewer 窗口
@@ -336,24 +297,6 @@ async function forwardTodoUpdate(data) {
     console.warn('[Sidepanel] forwardTodoUpdate failed:', e)
   }
 }
-
-// 接收外部窗口的就绪信号
-window.addEventListener('message', (e) => {
-  if (e.data?.type === 'debugLogReady') {
-    _debugLogReady = true
-    // 立即刷新队列
-    if (_debugLogQueue.length > 0) {
-      for (const m of _debugLogQueue) {
-        try { _debugLogWindow.postMessage(m, '*') } catch {}
-      }
-      _debugLogQueue = []
-    }
-    if (_debugLogFlushTimer) {
-      clearInterval(_debugLogFlushTimer)
-      _debugLogFlushTimer = null
-    }
-  }
-})
 
 
 function renderMarkdown(text) {
@@ -382,13 +325,22 @@ function renderMarkdown(text) {
   html = html.replace(/^## (.+)$/gm, '<h2>$1</h2>')
   html = html.replace(/^# (.+)$/gm, '<h1>$1</h1>')
 
-  // 链接 [text](url) — 过滤 javascript: 等危险协议防 XSS
+  // 链接 [text](url) — 过滤 javascript: 等危险协议防 XSS，并转义 URL 中的引号
   html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_, text, url) => {
-    const safeUrl = url.trim().toLowerCase()
-    if (safeUrl.startsWith('javascript:') || safeUrl.startsWith('data:') || safeUrl.startsWith('vbscript:')) {
+    const trimmedUrl = url.trim()
+    const safeUrlLower = trimmedUrl.toLowerCase()
+    // 危险协议黑名单
+    if (/^\s*(javascript|data|vbscript|file|blob)\s*:/i.test(safeUrlLower)) {
       return text
     }
-    return `<a href="${url}" target="_blank" rel="noopener">${text}</a>`
+    // 仅允许 http/https 协议
+    try {
+      const parsed = new URL(trimmedUrl)
+      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return text
+    } catch { return text }
+    // 转义 URL 中的 " 和 ' 防止属性注入
+    const escapedUrl = trimmedUrl.replace(/"/g, '&quot;').replace(/'/g, '&#39;')
+    return `<a href="${escapedUrl}" target="_blank" rel="noopener noreferrer">${text}</a>`
   })
 
   // 无序列表（合并连续的 <li>）
@@ -491,6 +443,16 @@ function escapeHtml(str) {
 async function sendMessage(text) {
   if (!text.trim() || isStreaming) return
 
+  // 防御：PDF 正在解析中时阻止发送（否则会发送空文本给 AI）
+  if (attachedPdf && attachedPdf.parsing) {
+    showUploadToast('PDF 正在解析中，请稍候再发送')
+    return
+  }
+
+  // 尽早设置 isStreaming，防止 await 期间用户双击导致重复发送
+  isStreaming = true
+  sendBtn.disabled = true
+
   // 检测是否需要页面内容
   const pageKeywords = ['总结', '翻译', '提取', '分析', '页面', '当前', '网页', '本文', '这篇文章']
   const needPageContent = pageKeywords.some(kw => text.includes(kw))
@@ -521,9 +483,6 @@ async function sendMessage(text) {
   chatInput.style.height = 'auto'
   sendBtn.classList.remove('active')
 
-  isStreaming = true
-  sendBtn.disabled = true
-
   if (agentMode) {
     await runAgent(text, pageContext)
     return
@@ -534,14 +493,16 @@ async function sendMessage(text) {
   let fullContent = ''
 
   try {
-    // 构建发送给 AI 的消息列表：处理页面上下文、PDF 文本与附加图片
+    // 构建发送给 AI 的消息列表：同时支持图片和 PDF（不再互斥）
     let lastUserContent = text + (pageContext || '')
+    let messagesForAI
     // 若已附加 PDF，把解析出的文本拼到用户问题之前
     if (attachedPdf && attachedPdf.text) {
       const pagesInfo = attachedPdf.pages ? `（共 ${Array.isArray(attachedPdf.pages) ? attachedPdf.pages.length : attachedPdf.pages} 页）` : ''
       lastUserContent = `【PDF 文档：${attachedPdf.name}${pagesInfo}】\n${attachedPdf.text}\n\n【以上为 PDF 内容，请据此回答以下问题】\n${lastUserContent}`
     }
-    let messagesForAI
+
+    // 同时处理图片和 PDF：图片走 vision 数组格式，PDF 文本拼入 text
     if (attachedImage) {
       // AI 服务端在公网，无法访问本地 admin-server 的图片 URL，需转 base64 data URL
       // 聊天历史仍存 URL（体积小），仅发送给 AI 时临时转换
@@ -568,18 +529,21 @@ async function sendMessage(text) {
           { type: 'image_url', image_url: { url: imageUrlForAI } },
         ],
       }]
-      attachedImage = null
-      attachedPdf = null
-      renderAttachmentPreview()
     } else if (attachedPdf) {
       // 仅 PDF 无图片：用纯文本消息（已拼入 lastUserContent）
       messagesForAI = [...chatHistory.slice(0, -1), { role: 'user', content: lastUserContent }]
-      attachedPdf = null
-      renderAttachmentPreview()
     } else if (pageContext) {
       messagesForAI = [...chatHistory.slice(0, -1), { role: 'user', content: lastUserContent }]
     } else {
       messagesForAI = chatHistory
+    }
+
+    // 统一清理已发送的附件（不再因分支差异导致 PDF 残留或图片误清）
+    // 之前的代码在 image 分支会清空 attachedPdf，导致同时上传时 PDF 被静默丢弃
+    if (attachedImage || attachedPdf) {
+      attachedImage = null
+      attachedPdf = null
+      renderAttachmentPreview()
     }
 
     if (!chrome.runtime?.id) { finishStreaming('扩展已重载，请重新打开侧边栏'); return }
@@ -683,10 +647,9 @@ async function loadAgentMode() {
       let fullContent = ''
       let toolResults = []
       currentPort.onMessage.addListener((msg) => {
-        if (msg.type === 'agentTodoUpdate') { forwardTodoUpdate(msg.data); return }
+        if (msg.type === 'agentTodoUpdate') { forwardTodoUpdate(msg.data); renderExecutionGraph(msg.data); return }
         if (msg.type === 'agentStart') {
           card.querySelector('.agent-step-title').textContent = 'Agent 已启动，分析需求中...'
-          openDebugLogWindow()
         } else if (msg.type === 'agentStatus') {
           card.querySelector('.agent-step-title').textContent = msg.text || '处理中...'
         } else if (msg.type === 'agentStep') {
@@ -914,10 +877,12 @@ async function runAgent(userText, pageContext) {
 
     // 先注册消息监听器，再发送 agentStart（避免响应比监听器先到达）
     currentPort.onMessage.addListener((msg) => {
-      if (msg.type === 'agentTodoUpdate') { forwardTodoUpdate(msg.data); return }
+      if (msg.type === 'agentTodoUpdate') { forwardTodoUpdate(msg.data); renderExecutionGraph(msg.data); return }
       if (msg.type === 'agentStart') {
         card.querySelector('.agent-step-title').textContent = 'Agent 已启动，分析需求中...'
-        openDebugLogWindow()
+        // Feature 8: 显示聊天视图中的执行图面板
+        const graphPanel = document.getElementById('chatExecutionGraph')
+        if (graphPanel) { graphPanel.style.display = ''; graphPanel.open = true }
       } else if (msg.type === 'agentStatus') {
         card.querySelector('.agent-step-title').textContent = msg.text || '处理中...'
       } else if (msg.type === 'agentStep') {
@@ -1377,7 +1342,7 @@ document.getElementById('testConnectionBtn').addEventListener('click', async () 
   try {
     const headers = await callService('configService', 'generateAuthHeaders', appKey, appSecret)
     const url = serverUrl.replace(/\/+$/, '') + '/api/ai-models/available'
-    const res = await fetch(url, { method: 'GET', headers })
+    const res = await fetchWithTimeout(url, { method: 'GET', headers }, 15000, 1)
     if (!res.ok) {
       const text = await res.text().catch(() => '')
       throw new Error(`${res.status} ${text.slice(0, 100)}`)
@@ -1407,6 +1372,63 @@ document.getElementById('uploadBtn').addEventListener('click', () => {
   fileInput.click()
 })
 
+// Feature 21: 导出对话历史（支持 JSON/CSV/Markdown/HTML/TXT）
+document.getElementById('exportBtn').addEventListener('click', (e) => {
+  e.stopPropagation()
+  // 移除已存在的菜单
+  const existing = document.getElementById('exportFormatMenu')
+  if (existing) { existing.remove(); return }
+  if (chatHistory.length === 0) {
+    showUploadToast('暂无对话内容可导出')
+    return
+  }
+  const menu = document.createElement('div')
+  menu.id = 'exportFormatMenu'
+  menu.style.cssText = 'position:fixed;background:#fff;border:1px solid rgba(0,0,0,0.12);border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,0.12);z-index:99999;padding:4px;min-width:140px'
+  const btn = e.currentTarget
+  const rect = btn.getBoundingClientRect()
+  menu.style.left = rect.left + 'px'
+  menu.style.bottom = (window.innerHeight - rect.top + 4) + 'px'
+  const formats = ExportService.getSupportedFormats()
+  for (const f of formats) {
+    const item = document.createElement('div')
+    item.textContent = f.label
+    item.style.cssText = 'padding:8px 12px;cursor:pointer;border-radius:4px;font-size:13px'
+    item.addEventListener('mouseenter', () => { item.style.background = 'rgba(104,65,234,0.08)' })
+    item.addEventListener('mouseleave', () => { item.style.background = 'none' })
+    item.addEventListener('click', async () => {
+      menu.remove()
+      // 构造导出数据：提取 role/content/toolName 字段
+      const exportData = chatHistory.map(m => ({
+        role: m.role || '',
+        content: typeof m.content === 'string' ? m.content : JSON.stringify(m.content || ''),
+        timestamp: m.timestamp || '',
+      }))
+      try {
+        const result = await ExportService.export(exportData, {
+          format: f.value,
+          title: 'AI Browser 对话记录',
+          columns: ['role', 'content', 'timestamp'],
+        })
+        if (result?.ok) showUploadToast('已导出: ' + result.filename)
+        else showUploadToast('导出失败: ' + (result?.error || '未知错误'))
+      } catch (err) { showUploadToast('导出失败: ' + err.message) }
+    })
+    menu.appendChild(item)
+  }
+  document.body.appendChild(menu)
+  // 点击外部关闭菜单
+  setTimeout(() => {
+    const closeHandler = (ev) => {
+      if (!menu.contains(ev.target)) {
+        menu.remove()
+        document.removeEventListener('click', closeHandler)
+      }
+    }
+    document.addEventListener('click', closeHandler)
+  }, 0)
+})
+
 fileInput.addEventListener('change', async (e) => {
   const file = e.target.files[0]
   if (!file) return
@@ -1419,7 +1441,7 @@ fileInput.addEventListener('change', async (e) => {
       const { url, headers } = await callService('configService', 'getPdfUploadConfig')
       const formData = new FormData()
       formData.append('file', file, file.name)
-      const res = await fetch(url, { method: 'POST', headers, body: formData })
+      const res = await fetchWithTimeout(url, { method: 'POST', headers, body: formData }, 60000, 0)
       const text = await res.text()
       let json
       try { json = JSON.parse(text) } catch (_) {
@@ -1458,7 +1480,7 @@ fileInput.addEventListener('change', async (e) => {
       const { url, headers } = await callService('configService', 'getImageUploadConfig')
       const formData = new FormData()
       formData.append('file', file, file.name)
-      const res = await fetch(url, { method: 'POST', headers, body: formData })
+      const res = await fetchWithTimeout(url, { method: 'POST', headers, body: formData }, 60000, 0)
       const text = await res.text()
       let json
       try { json = JSON.parse(text) } catch (_) {
@@ -1783,6 +1805,84 @@ async function checkFloatingAction() {
 }
 checkFloatingAction()
 
+// Feature 8/20/7/4/23: 初始化内置工具面板（标签页结构）
+let _builtInToolsContainer = null
+try {
+  _builtInToolsContainer = initFeaturePanels(callService)
+  const target = document.getElementById('builtInToolsContainer')
+  if (target && _builtInToolsContainer) {
+    target.appendChild(_builtInToolsContainer)
+  }
+} catch (e) {
+  console.warn('[SidePanel] 内置工具面板初始化失败:', e.message)
+}
+
+// 内置工具浮动面板：打开/关闭/最小化/拖拽
+const _toolsPanel = document.getElementById('builtInToolsPanel')
+document.getElementById('openBuiltInToolsBtn')?.addEventListener('click', () => {
+  if (_toolsPanel) {
+    _toolsPanel.classList.add('show')
+    _toolsPanel.classList.remove('minimized')
+  }
+})
+document.getElementById('builtInToolsClose')?.addEventListener('click', () => {
+  if (_toolsPanel) _toolsPanel.classList.remove('show')
+})
+document.getElementById('builtInToolsMinimize')?.addEventListener('click', () => {
+  if (_toolsPanel) _toolsPanel.classList.toggle('minimized')
+})
+
+// 拖拽功能
+if (_toolsPanel) {
+  const header = _toolsPanel.querySelector('.builtin-tools-header')
+  let isDragging = false, startX, startY, startLeft, startTop
+
+  if (header) {
+    header.addEventListener('mousedown', (e) => {
+      // 不拦截按钮和标签点击
+      if (e.target.closest('.builtin-tools-btn') || e.target.closest('.fp-tab-btn')) return
+      
+      isDragging = true
+      const rect = _toolsPanel.getBoundingClientRect()
+      const parent = _toolsPanel.parentElement
+      if (!parent) return
+      
+      const parentRect = parent.getBoundingClientRect()
+      startX = e.clientX
+      startY = e.clientY
+      startLeft = rect.left - parentRect.left
+      startTop = rect.top - parentRect.top
+      
+      _toolsPanel.style.transition = 'none'
+      e.preventDefault()
+    })
+  }
+
+  document.addEventListener('mousemove', (e) => {
+    if (!isDragging || !_toolsPanel || !_toolsPanel.parentElement) return
+    
+    const dx = e.clientX - startX
+    const dy = e.clientY - startY
+    const parent = _toolsPanel.parentElement
+    const parentRect = parent.getBoundingClientRect()
+    const panelRect = _toolsPanel.getBoundingClientRect()
+    
+    // 限制在父容器内
+    let newLeft = Math.max(0, Math.min(startLeft + dx, parentRect.width - panelRect.width))
+    let newTop = Math.max(0, Math.min(startTop + dy, parentRect.height - panelRect.height))
+    
+    _toolsPanel.style.left = newLeft + 'px'
+    _toolsPanel.style.top = newTop + 'px'
+  })
+
+  document.addEventListener('mouseup', () => {
+    if (isDragging && _toolsPanel) {
+      isDragging = false
+      _toolsPanel.style.transition = ''
+    }
+  })
+}
+
 // 监听 storage 变化（sidepanel 已打开时，新的划词操作会触发）
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area === 'local') {
@@ -1799,8 +1899,10 @@ chrome.storage.onChanged.addListener((changes, area) => {
     // Agent 在后台写入 chatHistory 时，自动同步到 UI
     if (changes.chatHistory?.newValue) {
       const newHistory = changes.chatHistory.newValue
-      if (newHistory.length >= chatHistory.length) {
-        const newMsgs = newHistory.slice(chatHistory.length)
+      // 快照长度防止在处理过程中 chatHistory 被其他流程修改导致重复渲染
+      const prevLen = chatHistory.length
+      if (newHistory.length >= prevLen) {
+        const newMsgs = newHistory.slice(prevLen)
         if (newMsgs.length > 0) {
           console.log('[SidePanel] storage.onChanged: 检测到', newMsgs.length, '条新消息（来自 Agent）')
           chatHistory = newHistory

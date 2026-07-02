@@ -14,7 +14,7 @@ export function shouldStoreToPayload(result, toolName) {
 /**
  * 生成 payloadStore 摘要（发给 AI 的）
  */
-export function generatePayloadSummary(result, toolName) {
+function generatePayloadSummary(result, toolName) {
   try {
     const obj = typeof result === 'string' ? JSON.parse(result) : result
 
@@ -93,7 +93,7 @@ export function storeToPayload(payloadStore, result, toolName) {
 /**
  * 获取数据条数
  */
-export function getPayloadCount(result) {
+function getPayloadCount(result) {
   try {
     const obj = typeof result === 'string' ? JSON.parse(result) : result
     if (Array.isArray(obj)) return obj.length
@@ -109,7 +109,7 @@ export function getPayloadCount(result) {
 /**
  * 获取数据样本
  */
-export function getPayloadSample(result) {
+function getPayloadSample(result) {
   try {
     const obj = typeof result === 'string' ? JSON.parse(result) : result
     if (Array.isArray(obj) && obj.length > 0) {
@@ -127,9 +127,19 @@ export function getPayloadSample(result) {
 
 /**
  * 智能结果截断（按结构截断，非一刀切）
+ * 兼容字符串与对象输入
  */
 export function smartTruncateResult(result, maxLen = 2000) {
-  if (!result || result.length <= maxLen) return result
+  // 统一为字符串处理
+  if (result == null) return ''
+  if (typeof result !== 'string') {
+    try {
+      result = JSON.stringify(result)
+    } catch {
+      result = String(result)
+    }
+  }
+  if (result.length <= maxLen) return result
   try {
     const obj = JSON.parse(result)
     if (Array.isArray(obj)) {

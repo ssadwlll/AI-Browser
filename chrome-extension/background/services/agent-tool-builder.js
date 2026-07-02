@@ -70,7 +70,7 @@ function buildScriptToolDefs(scripts) {
 /**
  * 构建完整工具定义（Phase 1 使用，包含所有 DOM 工具）
  */
-export function buildToolDefinitions(searchResults, currentPageUrl, round, scriptService, filteredScriptsCache, domainMismatchLogged) {
+function buildToolDefinitions(searchResults, currentPageUrl, round, scriptService, filteredScriptsCache, domainMismatchLogged) {
   const tools = []
 
   // 核心工具

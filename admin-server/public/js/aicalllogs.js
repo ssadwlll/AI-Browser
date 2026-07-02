@@ -4,12 +4,20 @@ let aclPageSize = 20;
 let aclDailyChartInst = null;
 let aclModelChartInst = null;
 
+// 获取本地日期字符串 YYYY-MM-DD（避免 toISOString 返回 UTC 日期）
+function getLocalDateString(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
 async function initAICallLogs() {
   const end = new Date();
   const start = new Date();
   start.setDate(start.getDate() - 29);
-  document.getElementById('aclStartDate').value = start.toISOString().slice(0, 10);
-  document.getElementById('aclEndDate').value = end.toISOString().slice(0, 10);
+  document.getElementById('aclStartDate').value = getLocalDateString(start);
+  document.getElementById('aclEndDate').value = getLocalDateString(end);
   await aclLoadFilters();
   await aclLoadStats();
   await aclLoadList();

@@ -78,9 +78,37 @@
   })
 
   // 监听注入脚本的回调（inject_js 通过 window.postMessage 反馈）
+  // 为防止页面脚本伪造回调消息，使用 nonce 验证机制：
+  // 1. 内容脚本生成随机 nonce 并暴露到 window（非枚举，MAIN world 可读）
+  // 2. 注入脚本回调时携带 nonce: window.__AI_BROWSER_CB_NONCE__
+  // 3. 内容脚本校验 nonce 匹配
+  // 注意：旧版注入脚本不携带 nonce，会被拒绝（建议更新脚本以包含 nonce）
+  const _callbackNonce = Math.random().toString(36).slice(2) + Date.now().toString(36)
+  try {
+    Object.defineProperty(window, '__AI_BROWSER_CB_NONCE__', {
+      value: _callbackNonce,
+      writable: false,
+      configurable: false,
+      enumerable: false,  // 隐藏，防止页面枚举
+    })
+  } catch (e) {
+    console.warn('[AI Browser] 无法设置回调 nonce，回调验证将降级')
+  }
+
   window.addEventListener('message', (event) => {
     if (event.source !== window) return
     if (event.data?.type === 'AI_BROWSER_CALLBACK') {
+      // 校验 nonce：防止页面脚本伪造回调消息注入后台
+      const msgNonce = event.data.nonce
+      if (!msgNonce) {
+        // 旧版脚本不携带 nonce，记录警告但拒绝（防止伪造）
+        console.warn('[AI Browser] 收到无 nonce 的回调消息，已拒绝。请更新注入脚本以包含 nonce: window.__AI_BROWSER_CB_NONCE__')
+        return
+      }
+      if (_callbackNonce && msgNonce !== _callbackNonce) {
+        console.warn('[AI Browser] 回调 nonce 不匹配，已拒绝')
+        return
+      }
       safeSendMessage({
         type: 'injectCallback',
         data: event.data.data || {},
@@ -501,9 +529,12 @@
 
     _todoLastData = data
 
-    // 记录阶段切换日志
+    // 记录阶段切换日志（限制最大数量，防止长任务累积导致内存膨胀）
     if (data.stageSwitch) {
       _todoSwitchLogs.push(`${data.stageSwitch.reason} → ${STAGE_NAMES[data.stageSwitch.to] || 'Stage ' + data.stageSwitch.to}`)
+      if (_todoSwitchLogs.length > 50) {
+        _todoSwitchLogs.splice(0, _todoSwitchLogs.length - 50)
+      }
     }
 
     // 自动显示
@@ -557,7 +588,14 @@
       const headerText = STAGE_NAMES[stageNum] || `Stage ${stageNum}`
       const subTodos = stage.subTodos || []
       const completedCount = subTodos.filter(t => t._status === 'done').length
-      header.innerHTML = `<span>${headerText}</span><span class="badge">${completedCount}/${subTodos.length}</span>`
+      // 用 DOM API 构建，避免 innerHTML（headerText 来自常量，但保持一致性）
+      const headerLabel = document.createElement('span')
+      headerLabel.textContent = headerText
+      const headerBadge = document.createElement('span')
+      headerBadge.className = 'badge'
+      headerBadge.textContent = `${completedCount}/${subTodos.length}`
+      header.appendChild(headerLabel)
+      header.appendChild(headerBadge)
       group.appendChild(header)
 
       const list = document.createElement('ul')
@@ -577,20 +615,35 @@
 
         const content = document.createElement('div')
         content.className = 'todo-content'
-        content.innerHTML =
-          `<span class="todo-id">${todo.id}</span>` +
-          `<span class="todo-action">${todo.action}</span>` +
-          `<span class="todo-desc">${todo.description || ''}</span>`
+        // 使用 DOM API + textContent 避免 LLM 输出注入 HTML（XSS 防护）
+        const todoId = document.createElement('span')
+        todoId.className = 'todo-id'
+        todoId.textContent = todo.id == null ? '' : String(todo.id)
+        const todoAction = document.createElement('span')
+        todoAction.className = 'todo-action'
+        todoAction.textContent = todo.action == null ? '' : String(todo.action)
+        const todoDesc = document.createElement('span')
+        todoDesc.className = 'todo-desc'
+        todoDesc.textContent = todo.description == null ? '' : String(todo.description)
+        content.appendChild(todoId)
+        content.appendChild(todoAction)
+        content.appendChild(todoDesc)
 
         const keysDiv = document.createElement('div')
         keysDiv.className = 'todo-keys'
         if (todo.dataOutputKey) {
-          keysDiv.innerHTML += `<span class="key">out: ${todo.dataOutputKey}</span>`
+          const outKey = document.createElement('span')
+          outKey.className = 'key'
+          outKey.textContent = `out: ${todo.dataOutputKey}`
+          keysDiv.appendChild(outKey)
         }
         if (Array.isArray(todo.dataDependKeys) && todo.dataDependKeys.length > 0) {
-          keysDiv.innerHTML += `<span class="key">dep: ${todo.dataDependKeys.join(', ')}</span>`
+          const depKey = document.createElement('span')
+          depKey.className = 'key'
+          depKey.textContent = `dep: ${todo.dataDependKeys.join(', ')}`
+          keysDiv.appendChild(depKey)
         }
-        if (keysDiv.innerHTML) content.appendChild(keysDiv)
+        if (keysDiv.children.length > 0) content.appendChild(keysDiv)
 
         li.appendChild(content)
         list.appendChild(li)

@@ -1,51 +1,6 @@
 // ============ Agent 评判器 & 辅助函数 ============
-// 任务复杂度评估、结果自评、chatHistory 存储、标签页校验、经验记忆
-
-/**
- * 任务复杂度预评估：快速判断任务是否需要开发专用脚本
- */
-export async function assessComplexity(configService, userMessage, chatHistory) {
-  try {
-    const config = await configService.getAIConfig()
-    const url = await configService.getAIProxyUrl()
-    const auth = await configService.getAppAuth()
-    const headers = await configService.generateAuthHeaders(auth.appKey, auth.appSecret)
-
-    const assessMessages = [
-      {
-        role: 'system',
-        content: '你是一个任务复杂度评估器。分析用户请求，仅输出一行JSON，格式：{"level":"simple|medium|complex","estimatedRounds":数字,"needsScript":true|false}。评估标准：simple(≤5轮,单页面简单操作)、medium(6-12轮,多步骤单页面)、complex(13+轮,多页面/翻页/批量结构化提取)。needsScript=true表示任务最好用专用脚本而非DOM工具逐个操作。只输出JSON，不要任何解释。'
-      },
-      {
-        role: 'user',
-        content: `评估这个任务的复杂度：${userMessage}\n\n历史上下文摘要：${(chatHistory || []).slice(-3).map(m => `${m.role}: ${(m.content || '').slice(0, 100)}`).join(' | ')}`
-      }
-    ]
-
-    const body = { model: config.model, messages: assessMessages, temperature: 0.1, max_tokens: 128 }
-    const controller = new AbortController()
-    const timeoutId = setTimeout(() => controller.abort(), 15000)
-    const res = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body), signal: controller.signal })
-    clearTimeout(timeoutId)
-
-    if (!res.ok) return { level: 'unknown', estimatedRounds: 0, needsScript: false }
-
-    const data = await res.json()
-    const text = data.choices?.[0]?.message?.content?.trim() || ''
-    const jsonMatch = text.match(/\{[\s\S]*\}/)
-    if (!jsonMatch) return { level: 'unknown', estimatedRounds: 0, needsScript: false }
-
-    const result = JSON.parse(jsonMatch[0])
-    return {
-      level: result.level || 'unknown',
-      estimatedRounds: parseInt(result.estimatedRounds) || 0,
-      needsScript: !!result.needsScript,
-    }
-  } catch (e) {
-    console.log('[Agent] 复杂度评估失败（非致命）:', e.message)
-    return { level: 'unknown', estimatedRounds: 0, needsScript: false }
-  }
-}
+// 结果自评、chatHistory 存储、标签页校验、经验记忆
+import { isSystemUrl, safeJsonStringify, fetchWithTimeout } from '../../shared/utils.js'
 
 /**
  * 事后自评：对 Agent 执行结果进行快速评判
@@ -59,7 +14,8 @@ export async function runJudge(configService, userMessage, agentSummary, execute
 
     const toolSummary = executedTools.slice(0, 10).map(t => {
       const name = t.name || ''
-      const resultStr = typeof t.result === 'string' ? t.result : JSON.stringify(t.result || '')
+      // 使用 safeJsonStringify 避免循环引用导致 JSON.stringify 崩溃
+      const resultStr = typeof t.result === 'string' ? t.result : safeJsonStringify(t.result || '')
       return `${name}: ${resultStr.slice(0, 120)}`
     }).join('\n')
 
@@ -134,13 +90,15 @@ export async function saveToChatHistoryStorage(content, toolCalls) {
 
 /**
  * 获取并校验目标标签页
+ * 使用统一的 isSystemUrl 判断，覆盖所有危险协议
+ * （chrome://、edge://、about:、chrome-extension://、file://、view-source:、devtools:// 等）
  */
 export async function getTargetTab(tabId) {
   try {
     const tab = await chrome.tabs.get(tabId)
     if (!tab) return null
     const url = tab.url || ''
-    if (url.startsWith('chrome://') || url.startsWith('chrome-extension://') || url.startsWith('edge://') || url.startsWith('about:')) {
+    if (isSystemUrl(url)) {
       return null
     }
     return tab
@@ -158,7 +116,21 @@ export async function recordMemory(configService, scriptId, success, durationMs,
   try {
     const auth = await configService.getAppAuth()
     const authHeaders = await configService.generateAuthHeaders(auth.appKey, auth.appSecret)
-    await fetch(`${config.serverUrl}/api/scripts/${scriptId}/memories`, {
+    
+    // 上报使用统计到 usage_stats 表
+    await fetchWithTimeout(`${config.serverUrl}/api/scripts/${scriptId}/stats`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...authHeaders },
+      body: JSON.stringify({
+        action: 'run',
+        duration_ms: durationMs || 0,
+        success,
+        error_msg: (errorMessage || '').slice(0, 500) || null,
+      }),
+    }, 5000, 0).catch(() => {})
+    
+    // 上报记忆到 memories 表
+    await fetchWithTimeout(`${config.serverUrl}/api/scripts/${scriptId}/memories`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...authHeaders },
       body: JSON.stringify({
@@ -169,7 +141,7 @@ export async function recordMemory(configService, scriptId, success, durationMs,
         errorMessage: (errorMessage || '').slice(0, 500),
         resultSummary: (resultSummary || '').slice(0, 200),
       }),
-    })
+    }, 10000, 0)
   } catch (e) {
     // memory 记录失败不影响主流程
   }

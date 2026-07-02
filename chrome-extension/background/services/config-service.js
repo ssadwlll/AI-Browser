@@ -1,5 +1,7 @@
 // ============ ConfigService + StorageService ============
 
+import { fetchWithTimeout, AppError, ERROR_CODES } from '../../shared/utils.js'
+
 const DEFAULT_AI_CONFIG = {
   model: 'deepseek-v4-pro',
   temperature: 0.7,
@@ -12,17 +14,20 @@ const DEFAULT_SYNC_CONFIG = {
   appKey: '',
   appSecret: '',
   syncInterval: 30,
-  enabled: true,
+  enabled: false,  // 默认关闭同步，避免用户未配置 appKey/appSecret 时持续发起失败请求
 }
 
 // ============ 纯 JS HMAC-SHA256（兼容 HTTP 页面，不依赖 crypto.subtle） ============
 // 算法：HMAC(K, m) = SHA256((K⊕opad) || SHA256((K⊕ipad) || m))
 // 与 coze-proxy.php 服务端验证逻辑一致
 
+// 使用 TextEncoder 进行 UTF-8 编码，正确处理中文等多字节字符
+// 旧实现 charCodeAt(i) & 0xFF 会截断非 ASCII 字符导致签名错误
+const _textEncoder = new TextEncoder()
 function _strToBytes(str) {
-  const arr = []
-  for (let i = 0; i < str.length; i++) arr.push(str.charCodeAt(i) & 0xFF)
-  return arr
+  if (!str) return []
+  // 优先使用 TextEncoder（UTF-8）
+  return Array.from(_textEncoder.encode(str))
 }
 
 /**
@@ -90,15 +95,24 @@ function _hmacSha256(key, message) {
 }
 
 export class ConfigService {
+  // 配置保存串行化锁：防止并发读-改-写导致后写覆盖前写
+  _saveChain = Promise.resolve()
+
   async getAIConfig() {
     const data = await chrome.storage.local.get('aiConfig')
     return { ...DEFAULT_AI_CONFIG, ...(data.aiConfig || {}) }
   }
 
   async saveAIConfig(config) {
-    const merged = { ...DEFAULT_AI_CONFIG, ...config }
-    await chrome.storage.local.set({ aiConfig: merged })
-    return merged
+    // 串行化读-改-写
+    const run = () => (async () => {
+      const old = await this.getAIConfig()
+      const merged = { ...DEFAULT_AI_CONFIG, ...old, ...config }
+      await chrome.storage.local.set({ aiConfig: merged })
+      return merged
+    })()
+    this._saveChain = this._saveChain.then(run, run)
+    return this._saveChain
   }
 
   async getSyncConfig() {
@@ -107,9 +121,15 @@ export class ConfigService {
   }
 
   async saveSyncConfig(config) {
-    const merged = { ...DEFAULT_SYNC_CONFIG, ...config }
-    await chrome.storage.local.set({ syncConfig: merged })
-    return merged
+    // 串行化读-改-写
+    const run = () => (async () => {
+      const old = await this.getSyncConfig()
+      const merged = { ...DEFAULT_SYNC_CONFIG, ...old, ...config }
+      await chrome.storage.local.set({ syncConfig: merged })
+      return merged
+    })()
+    this._saveChain = this._saveChain.then(run, run)
+    return this._saveChain
   }
 
   async getSelectionToolsEnabled() {
@@ -137,9 +157,15 @@ export class ConfigService {
   }
 
   async saveAgentConfig(config) {
-    const merged = { ...(await this.getAgentConfig()), ...config }
-    await chrome.storage.local.set({ agentConfig: merged })
-    return merged
+    // 串行化读-改-写：防止并发保存导致后写覆盖前写
+    const run = () => (async () => {
+      const old = await this.getAgentConfig()
+      const merged = { ...old, ...config }
+      await chrome.storage.local.set({ agentConfig: merged })
+      return merged
+    })()
+    this._saveChain = this._saveChain.then(run, run)
+    return this._saveChain
   }
 
   /**
@@ -174,14 +200,15 @@ export class ConfigService {
     const syncConfig = await this.getSyncConfig()
     const url = syncConfig.serverUrl.replace(/\/+$/, '') + '/api/ai-models/available'
     const headers = await this.generateAuthHeaders(syncConfig.appKey, syncConfig.appSecret)
-    const res = await fetch(url, { method: 'GET', headers })
+    // 使用 fetchWithTimeout：15s 超时 + 1 次重试（对 5xx 自动重试）
+    const res = await fetchWithTimeout(url, { method: 'GET', headers }, 15000, 1)
     if (!res.ok) {
       const text = await res.text().catch(() => '')
-      throw new Error(`获取模型列表失败: ${res.status} ${text.slice(0, 200)}`)
+      throw new AppError(ERROR_CODES.AUTH_INVALID, `获取模型列表失败: ${res.status} ${text.slice(0, 200)}`)
     }
     const json = await res.json()
     if (!json.success) {
-      throw new Error(json.error || json.message || '获取模型列表失败')
+      throw new AppError(ERROR_CODES.UNKNOWN, json.error || json.message || '获取模型列表失败')
     }
     return json.data
   }

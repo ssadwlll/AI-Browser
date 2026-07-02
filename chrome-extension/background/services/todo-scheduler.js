@@ -179,6 +179,9 @@ Stage 3:
 
         // 注册 dataOutputKey
         if (todo.dataOutputKey) {
+          if (availableKeys.has(todo.dataOutputKey)) {
+            errors.push(`待办 ${todo.id} 的 dataOutputKey "${todo.dataOutputKey}" 与之前待办重复，必须唯一`)
+          }
           availableKeys.add(todo.dataOutputKey)
         }
       }
@@ -194,6 +197,13 @@ Stage 3:
     this.currentStage = STAGE.DOM
     this.currentTodoIndex = 0
     this.totalCompleted = 0
+    this.stageFailCount = 0
+    this.stage2ScriptFailCount = 0
+    this.stageCache.clear()
+    this.globalDataStore.clear()
+    // 重置收敛提示标志：避免新任务复用旧任务的已触发状态
+    this._convergence70Fired = false
+    this._convergence85Fired = false
     console.log(`[TodoScheduler] 待办列表已校验通过: ${totalTodos} 个待办, ${availableKeys.size} 个数据key`)
 
     return { ok: true, totalTodos }
@@ -224,8 +234,8 @@ Stage 3:
       this.totalCompleted++
       // 失败计数由 recordProgress() 统一管理，此处不重复
 
-      // 存储输出数据到全局存储
-      if (todo.dataOutputKey && outputData !== null) {
+      // 存储输出数据到全局存储（null 和 undefined 都跳过）
+      if (todo.dataOutputKey && outputData != null) {
         this.globalDataStore.set(todo.dataOutputKey, outputData, todo.id)
       }
 
@@ -264,8 +274,9 @@ Stage 3:
   recordNoProgress(funcName) {
     this.stageFailCount++
     // 阶段2：脚本执行失败单独累计（不随 stageFailCount 重置）
+    // 仅用 startsWith('inject_script_') 精确匹配，避免 includes 匹配过宽
     if (this.currentStage === STAGE.SCRIPT && funcName &&
-        (funcName.startsWith('inject_script_') || funcName.includes('inject_script'))) {
+        funcName.startsWith('inject_script_')) {
       this.stage2ScriptFailCount++
     }
     console.log(`[TodoScheduler] 无进展: ${funcName} | 阶段${this.currentStage} 连续失败${this.stageFailCount} 脚本失败${this.stage2ScriptFailCount}`)
@@ -374,6 +385,11 @@ Stage 3:
    * 强制切换到指定阶段（用于硬性规则触发）
    */
   forceSwitchToStage(stage) {
+    // 边界校验：仅允许 1/2/3
+    if (![1, 2, 3].includes(stage)) {
+      console.warn(`[TodoScheduler] forceSwitchToStage 非法阶段: ${stage}，忽略`)
+      return
+    }
     this.currentStage = stage
     this.currentTodoIndex = 0
     this.stageFailCount = 0
@@ -399,7 +415,7 @@ Stage 3:
     const remaining = stageData.subTodos.slice(this.currentTodoIndex)
     const dataSummaries = this.globalDataStore.getAllSummaries()
 
-    let context = `=== 当前阶段: Stage ${this.currentStage} (${stageData.name}) ===\n`
+    let context = `=== 当前阶段: Stage ${this.currentStage} (${stageData.name || '未命名阶段'}) ===\n`
     context += `待办进度: ${this.totalCompleted}/${this.totalTodos} (${this.getProgress().percentage}%)\n`
 
     if (remaining.length > 0) {

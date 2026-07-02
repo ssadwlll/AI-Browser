@@ -1,5 +1,7 @@
 // ============ 域名安全策略 ============
 // 管理白名单/黑名单/IP拦截，判断 URL 是否被允许访问
+import { isIPAddress } from '../../shared/utils.js'
+
 export class DomainPolicy {
   constructor(configService, scriptService) {
     this.configService = configService
@@ -35,8 +37,8 @@ export class DomainPolicy {
       const parsed = new URL(url)
       const hostname = parsed.hostname
 
-      // 禁止IP直连
-      if (this.blockIPAddresses && /^[\d.]+$/.test(hostname)) return false
+      // 禁止IP直连（IPv4 + IPv6）
+      if (this.blockIPAddresses && isIPAddress(hostname)) return false
 
       // 白名单优先
       if (this.allowedDomains) {

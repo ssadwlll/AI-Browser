@@ -35,35 +35,47 @@
   <div class="sidebar">
     <div class="sidebar-brand"><span>A</span> AI Browser</div>
     <div class="sidebar-nav">
-      <div class="nav-item active" data-page="dashboard" onclick="switchPage('dashboard')">
-        <span class="icon">📊</span> 控制台
+      <div class="nav-group">
+        <div class="nav-group-title">概览</div>
+        <div class="nav-item active" data-page="dashboard" onclick="switchPage('dashboard')">
+          <span class="icon">📊</span> 控制台
+        </div>
       </div>
-      <div class="nav-item" data-page="scripts" onclick="switchPage('scripts')">
-        <span class="icon">📜</span> 脚本管理
+      <div class="nav-group">
+        <div class="nav-group-title">内容管理</div>
+        <div class="nav-item" data-page="scripts" onclick="switchPage('scripts')">
+          <span class="icon">📜</span> 脚本管理
+        </div>
+        <div class="nav-item" data-page="categories" onclick="switchPage('categories')">
+          <span class="icon">📁</span> 分类管理
+        </div>
+        <div class="nav-item" data-page="attachments" onclick="switchPage('attachments')">
+          <span class="icon">📎</span> 附件管理
+        </div>
+        <div class="nav-item" data-page="forge" onclick="switchPage('forge')">
+          <span class="icon">🔨</span> 脚本工坊
+        </div>
       </div>
-      <div class="nav-item" data-page="users" onclick="switchPage('users')">
-        <span class="icon">👥</span> 用户管理
+      <div class="nav-group">
+        <div class="nav-group-title">AI 服务</div>
+        <div class="nav-item" data-page="aimodels" onclick="switchPage('aimodels')">
+          <span class="icon">🤖</span> 模型配置
+        </div>
+        <div class="nav-item" data-page="aicalllogs" onclick="switchPage('aicalllogs')">
+          <span class="icon">📋</span> 调用记录
+        </div>
       </div>
-      <div class="nav-item" data-page="categories" onclick="switchPage('categories')">
-        <span class="icon">📁</span> 分类管理
-      </div>
-      <div class="nav-item" data-page="tokens" onclick="switchPage('tokens')">
-        <span class="icon">🔑</span> API Token
-      </div>
-      <div class="nav-item" data-page="appkeys" onclick="switchPage('appkeys')">
-        <span class="icon">🔐</span> AppKey管理
-      </div>
-      <div class="nav-item" data-page="aimodels" onclick="switchPage('aimodels')">
-        <span class="icon">🤖</span> AI模型配置
-      </div>
-      <div class="nav-item" data-page="aicalllogs" onclick="switchPage('aicalllogs')">
-        <span class="icon">📋</span> 调用记录
-      </div>
-      <div class="nav-item" data-page="attachments" onclick="switchPage('attachments')">
-        <span class="icon">📎</span> 附件管理
-      </div>
-      <div class="nav-item" data-page="forge" onclick="switchPage('forge')">
-        <span class="icon">🔨</span> 脚本工坊
+      <div class="nav-group">
+        <div class="nav-group-title">账户安全</div>
+        <div class="nav-item" data-page="users" onclick="switchPage('users')">
+          <span class="icon">👥</span> 用户管理
+        </div>
+        <div class="nav-item" data-page="tokens" onclick="switchPage('tokens')">
+          <span class="icon">🔑</span> API Token
+        </div>
+        <div class="nav-item" data-page="appkeys" onclick="switchPage('appkeys')">
+          <span class="icon">🔐</span> AppKey
+        </div>
       </div>
     </div>
     <div class="sidebar-footer">

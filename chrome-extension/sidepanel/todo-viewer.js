@@ -1,3 +1,7 @@
+// ============ Todo Viewer ============
+// 独立窗口形式的待办面板
+// 所有来自 LLM 的字段均使用 textContent 渲染，避免 XSS
+
 const todoBody = document.getElementById('todoBody')
 const overview = document.getElementById('overview')
 const toast = document.getElementById('toast')
@@ -15,6 +19,10 @@ const ovLastTool = document.getElementById('ovLastTool')
 // State
 let lastData = null
 let switchLogs = []
+const MAX_SWITCH_LOGS = 50  // 防止日志无限增长导致内存膨胀
+
+// showToast 的 timer 引用，连续调用时清理上一个
+let toastTimer = null
 
 copyBtn.addEventListener('click', copyAll)
 clearBtn.addEventListener('click', clearAll)
@@ -22,7 +30,11 @@ clearBtn.addEventListener('click', clearAll)
 function showToast(msg) {
   toast.textContent = msg
   toast.classList.add('show')
-  setTimeout(() => toast.classList.remove('show'), 2000)
+  if (toastTimer) clearTimeout(toastTimer)
+  toastTimer = setTimeout(() => {
+    toast.classList.remove('show')
+    toastTimer = null
+  }, 2000)
 }
 
 const STAGE_NAMES = { 1: 'Stage 1 DOM工具', 2: 'Stage 2 远程脚本', 3: 'Stage 3 数据汇总' }
@@ -33,6 +45,14 @@ function getStatusIcon(status) {
   if (status === 'failed') return '❌'
   if (status === 'running') return '⏳'
   return '⬜'
+}
+
+// 创建带文本内容的 span（避免 innerHTML 注入）
+function createSpan(className, text) {
+  const span = document.createElement('span')
+  span.className = className
+  span.textContent = text == null ? '' : String(text)
+  return span
 }
 
 function renderTodo(data) {
@@ -60,7 +80,6 @@ function renderTodo(data) {
 
   // Find current todo id to mark as running
   const currentTodoId = progress.currentTodo?.id || null
-  // 只有当 lastTool 匹配当前待办的 action 时才显示⏳
   const currentAction = progress.currentTodo?.action || null
   const isExecutingCurrentTodo = data.lastTool && currentAction && (
     data.lastTool === currentAction ||
@@ -81,7 +100,11 @@ function renderTodo(data) {
     const headerText = STAGE_NAMES[stageNum] || `Stage ${stageNum}`
     const subTodos = stage.subTodos || []
     const completedCount = subTodos.filter(t => t._status === 'done').length
-    header.innerHTML = `<span>${headerText}</span><span class="badge">${completedCount}/${subTodos.length}</span>`
+    // 使用 textContent 而非 innerHTML 拼接，避免 XSS
+    const headerLabel = createSpan('', headerText)
+    const headerBadge = createSpan('badge', `${completedCount}/${subTodos.length}`)
+    header.appendChild(headerLabel)
+    header.appendChild(headerBadge)
     group.appendChild(header)
 
     const list = document.createElement('ul')
@@ -90,7 +113,6 @@ function renderTodo(data) {
     for (const todo of subTodos) {
       const li = document.createElement('li')
       let status = todo._status || 'pending'
-      // 只有真正在执行当前待办时才显示⏳ running
       if (todo.id === currentTodoId && !todo._status && isExecutingCurrentTodo) status = 'running'
       li.className = 'todo-item ' + status
 
@@ -101,21 +123,23 @@ function renderTodo(data) {
 
       const content = document.createElement('div')
       content.className = 'todo-content'
-      content.innerHTML =
-        `<span class="todo-id">${todo.id}</span>` +
-        `<span class="todo-action">${todo.action}</span>` +
-        `<span class="todo-desc">${todo.description || ''}</span>`
+      // 所有字段使用 textContent，避免 LLM 输出注入 HTML
+      content.appendChild(createSpan('todo-id', todo.id))
+      content.appendChild(createSpan('todo-action', todo.action))
+      content.appendChild(createSpan('todo-desc', todo.description || ''))
 
       // Show dataOutputKey / dataDependKeys
       const keysDiv = document.createElement('div')
       keysDiv.className = 'todo-keys'
       if (todo.dataOutputKey) {
-        keysDiv.innerHTML += `<span class="key">out: ${todo.dataOutputKey}</span>`
+        const outKey = createSpan('key', `out: ${todo.dataOutputKey}`)
+        keysDiv.appendChild(outKey)
       }
       if (Array.isArray(todo.dataDependKeys) && todo.dataDependKeys.length > 0) {
-        keysDiv.innerHTML += `<span class="key">dep: ${todo.dataDependKeys.join(', ')}</span>`
+        const depKey = createSpan('key', `dep: ${todo.dataDependKeys.join(', ')}`)
+        keysDiv.appendChild(depKey)
       }
-      if (keysDiv.innerHTML) content.appendChild(keysDiv)
+      if (keysDiv.children.length > 0) content.appendChild(keysDiv)
 
       li.appendChild(content)
       list.appendChild(li)
@@ -125,8 +149,8 @@ function renderTodo(data) {
     todoBody.appendChild(group)
   }
 
-  // Append stage switch logs
-  for (const log of switchLogs) {
+  // Append stage switch logs（限制最大数量）
+  for (const log of switchLogs.slice(-MAX_SWITCH_LOGS)) {
     const div = document.createElement('div')
     div.className = 'stage-switch-log'
     div.textContent = `🔄 ${log}`
@@ -168,9 +192,21 @@ const todoChannel = new BroadcastChannel('ai-browser-todo')
 todoChannel.addEventListener('message', (e) => {
   const data = e.data
   if (!data) return
+  if (data.type === 'agentTodoClear') {
+    // 新任务启动时清除旧待办数据
+    renderTodo({ stages: [], progress: { total: 0, completed: 0 }, currentStage: 1 })
+    return
+  }
   if (data.type === 'agentTodoUpdate') {
     if (data.data?.stageSwitch) {
-      switchLogs.push(`${data.data.stageSwitch.reason} → ${STAGE_NAMES[data.data.stageSwitch.to] || 'Stage ' + data.data.stageSwitch.to}`)
+      const reason = data.data.stageSwitch.reason || ''
+      const toStage = data.data.stageSwitch.to
+      const stageLabel = STAGE_NAMES[toStage] || ('Stage ' + toStage)
+      switchLogs.push(`${reason} → ${stageLabel}`)
+      // 限制日志数量，超出时丢弃最旧的
+      if (switchLogs.length > MAX_SWITCH_LOGS) {
+        switchLogs.splice(0, switchLogs.length - MAX_SWITCH_LOGS)
+      }
     }
     renderTodo(data.data)
   }

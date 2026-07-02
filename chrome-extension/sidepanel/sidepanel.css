@@ -313,3 +313,17 @@ body{font-family:var(--font-sans);background:var(--bg-white);color:var(--text-pr
 .placeholder-view .placeholder-icon{opacity:0.4}
 .placeholder-view .placeholder-text{font-size:var(--fs-lg);font-weight:600;color:var(--text-secondary)}
 .placeholder-view .placeholder-desc{font-size:var(--fs-body);color:var(--text-quaternary)}
+
+/* ============ 内置工具浮动面板 ============ */
+.builtin-tools-panel{position:absolute;width:88%;height:55%;left:6%;top:20%;background:var(--bg-white);border:1px solid var(--border-light);border-radius:var(--radius-xl);box-shadow:0 8px 32px rgba(0,0,0,0.18);z-index:40;display:none;flex-direction:column;overflow:hidden;animation:builtinSlideUp .2s ease-out}
+.builtin-tools-panel.show{display:flex}
+.builtin-tools-panel.minimized{height:40px}
+@keyframes builtinSlideUp{0%{opacity:0;transform:translateY(12px)}100%{opacity:1;transform:translateY(0)}}
+.builtin-tools-header{display:flex;align-items:center;justify-content:space-between;padding:8px 14px;border-bottom:1px solid var(--border-light);background:var(--brand-light);cursor:grab;flex-shrink:0;user-select:none;border-radius:var(--radius-xl) var(--radius-xl) 0 0}
+.builtin-tools-header:active{cursor:grabbing}
+.builtin-tools-title{font-size:var(--fs-body);font-weight:600;color:var(--brand)}
+.builtin-tools-controls{display:flex;gap:4px}
+.builtin-tools-btn{background:none;border:none;cursor:pointer;color:var(--text-quaternary);font-size:16px;width:28px;height:28px;border-radius:var(--radius);transition:all .15s;display:flex;align-items:center;justify-content:center}
+.builtin-tools-btn:hover{background:var(--fill-tsp-secondary);color:var(--text-primary)}
+.builtin-tools-content{flex:1;overflow:hidden;display:flex;flex-direction:column}
+.builtin-tools-panel.minimized .builtin-tools-content{display:none}

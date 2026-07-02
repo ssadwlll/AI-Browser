@@ -19,6 +19,7 @@ export async function runAgent(ctx) {
     MAX_AI_REQUESTS, TIMEOUT_MS, ACTION_TIMEOUT_MS,
     postToUI, yieldUI,
     tabId, userMessage, chatHistory,
+    toolRecordingService, // Feature 4: 工具调用录制
   } = ctx
 
   const startTime = Date.now()
@@ -150,7 +151,13 @@ Stage 3（结果汇总）：整理并输出结果
 
 === 输出规范 ===
 - 自然语言总结结果，不输出原始JSON
-- 错误时分析原因并在finish_task中告知`
+- 错误时分析原因并在finish_task中告知
+
+=== 复用历史结果 ===
+如果用户的要求是"导出/下载/保存之前的结果"或类似表述，且之前已执行过任务：
+1. 先调用 recall_data(entry_id="all") 查询上轮存储的数据
+2. 直接调用 finish_task 汇总输出，不要重新执行页面操作或脚本
+3. 如果无历史数据可查，再正常执行任务`
 
   const systemMsg = { role: 'system', content: phase1SystemPrompt }
 
@@ -255,6 +262,12 @@ Stage 3（结果汇总）：整理并输出结果
 
   // ===== 主循环开始 =====
   while (aiRequestCount < maxRounds) {
+    // 检查是否被新任务中止
+    const curState = agentStates.get(tabId)
+    if (curState?.aborted) {
+      console.log('[Agent] 检测到中止信号，退出主循环')
+      return
+    }
     if (Date.now() - startTime > TIMEOUT_MS) {
       postToUI(tabId, { type: 'agentError', error: 'Agent执行超时' })
       await saveToChatHistoryStorage('⚠️ Agent 执行超时，请简化任务后重试。', [])
@@ -525,6 +538,8 @@ ${allData.length > 0 ? allData.join('\n') : '（无数据）'}`
           postToUI(tabId, { type: 'agentStep', step: totalToolCalls, toolName: funcName, toolArgs: funcArgs })
           await yieldUI()
 
+          // Feature 4: 工具调用计时起点
+          const _toolStartTime = Date.now()
           let toolResult
           if (funcName === 'recall_data') {
             const entryIds = (funcArgs.entry_id || '').split(',').map(s => s.trim()).filter(Boolean)
@@ -586,6 +601,10 @@ ${allData.length > 0 ? allData.join('\n') : '（无数据）'}`
                   await saveToChatHistoryStorage(summary + judgeMsg, [])
                 }
               } catch (e) { console.warn('[Agent] 事后自评失败（非致命）:', e.message) }
+            }
+            // Feature 4: finish_task 录制
+            if (toolRecordingService) {
+              try { toolRecordingService.record('finish_task', funcArgs, summary, Date.now() - _toolStartTime) } catch {}
             }
             return
           } else if (funcName === 'capture_network') {
@@ -868,6 +887,15 @@ ${allData.length > 0 ? allData.join('\n') : '（无数据）'}`
           }
 
           postToUI(tabId, { type: 'agentStepResult', step: totalToolCalls, toolName: funcName, result: toolResult, done: false })
+
+          // Feature 4: 工具调用录制（结果已生成，记录到会话）
+          if (toolRecordingService) {
+            try {
+              toolRecordingService.record(funcName, funcArgs, toolResult, Date.now() - _toolStartTime)
+            } catch (e) {
+              console.warn('[ToolRecording] record 失败（非致命）:', e.message)
+            }
+          }
 
           // PayloadStore 存储判断
           let finalResult
