@@ -152,12 +152,19 @@ Stage 3（结果汇总）：整理并输出结果
 === 输出规范 ===
 - 自然语言总结结果，不输出原始JSON
 - 错误时分析原因并在finish_task中告知
+- **导出CSV/表格格式**：在finish_task的summary中直接输出CSV格式的文本（包含表头和数据行），无需寻找专门的导出工具
 
 === 复用历史结果 ===
 如果用户的要求是"导出/下载/保存之前的结果"或类似表述，且之前已执行过任务：
 1. 先调用 recall_data(entry_id="all") 查询上轮存储的数据
 2. 直接调用 finish_task 汇总输出，不要重新执行页面操作或脚本
-3. 如果无历史数据可查，再正常执行任务`
+3. 导出CSV时，summary直接包含CSV格式数据（表头+数据行，逗号分隔），例如：
+   ```
+   序号,标题,链接,内容
+   1,新闻标题1,https://...,摘要内容1
+   2,新闻标题2,https://...,摘要内容2
+   ```
+4. 如果无历史数据可查，再正常执行任务`
 
   const systemMsg = { role: 'system', content: phase1SystemPrompt }
 
@@ -263,13 +270,18 @@ Stage 3（结果汇总）：整理并输出结果
     if (payloadSummary) {
       parts.push(`上轮工具执行结果（${payloadSummary.count}条）：`)
       for (const item of payloadSummary.items) {
+        // 显示完整摘要，帮助LLM理解数据内容
         parts.push(`  - ${item.id}(${item.toolName}): ${item.summary}`)
       }
     }
     if (globalSummaries.length > 0) {
       parts.push(`\n全局存储数据：\n${globalSummaries.join('\n')}`)
     }
-    _injections.push(`=== 上轮任务数据（可复用） ===\n${parts.join('\n')}\n\n如果用户要求导出/保存/格式化之前的结果，请直接用 recall_data(entry_id="all") 获取数据后调用 finish_task 输出，无需重新执行页面操作。`)
+    const detailedHint = `\n\n这些数据包含新闻标题、链接、正文内容等信息。用户要求"导出CSV"时，请：
+1. 用 recall_data(entry_id="all") 获取完整数据
+2. 直接用 finish_task 输出CSV格式（表头+数据行，逗号分隔）
+3. 无需寻找导出工具或重新执行页面操作`
+    _injections.push(`=== 上轮任务数据（可复用） ===\n${parts.join('\n')}${detailedHint}`)
   }
 
   postToUI(tabId, { type: 'agentStart' })
