@@ -46,9 +46,14 @@ export class AgentService {
     }
     this.agentStates.delete(tabId)
 
-    // 立即清除待办调度器，避免旧任务待办残留（保留 payloadStore 供"导出结果"复用）
+    // 立即清除待办调度器，避免旧任务待办残留
+    // PayloadStore: 继承上一轮数据供复用（如"导出csv给我"场景）
     this.todoScheduler.clear()
     this._pageReadCache.clear()
+    // 设置新 sessionId 并继承上一轮数据
+    const newSessionId = `s_${tabId}_${Date.now()}`
+    this.payloadStore.setSessionId(newSessionId)
+    this.payloadStore.inheritFromLastSession(newSessionId, 300000)  // 5分钟内的数据可继承
 
     // 通知待办查看器窗口和 content script 清除旧数据
     try {
@@ -59,6 +64,25 @@ export class AgentService {
     try {
       chrome.tabs.sendMessage(tabId, { type: 'todoUpdate', data: { stages: [], progress: { total: 0, completed: 0 }, currentStage: 1 } }).catch(() => {})
     } catch {}
+
+    // 对话全景：清空旧数据并根据设置自动打开窗口
+    try {
+      const bcConv = new BroadcastChannel('ai-browser-conversation')
+      bcConv.postMessage({ type: 'conversationClear' })
+      bcConv.close()
+    } catch {}
+    try {
+      const agentCfg = await this.configService.getAgentConfig()
+      if (agentCfg?.conversationViewer === true) {
+        chrome.windows.create({
+          url: chrome.runtime.getURL('sidepanel/conversation-viewer.html'),
+          type: 'popup',
+          width: 900,
+          height: 700,
+          focused: false  // 不抢占焦点
+        })
+      }
+    } catch (e) { console.warn('[ConversationViewer] 打开失败:', e.message) }
 
     const tabUrl = tab?.url || ''
     if (isSystemUrl(tabUrl)) {
@@ -165,6 +189,25 @@ export class AgentService {
     }
   }
 
+  /**
+   * 检查 port 是否仍然连接（用于在每轮循环开始时检测 UI 是否已关闭）
+   * 返回 true 表示连接正常，false 表示断开
+   */
+  checkPortConnected(tabId) {
+    const state = this.agentStates.get(tabId)
+    if (!state) return false
+    if (!state.port) return false
+    // 尝试发送一条心跳消息，失败则标记为断开
+    try {
+      state.port.postMessage({ type: 'heartbeat' })
+      return true
+    } catch {
+      state.port = null
+      console.log('[AgentService] Port 已断开，任务将被终止')
+      return false
+    }
+  }
+
   async _yieldUI() {
     await new Promise(r => setTimeout(r, 0))
   }
@@ -187,6 +230,7 @@ export class AgentService {
       ACTION_TIMEOUT_MS: this.ACTION_TIMEOUT_MS,
       postToUI: this.postToUI.bind(this),
       yieldUI: this._yieldUI,
+      checkPortConnected: this.checkPortConnected.bind(this),
       tabId,
       userMessage,
       chatHistory,

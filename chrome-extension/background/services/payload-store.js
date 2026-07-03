@@ -1,12 +1,28 @@
 // ============ PayloadStore ============
 // 工具结果暂存区：超过阈值的结果存此处，只发摘要给AI
+// 支持按 sessionId 隔离：新任务只查自己 session 的数据
 export class PayloadStore {
   constructor() {
     this.entries = []
-    this.maxEntries = 20
+    this.maxEntries = 30
     this.maxRecallChars = 5000  // recall_data 单次返回上限
     // 单调递增计数器，避免 FIFO 淘汰后 ID 复用导致数据错乱
     this._idCounter = 0
+    this._sessionId = ''  // 当前会话ID，用于任务隔离
+  }
+
+  /**
+   * 设置当前会话ID（新任务启动时调用）
+   */
+  setSessionId(sessionId) {
+    this._sessionId = sessionId || ''
+  }
+
+  /**
+   * 获取当前会话ID
+   */
+  getSessionId() {
+    return this._sessionId
   }
 
   // 存储数据
@@ -18,6 +34,7 @@ export class PayloadStore {
     this._idCounter++
     const entry = {
       id: `p${this._idCounter}`,
+      sessionId: this._sessionId,  // 绑定当前会话
       toolName,
       timestamp: Date.now(),
       data,
@@ -28,29 +45,37 @@ export class PayloadStore {
     return entry.id
   }
 
-  // 查询数据
+  // 查询数据（默认只查当前session，除非显式指定跨session）
   query(options = {}) {
     let results = []
+
+    // 默认只查当前 sessionId 的条目
+    const sessionIdFilter = options.crossSession ? null : this._sessionId
 
     // 按 entry_id 查询
     if (options.entry_id) {
       const entryId = options.entry_id.trim()
       // "all" 表示查询所有条目的完整数据
       if (entryId === 'all') {
-        results = this.entries.slice() // 返回所有条目
+        results = sessionIdFilter
+          ? this.entries.filter(e => e.sessionId === sessionIdFilter)
+          : this.entries.slice()
       } else {
         const ids = entryId.split(',').map(s => s.trim())
-        results = this.entries.filter(e => ids.includes(e.id))
+        results = this.entries.filter(e => ids.includes(e.id) && (!sessionIdFilter || e.sessionId === sessionIdFilter))
       }
     }
     // 按 tool_name 查询最新
     else if (options.tool_name) {
-      const entry = this.entries.filter(e => e.toolName === options.tool_name).pop()
+      const filtered = sessionIdFilter
+        ? this.entries.filter(e => e.toolName === options.tool_name && e.sessionId === sessionIdFilter)
+        : this.entries.filter(e => e.toolName === options.tool_name)
+      const entry = filtered.pop()
       if (entry) results = [entry]
     }
     // 查全部（返回汇总）
     else {
-      return this._summaryAll()
+      return this._summaryAll(sessionIdFilter)
     }
 
     // 应用 filter
@@ -85,10 +110,13 @@ export class PayloadStore {
     return formatted
   }
 
-  // 汇总所有条目
-  _summaryAll() {
+  // 汇总所有条目（支持按 sessionId 过滤）
+  _summaryAll(sessionIdFilter = null) {
+    const entries = sessionIdFilter
+      ? this.entries.filter(e => e.sessionId === sessionIdFilter)
+      : this.entries
     return {
-      summary: this.entries.map(e => `${e.id}(${e.toolName}:${e.metadata.count || 1}条)`).join(', ') || '无存储数据',
+      summary: entries.map(e => `${e.id}(${e.toolName}:${e.metadata.count || 1}条)`).join(', ') || '无存储数据',
       hint: '调用 recall_data(entry_id="xxx") 查询具体条目'
     }
   }
@@ -227,10 +255,34 @@ export class PayloadStore {
     }
   }
 
-  // 清空
-  clear() {
-    this.entries = []
-    this._idCounter = 0
+  // 清空（可选：只清空当前session的条目，或全部清空）
+  clear(options = {}) {
+    if (options.sessionOnly && this._sessionId) {
+      // 仅清除当前 session 的条目，保留其他 session
+      this.entries = this.entries.filter(e => e.sessionId !== this._sessionId)
+    } else {
+      this.entries = []
+      this._idCounter = 0
+    }
+  }
+
+  /**
+   * 继承上一轮数据：将最近的 N 条数据更新 sessionId 为当前 session
+   * 用于用户连续对话时复用上一轮采集的数据（如"导出csv给我"）
+   * @param {string} newSessionId - 新任务的 sessionId
+   * @param {number} maxAgeMs - 最大继承数据的时间间隔（默认5分钟）
+   */
+  inheritFromLastSession(newSessionId, maxAgeMs = 300000) {
+    const now = Date.now()
+    const recentEntries = this.entries
+      .filter(e => e.sessionId !== newSessionId && (now - e.timestamp) < maxAgeMs)
+      .slice(-10)  // 最多继承10条最近数据
+
+    for (const entry of recentEntries) {
+      entry.sessionId = newSessionId
+    }
+    console.log(`[PayloadStore] 继承了 ${recentEntries.length} 条上一轮数据到新 session ${newSessionId}`)
+    return recentEntries.length
   }
 
   // 列出所有条目ID（用于阶段2上下文注入）
@@ -263,12 +315,15 @@ export class PayloadStore {
     return data.filter(d => d.attrs?.href).map(d => d.attrs.href)
   }
 
-  // 获取汇总（用于finish_task）
-  getSummaryForFinish() {
-    if (this.entries.length === 0) return null
+  // 获取汇总（用于finish_task，默认只返回当前session）
+  getSummaryForFinish(options = {}) {
+    const entries = options.crossSession
+      ? this.entries
+      : this.entries.filter(e => e.sessionId === this._sessionId)
+    if (entries.length === 0) return null
     return {
-      count: this.entries.length,
-      items: this.entries.map(e => ({ id: e.id, toolName: e.toolName, summary: e.summary }))
+      count: entries.length,
+      items: entries.map(e => ({ id: e.id, toolName: e.toolName, summary: e.summary }))
     }
   }
 }

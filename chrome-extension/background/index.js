@@ -15,6 +15,9 @@ import { ToolRecordingService } from './services/tool-recording-service.js'
 import { ScheduledTaskService } from './services/scheduled-task-service.js'
 import { AgentResumeService } from './services/agent-resume-service.js'
 import { HumanInterventionService } from './services/human-intervention-service.js'
+import { TaskArchiveService } from './services/task-archive-service.js'
+import { OutputService } from './services/output-service.js'
+import { ScratchpadService } from './services/scratchpad-service.js'
 
 // ============ 常量 ============
 const MSG_TYPES = {
@@ -46,6 +49,9 @@ const toolRecordingService = new ToolRecordingService()
 const agentResumeService = new AgentResumeService()
 const agentService = new AgentService(configService, toolService, pageService, scriptService, toolRecordingService, agentResumeService)
 const taskTemplateService = new TaskTemplateService()
+const scratchpadService = new ScratchpadService()  // Feature: 中间推理持久化
+const outputService = new OutputService()          // Feature: 任务结果输出
+const taskArchiveService = new TaskArchiveService()  // Feature: 任务追溯复盘（内部会创建自己的实例，但这里单独注册供 callService）
 const humanInterventionService = new HumanInterventionService((request) => {
   // 人工介入请求回调：转发到 sidepanel
   try {
@@ -83,6 +89,9 @@ const services = {
   agentResumeService,
   humanInterventionService,
   scheduledTaskService,
+  scratchpadService,   // Feature: 中间推理持久化
+  outputService,       // Feature: 任务结果输出
+  taskArchiveService,  // Feature: 任务追溯复盘
   dbService: DBService,
 }
 
@@ -348,5 +357,19 @@ async function setupAlarm() {
   })
 }
 setupAlarm()
+
+// ===== Service Worker 启动检测：检查是否有未完成的任务 =====
+// 如果 ScratchpadService 中有最近的任务（5分钟内），说明可能是重启导致的任务中断
+scratchpadService.init().then(async () => {
+  const recentScratchpads = await scratchpadService.list(5)
+  const now = Date.now()
+  const unfinished = recentScratchpads.filter(s => (now - s.timestamp) < 300000)  // 5分钟内
+  
+  if (unfinished.length > 0) {
+    console.log('[AI Browser] 检测到未完成的任务:', unfinished.map(s => s.sessionId).join(', '))
+    // 通知用户可以通过对话记录面板查看之前的任务进度
+    // 注意：当前架构不支持自动恢复任务（messages[]未保存），用户需要重新发起任务
+  }
+}).catch(e => console.warn('[AI Browser] ScratchpadService 检测失败:', e.message))
 
 console.log('[AI Browser] Background Service Worker started')

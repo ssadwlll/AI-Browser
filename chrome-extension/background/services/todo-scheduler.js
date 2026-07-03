@@ -151,7 +151,7 @@ Stage 3:
         if (todo.action) {
           if (stage.stage === 1) {
             if (todo.action.startsWith('inject_script_')) {
-              errors.push(`Stage 1 禁止使用 ${todo.action}。脚本属于Stage2，请将该待办移到Stage2。正确示例: Stage2 action="inject_script_10"`)
+              errors.push(`Stage 1 禁止使用 ${todo.action}。脚本属于Stage2，请将该待办移到Stage2。正确示例: Stage2 action="inject_script_N"（N为search_tools查到的脚本ID）`)
             } else if (!STAGE1_TOOLS.has(todo.action)) {
               errors.push(`Stage 1 不允许使用 ${todo.action}。Stage1只能用DOM工具（如 read_page_content, extract_content, navigate_to 等）`)
             }
@@ -160,7 +160,7 @@ Stage 3:
             const isAllowed = STAGE2_TOOLS.has(todo.action) ||
               todo.action.startsWith('inject_script_')
             if (!isAllowed) {
-              errors.push(`Stage 2 不允许使用 ${todo.action}。Stage2只能用 inject_script_N（N为脚本ID数字，如 inject_script_10）或 search_tools。不要用中文名或DOM工具。`)
+              errors.push(`Stage 2 不允许使用 ${todo.action}。Stage2只能用 inject_script_N（N为search_tools查到的脚本ID）或 search_tools。不要用中文名或DOM工具。`)
             }
           }
           if (stage.stage === 3 && !STAGE3_TOOLS.has(todo.action)) {
@@ -413,7 +413,6 @@ Stage 3:
     if (!stageData) return null
 
     const remaining = stageData.subTodos.slice(this.currentTodoIndex)
-    const dataSummaries = this.globalDataStore.getAllSummaries()
 
     let context = `=== 当前阶段: Stage ${this.currentStage} (${stageData.name || '未命名阶段'}) ===\n`
     context += `待办进度: ${this.totalCompleted}/${this.totalTodos} (${this.getProgress().percentage}%)\n`
@@ -426,11 +425,45 @@ Stage 3:
       if (current.dataDependKeys?.length > 0) {
         const satisfied = current.dataDependKeys.every(k => this.globalDataStore.has(k))
         context += `数据依赖: ${current.dataDependKeys.join(', ')} ${satisfied ? '✓已满足' : '✗未满足'}\n`
+        // 自动注入依赖的数据内容，避免AI主动recall_data浪费轮次
+        if (satisfied) {
+          const depDataParts = []
+          for (const depKey of current.dataDependKeys) {
+            const value = this.globalDataStore.get(depKey)
+            const summary = this.globalDataStore.getSummary(depKey)
+            if (value !== null) {
+              // 紧凑格式化：限制每条数据最大2000字符
+              let dataStr = typeof value === 'string' ? value : JSON.stringify(value)
+              if (dataStr.length > 2000) {
+                // 大数据：保留摘要+样本前5条+总数
+                try {
+                  const obj = typeof value === 'string' ? JSON.parse(value) : value
+                  if (Array.isArray(obj)) {
+                    dataStr = JSON.stringify({ total: obj.length, items: obj.slice(0, 5), _note: `共${obj.length}条，以下为前5条样本` })
+                  } else {
+                    dataStr = dataStr.slice(0, 2000) + `\n...(共${dataStr.length}字符，已截断)`
+                  }
+                } catch {
+                  dataStr = dataStr.slice(0, 2000) + `\n...(共${dataStr.length}字符，已截断)`
+                }
+              }
+              depDataParts.push(`[${depKey}]: ${dataStr}`)
+            }
+          }
+          if (depDataParts.length > 0) {
+            context += `\n=== 依赖数据（直接使用，无需recall_data） ===\n${depDataParts.join('\n')}\n`
+          }
+        }
       }
     }
 
-    if (dataSummaries.length > 0) {
-      context += `\n=== 全局存储数据 ===\n  ${dataSummaries.join('\n  ')}\n`
+    // 全局存储数据仅在 Stage 3 注入（Stage 1/2 由 WorkingMemory/交接摘要提供）
+    // 这样避免每轮重复注入相同的数据摘要
+    if (this.currentStage === 3) {
+      const dataSummaries = this.globalDataStore.getAllSummaries()
+      if (dataSummaries.length > 0) {
+        context += `\n=== 全局存储数据 ===\n  ${dataSummaries.join('\n  ')}\n`
+      }
     }
 
     return context

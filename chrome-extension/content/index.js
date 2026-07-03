@@ -525,7 +525,20 @@
   }
 
   function updateTodoPanel(data) {
-    if (!data || !data.stages || data.stages.length === 0) return
+    if (!data || !data.stages || data.stages.length === 0) {
+      // 任务完成时自动隐藏待办面板
+      if (data && data._taskDone && _todoVisible) {
+        _todoLastData = null
+        _todoSwitchLogs = []
+        _todoShadow.getElementById('overview').style.display = 'none'
+        _todoShadow.getElementById('todoBody').innerHTML = '<div class="empty-state">任务已完成，等待新任务…</div>'
+        setTimeout(() => {
+          _todoShadow.getElementById('todoPanel').classList.remove('show')
+          _todoVisible = false
+        }, 1000)
+      }
+      return
+    }
 
     _todoLastData = data
 

@@ -1,10 +1,6 @@
 // ============ Feature Panels - 内置工具面板 ============
-// Feature 8: 执行图 / Feature 20: 资源监控 / Feature 7: 任务模板 / Feature 4: 工具录制 / Feature 23: 定时任务
+// Feature 20: 资源监控 / Feature 7: 任务模板 / Feature 4: 工具录制 / Feature 23: 定时任务
 // 整合为标签页结构，所有用户输入均使用 textContent 渲染
-
-// 模块级引用，供 renderExecutionGraph 外部调用
-let _graphContainer = null
-let _messageListenerRegistered = false
 
 const STYLE_ID = 'feature-panels-style'
 
@@ -23,39 +19,6 @@ function injectStyles() {
 
 /* 标签内容区 */
 .fp-tab-panels{flex:1;overflow-y:auto;padding:12px}
-
-/* 执行图 */
-.fp-graph-empty{color:#8c8c8c;font-size:13px;padding:16px;text-align:center}
-.fp-graph{display:flex;align-items:flex-start;gap:0;overflow-x:auto;padding:8px 0}
-.fp-stage-col{display:flex;flex-direction:column;align-items:center;min-width:160px;flex-shrink:0}
-.fp-stage-node{width:150px;border:2px solid;border-radius:10px;padding:8px 10px;text-align:center;background:#fff;transition:all .2s}
-.fp-stage-node.pending{border-color:#bdbdbd;opacity:.6}
-.fp-stage-node.active{border-color:#6841ea;box-shadow:0 0 0 3px rgba(104,65,234,0.12)}
-.fp-stage-node.done{border-color:#00aa5b;background:rgba(0,170,91,0.04)}
-.fp-stage-name{font-size:13px;font-weight:600;color:#262626}
-.fp-stage-count{font-size:12px;color:#595959;margin-top:2px}
-.fp-stage-status{font-size:11px;margin-top:4px;padding:1px 6px;border-radius:4px;display:inline-block}
-.fp-stage-status.pending{background:rgba(189,189,189,0.2);color:#8c8c8c}
-.fp-stage-status.active{background:rgba(104,65,234,0.12);color:#6841ea}
-.fp-stage-status.done{background:rgba(0,170,91,0.12);color:#00aa5b}
-.fp-stage-arrow{font-size:20px;color:#8c8c8c;align-self:center;margin:0 4px;flex-shrink:0}
-.fp-todo-list{display:flex;flex-direction:column;gap:4px;margin-top:8px;width:150px}
-.fp-todo-node{display:flex;align-items:center;gap:6px;padding:6px 8px;border-radius:6px;background:rgba(250,250,250,0.8);border:1px solid rgba(79,89,102,0.06);font-size:12px}
-.fp-todo-node.running{border-color:rgba(104,65,234,0.3);background:rgba(104,65,234,0.04)}
-.fp-todo-node.done{border-color:rgba(0,170,91,0.2);background:rgba(0,170,91,0.03)}
-.fp-todo-node.failed{border-color:rgba(234,54,57,0.2);background:rgba(234,54,57,0.03)}
-.fp-todo-icon{flex-shrink:0;width:16px;text-align:center}
-.fp-todo-body{flex:1;min-width:0}
-.fp-todo-id{font-weight:600;color:#595959;font-size:11px}
-.fp-todo-action{color:#262626;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.fp-todo-keys{display:flex;flex-wrap:wrap;gap:3px;margin-top:3px}
-.fp-data-badge{font-size:10px;padding:1px 5px;border-radius:3px;font-family:monospace}
-.fp-data-badge.out{background:rgba(0,170,91,0.1);color:#00aa5b}
-.fp-data-badge.dep{background:rgba(255,171,0,0.12);color:#ffab00}
-.fp-data-flow{margin-top:12px;padding-top:8px;border-top:1px dashed rgba(79,89,102,0.12)}
-.fp-data-flow-title{font-size:12px;font-weight:600;color:#595959;margin-bottom:4px}
-.fp-data-flow-item{font-size:11px;color:#595959;font-family:monospace;padding:2px 0}
-.fp-data-flow-arrow{color:#6841ea;margin:0 4px}
 
 /* 通用组件 */
 .fp-btn{border:none;border-radius:6px;padding:4px 10px;font-size:12px;cursor:pointer;transition:all .15s;flex-shrink:0}
@@ -82,226 +45,6 @@ function injectStyles() {
 .fp-idb-count{font-weight:600;color:#262626}
 `
   document.head.appendChild(style)
-}
-
-// ============ 执行图 ============
-
-const STAGE_NAMES = { 1: 'Stage 1 DOM', 2: 'Stage 2 脚本', 3: 'Stage 3 汇总' }
-
-function getStatusIcon(status) {
-  if (status === 'done') return '✓'
-  if (status === 'failed') return '✗'
-  if (status === 'running') return '⏳'
-  return '⬜'
-}
-
-/**
- * 获取阶段状态
- * @param {number} stageNum - 阶段序号
- * @param {number} currentStage - 当前执行阶段
- * @param {boolean} hasActiveTodo - 是否有进行中的待办
- * @param {boolean} allDone - 该阶段所有待办是否已完成
- */
-function getStageStatus(stageNum, currentStage, hasActiveTodo, allDone) {
-  if (stageNum < currentStage) return 'done'
-  if (stageNum === currentStage) {
-    // 当前阶段所有待办都完成 → 已完成（不再显示"进行中"）
-    if (allDone) return 'done'
-    return 'active'
-  }
-  return 'pending'
-}
-
-function createTodoNode(todo, currentTodoId) {
-  const node = document.createElement('div')
-  let status = todo._status || 'pending'
-  if (todo.id === currentTodoId && !todo._status) status = 'running'
-  node.className = 'fp-todo-node ' + status
-
-  const icon = document.createElement('span')
-  icon.className = 'fp-todo-icon'
-  icon.textContent = getStatusIcon(status)
-  node.appendChild(icon)
-
-  const body = document.createElement('div')
-  body.className = 'fp-todo-body'
-
-  const idSpan = document.createElement('span')
-  idSpan.className = 'fp-todo-id'
-  idSpan.textContent = todo.id || ''
-  body.appendChild(idSpan)
-
-  if (todo.action) {
-    const actionSpan = document.createElement('span')
-    actionSpan.className = 'fp-todo-action'
-    actionSpan.textContent = ' ' + todo.action
-    actionSpan.title = todo.action
-    body.appendChild(actionSpan)
-  }
-
-  if (todo.dataOutputKey || (Array.isArray(todo.dataDependKeys) && todo.dataDependKeys.length > 0)) {
-    const keysDiv = document.createElement('div')
-    keysDiv.className = 'fp-todo-keys'
-    if (todo.dataOutputKey) {
-      const badge = document.createElement('span')
-      badge.className = 'fp-data-badge out'
-      badge.textContent = 'out: ' + todo.dataOutputKey
-      keysDiv.appendChild(badge)
-    }
-    if (Array.isArray(todo.dataDependKeys) && todo.dataDependKeys.length > 0) {
-      const badge = document.createElement('span')
-      badge.className = 'fp-data-badge dep'
-      badge.textContent = 'dep: ' + todo.dataDependKeys.join(', ')
-      keysDiv.appendChild(badge)
-    }
-    body.appendChild(keysDiv)
-  }
-
-  node.appendChild(body)
-  return node
-}
-
-/**
- * 渲染执行图（可外部调用）
- * @param {object} todoData - 待办数据，包含 stages 数组
- */
-export function renderExecutionGraph(todoData) {
-  _renderGraphTo(_graphContainer, todoData)
-}
-
-function _renderGraphTo(container, todoData) {
-  if (!container) return
-  container.innerHTML = ''
-
-  if (!todoData || !Array.isArray(todoData.stages) || todoData.stages.length === 0) {
-    const empty = document.createElement('div')
-    empty.className = 'fp-graph-empty'
-    empty.textContent = '暂无执行数据，启动 Agent 后将自动显示'
-    container.appendChild(empty)
-    return
-  }
-
-  const currentStage = todoData.currentStage || 1
-  const progress = todoData.progress || {}
-  const currentTodoId = progress.currentTodo?.id || null
-  const lastProgress = todoData.lastProgress === true
-  const graph = document.createElement('div')
-  graph.className = 'fp-graph'
-
-  todoData.stages.forEach((stage, index) => {
-    const stageNum = stage.stage || (index + 1)
-    const subTodos = stage.subTodos || []
-    const completedCount = subTodos.filter(t => t._status === 'done').length
-    const allDone = subTodos.length > 0 && completedCount === subTodos.length
-    const hasActiveTodo = subTodos.some(t => t._status === 'running' || t.id === currentTodoId)
-    // 如果所有待办都已完成，或者收到 lastProgress 标记，则阶段已完成
-    const stageStatus = (allDone || (lastProgress && stageNum === currentStage))
-      ? 'done'
-      : getStageStatus(stageNum, currentStage, hasActiveTodo, allDone)
-
-    const col = document.createElement('div')
-    col.className = 'fp-stage-col'
-
-    const stageNode = document.createElement('div')
-    stageNode.className = 'fp-stage-node ' + stageStatus
-
-    const nameEl = document.createElement('div')
-    nameEl.className = 'fp-stage-name'
-    nameEl.textContent = STAGE_NAMES[stageNum] || ('Stage ' + stageNum)
-    stageNode.appendChild(nameEl)
-
-    const countEl = document.createElement('div')
-    countEl.className = 'fp-stage-count'
-    countEl.textContent = completedCount + '/' + subTodos.length + ' 已完成'
-    stageNode.appendChild(countEl)
-
-    const statusEl = document.createElement('span')
-    statusEl.className = 'fp-stage-status ' + stageStatus
-    const statusText = stageStatus === 'done' ? '已完成' : stageStatus === 'active' ? '进行中' : '等待中'
-    statusEl.textContent = statusText
-    stageNode.appendChild(statusEl)
-
-    col.appendChild(stageNode)
-
-    const todoList = document.createElement('div')
-    todoList.className = 'fp-todo-list'
-    for (const todo of subTodos) {
-      todoList.appendChild(createTodoNode(todo, currentTodoId))
-    }
-    col.appendChild(todoList)
-
-    graph.appendChild(col)
-
-    if (index < todoData.stages.length - 1) {
-      const arrow = document.createElement('div')
-      arrow.className = 'fp-stage-arrow'
-      arrow.textContent = '→'
-      arrow.style.alignSelf = 'center'
-      graph.appendChild(arrow)
-    }
-  })
-
-  container.appendChild(graph)
-
-  // 数据流向区域
-  const allTodos = todoData.stages.flatMap(s => s.subTodos || [])
-  const depConnections = []
-  for (const todo of allTodos) {
-    if (Array.isArray(todo.dataDependKeys) && todo.dataDependKeys.length > 0) {
-      for (const depKey of todo.dataDependKeys) {
-        const source = allTodos.find(t => t.dataOutputKey === depKey)
-        if (source) {
-          depConnections.push({ from: source.id, to: todo.id, key: depKey })
-        }
-      }
-    }
-  }
-
-  if (depConnections.length > 0) {
-    const flowDiv = document.createElement('div')
-    flowDiv.className = 'fp-data-flow'
-    const title = document.createElement('div')
-    title.className = 'fp-data-flow-title'
-    title.textContent = '数据依赖流向'
-    flowDiv.appendChild(title)
-
-    for (const conn of depConnections) {
-      const item = document.createElement('div')
-      item.className = 'fp-data-flow-item'
-      const fromSpan = document.createElement('span')
-      fromSpan.textContent = conn.from
-      item.appendChild(fromSpan)
-      const arrowSpan = document.createElement('span')
-      arrowSpan.className = 'fp-data-flow-arrow'
-      arrowSpan.textContent = '─[' + conn.key + ']→'
-      item.appendChild(arrowSpan)
-      const toSpan = document.createElement('span')
-      toSpan.textContent = conn.to
-      item.appendChild(toSpan)
-      flowDiv.appendChild(item)
-    }
-    container.appendChild(flowDiv)
-  }
-}
-
-function setupGraphMessageListener() {
-  if (_messageListenerRegistered) return
-  _messageListenerRegistered = true
-  chrome.runtime.onMessage.addListener((msg) => {
-    if (msg && msg.type === 'agentTodoUpdate' && msg.data) {
-      renderExecutionGraph(msg.data)
-    }
-  })
-}
-
-function createExecutionGraphPanel() {
-  const div = document.createElement('div')
-  _graphContainer = document.createElement('div')
-  _graphContainer.className = 'fp-graph-container'
-  _graphContainer.innerHTML = '<div class="fp-graph-empty">暂无执行数据，启动 Agent 后将自动显示</div>'
-  div.appendChild(_graphContainer)
-  setupGraphMessageListener()
-  return { el: div, load: () => {} }
 }
 
 // ============ 资源监控 ============
@@ -739,6 +482,7 @@ function createDebugLogPanel() {
     else if (level === 'info') entry.style.borderLeftColor = '#40a0f0'
 
     const labelDiv = document.createElement('div')
+    labelDiv.className = 'log-label'  // 添加类名，供复制功能查询
     labelDiv.style.cssText = 'font-weight:700;font-size:12px;margin-bottom:4px'
     if (level === 'info') labelDiv.style.color = '#60b0f0'
     else if (level === 'warn') labelDiv.style.color = '#f0b030'
@@ -748,6 +492,7 @@ function createDebugLogPanel() {
     entry.appendChild(labelDiv)
 
     const detailDiv = document.createElement('div')
+    detailDiv.className = 'log-detail'  // 添加类名，供复制功能查询
     detailDiv.style.cssText = 'color:#999;font-size:11px'
     detailDiv.textContent = detail || ''
     entry.appendChild(detailDiv)
@@ -809,7 +554,6 @@ export function initFeaturePanels(callService) {
 
   // 标签定义
   const tabs = [
-    { id: 'graph', label: '📊 执行图', create: () => createExecutionGraphPanel() },
     { id: 'templates', label: '📋 任务模板', create: () => createTaskTemplatePanel(callService) },
     { id: 'recording', label: '🎬 工具录制', create: () => createToolRecordingPanel(callService) },
     { id: 'scheduled', label: '⏰ 定时任务', create: () => createScheduledTaskPanel(callService) },
@@ -852,7 +596,7 @@ export function initFeaturePanels(callService) {
   }
 
   // 默认显示第一个标签
-  switchTab('graph')
+  switchTab('templates')
 
   return container
 }

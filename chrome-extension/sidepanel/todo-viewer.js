@@ -193,8 +193,12 @@ todoChannel.addEventListener('message', (e) => {
   const data = e.data
   if (!data) return
   if (data.type === 'agentTodoClear') {
-    // 新任务启动时清除旧待办数据
+    // 任务完成或新任务启动时清除旧待办数据
     renderTodo({ stages: [], progress: { total: 0, completed: 0 }, currentStage: 1 })
+    // 任务完成时自动隐藏窗口（1秒后），新任务启动时也会收到此消息但窗口本身可能是隐藏的
+    setTimeout(() => {
+      window.close()
+    }, 1000)
     return
   }
   if (data.type === 'agentTodoUpdate') {

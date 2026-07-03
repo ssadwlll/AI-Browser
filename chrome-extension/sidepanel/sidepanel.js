@@ -1,7 +1,7 @@
 // AI Browser Chrome Extension - SidePanel Logic
 
 import { fetchWithTimeout, callServiceWithTimeout } from '../shared/utils.js'
-import { initFeaturePanels, renderExecutionGraph, appendDebugLogToPanel } from './feature-panels.js'
+import { initFeaturePanels, appendDebugLogToPanel } from './feature-panels.js'
 import { ExportService } from '../shared/export-service.js'
 
 const MSG_TYPES = {
@@ -647,7 +647,7 @@ async function loadAgentMode() {
       let fullContent = ''
       let toolResults = []
       currentPort.onMessage.addListener((msg) => {
-        if (msg.type === 'agentTodoUpdate') { forwardTodoUpdate(msg.data); renderExecutionGraph(msg.data); return }
+        if (msg.type === 'agentTodoUpdate') { forwardTodoUpdate(msg.data); return }
         if (msg.type === 'agentStart') {
           card.querySelector('.agent-step-title').textContent = 'Agent 已启动，分析需求中...'
         } else if (msg.type === 'agentStatus') {
@@ -877,12 +877,9 @@ async function runAgent(userText, pageContext) {
 
     // 先注册消息监听器，再发送 agentStart（避免响应比监听器先到达）
     currentPort.onMessage.addListener((msg) => {
-      if (msg.type === 'agentTodoUpdate') { forwardTodoUpdate(msg.data); renderExecutionGraph(msg.data); return }
+      if (msg.type === 'agentTodoUpdate') { forwardTodoUpdate(msg.data); return }
       if (msg.type === 'agentStart') {
         card.querySelector('.agent-step-title').textContent = 'Agent 已启动，分析需求中...'
-        // Feature 8: 显示聊天视图中的执行图面板
-        const graphPanel = document.getElementById('chatExecutionGraph')
-        if (graphPanel) { graphPanel.style.display = ''; graphPanel.open = true }
       } else if (msg.type === 'agentStatus') {
         card.querySelector('.agent-step-title').textContent = msg.text || '处理中...'
       } else if (msg.type === 'agentStep') {
@@ -1058,6 +1055,12 @@ async function loadSettings() {
   if (debugToggle) {
     debugToggle.classList.toggle('on', agentConfig.debug === true)
     debugToggle.onclick = () => debugToggle.classList.toggle('on')
+  }
+  // 对话全景开关
+  const convViewerToggle = document.getElementById('conversationViewerToggle')
+  if (convViewerToggle) {
+    convViewerToggle.classList.toggle('on', agentConfig.conversationViewer === true)
+    convViewerToggle.onclick = () => convViewerToggle.classList.toggle('on')
   }
 }
 
@@ -1312,6 +1315,7 @@ document.getElementById('saveSettingsBtn').addEventListener('click', async () =>
     await callService('configService', 'saveAgentConfig', {
       maxRounds: parseInt(document.getElementById('agentMaxRounds').value) || 30,
       debug: document.getElementById('agentDebugToggle').classList.contains('on'),
+      conversationViewer: document.getElementById('conversationViewerToggle').classList.contains('on'),
     })
 
     // 保存后刷新模型列表（用户可能刚填好 appKey/appSecret）

@@ -156,6 +156,7 @@ function buildToolDefinitions(searchResults, currentPageUrl, round, scriptServic
         type: 'object',
         properties: {
           selectorHint: { type: 'string', description: '可选：限定查询的CSS选择器范围，如"a.news-item"。不传则返回所有可交互元素' },
+          return_mode: { type: 'string', description: '返回模式："summary"(概览，显示样本元素)或"full"(完整列表)。默认summary' },
         },
         required: [],
       },
@@ -207,6 +208,7 @@ function buildToolDefinitions(searchResults, currentPageUrl, round, scriptServic
           multiple: { type: 'boolean', description: '是否返回多条结果。列表采集设为true，单条提取设为false。默认true' },
           limit: { type: 'number', description: '最多返回条数，默认10，最大50' },
           attributes: { type: 'string', description: '逗号分隔的要提取的属性名。提取链接时必传"href"。如"href,title,data-id"' },
+          return_mode: { type: 'string', description: '返回模式："summary"(概览，用于查看数据结构)或"full"(完整数据，用于下一步处理)。默认summary' },
         },
         required: ['selector'],
       },
@@ -392,11 +394,12 @@ function buildToolDefinitions(searchResults, currentPageUrl, round, scriptServic
     type: 'function',
     function: {
       name: 'finish_task',
-      description: '任务完成，汇报结果',
+      description: '任务完成，汇报结果。系统会自动从存储获取引用数据并格式化输出。',
       parameters: {
         type: 'object',
         properties: {
           summary: { type: 'string', description: '完成摘要' },
+          data_refs: { type: 'string', description: '引用的数据ID列表（逗号分隔，如"p1,p2"）。系统会自动获取完整数据并注入到输出中' },
         },
         required: ['summary'],
       },
@@ -475,11 +478,12 @@ export function buildPhase2Tools(searchResults, currentPageUrl, round, scriptSer
     type: 'function',
     function: {
       name: 'finish_task',
-      description: '任务完成，汇报结果。阶段2失败时也调用此工具总结失败原因和建议。',
+      description: '任务完成，汇报结果。阶段2失败时也调用此工具总结失败原因和建议。系统会自动从存储获取引用数据并格式化输出。',
       parameters: {
         type: 'object',
         properties: {
           summary: { type: 'string', description: '完成摘要或失败原因分析' },
+          data_refs: { type: 'string', description: '引用的数据ID列表（逗号分隔，如"p1,p2"）。系统会自动获取完整数据并注入到输出中' },
         },
         required: ['summary'],
       },
