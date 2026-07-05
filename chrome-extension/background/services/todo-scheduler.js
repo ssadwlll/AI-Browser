@@ -41,25 +41,31 @@ export class TodoScheduler {
 === 待办格式 ===
 每个 item 必须包含:
 - id: 唯一标识（如 "t1", "t2"）
-- action: 工具名称（DOM工具如extract_content、脚本如inject_script_N、或finish_task）
+- action: 工具名称，可用值：
+  · extract_content / click_element / navigate_to（DOM工具）
+  · inject_script_N（脚本库脚本，N为ID）
+  · generate_script（动态代码，用于数据整合/转换/分析/过滤等）
+  · finish_task（完成并输出结果，必须是最后一步）
 - description: 简要描述此步骤做什么
 
 === 工作流程 ===
 1. 先了解页面结构（get_interactive_elements / read_page_content）
 2. 根据需要提取数据（extract_content）或调用脚本（inject_script_N）
-3. 汇总结果（finish_task）
-4. 如脚本库无合适脚本，可使用 generate_script 动态生成代码
+3. 如需整合多份数据，用 generate_script 作为独立待办步骤
+4. 汇总结果（finish_task）
 
 === 正确示例 ===
 [
   { id: "t1", action: "extract_content", description: "提取新闻列表标题和链接" },
   { id: "t2", action: "inject_script_9", description: "批量获取新闻详情" },
-  { id: "t3", action: "finish_task", description: "汇总输出结果" }
+  { id: "t3", action: "generate_script", description: "整合列表+详情数据，去重排序" },
+  { id: "t4", action: "finish_task", description: "汇总输出结果" }
 ]${scriptHint}
 
 === 常见错误 ===
 ❌ action 写成中文名 → 应写为工具名称（如 extract_content, inject_script_N）
 ❌ 缺少 finish_task → 最后一步必须是 finish_task
+❌ search_tools / read_page_content 作为待办action → 这些是辅助工具，不推进进度
 
 用户需求: ${userMessage}`
   }
@@ -83,7 +89,8 @@ export class TodoScheduler {
 
     const usedIds = new Set()
     // 辅助工具不能作为待办 action（它们不推进待办进度，会导致任务卡住）
-    const AUXILIARY_ACTIONS = ['search_tools', 'generate_script', 'read_page_content', 'detect_page_template', 'get_interactive_elements', 'find_text_on_page']
+    // 注意：generate_script 可作为数据整合类待办的 action（如"合并多份数据"），不应拦截
+    const AUXILIARY_ACTIONS = ['search_tools', 'read_page_content', 'detect_page_template', 'get_interactive_elements', 'find_text_on_page']
     for (const item of items) {
       if (!item.id) errors.push('有待办缺少 id')
       if (!item.action) errors.push('有待办缺少 action')
@@ -91,7 +98,7 @@ export class TodoScheduler {
       if (item.id && usedIds.has(item.id)) errors.push(`id "${item.id}" 重复`)
       if (item.id) usedIds.add(item.id)
       if (item.action && AUXILIARY_ACTIONS.includes(item.action)) {
-        errors.push(`待办 "${item.id}" 的 action "${item.action}" 是辅助工具，不能作为主待办。请用 extract_content / inject_script_N / click_element / navigate_to / finish_task 等`)
+        errors.push(`待办 "${item.id}" 的 action "${item.action}" 是辅助工具，不能作为主待办。请用 extract_content / inject_script_N / click_element / navigate_to / generate_script / finish_task 等`)
       }
     }
 

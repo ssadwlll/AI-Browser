@@ -377,7 +377,7 @@ export function buildTools(searchResults, currentPageUrl, round, scriptService, 
               type: 'object',
               properties: {
                 id: { type: 'string', description: '待办ID，如 "t1"' },
-                action: { type: 'string', description: '工具名称，如 extract_content / inject_script_N / finish_task' },
+                action: { type: 'string', description: '工具名称。可用：extract_content / inject_script_N / click_element / navigate_to / generate_script / finish_task。其中 generate_script 用于数据整合/转换/分析类步骤（如合并多份数据）' },
                 description: { type: 'string', description: '待办描述' },
               },
               required: ['id', 'action', 'description'],
