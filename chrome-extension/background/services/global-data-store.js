@@ -1,6 +1,6 @@
 // ============ GlobalDataStore ============
 // 任务级持久存储：任务全程共享，自动生成数据摘要
-// 每个 entry 由 dataOutputKey 索引，供 inject_script_N 通过 window.__store 访问全量数据
+// 每个 entry 由 dataOutputKey 索引，供 AI 通过 generate_script(data_refs=...) 注入到页面访问
 export class GlobalDataStore {
   constructor() {
     this.entries = new Map()  // key → { value, summary, sourceTodo, timestamp }

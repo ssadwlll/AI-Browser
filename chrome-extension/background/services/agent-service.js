@@ -118,7 +118,7 @@ export class AgentService {
     } finally {
       const state = this.agentStates.get(tabId)
       if (state) state.running = false
-      // 注意：不清除 payloadStore，保留上轮结果供后续 inject_script_N 复用
+      // 注意：不清除 payloadStore，保留上轮结果供后续 generate_script(data_refs=...) 复用
       // （避免用户说"导出结果"时 agent 无法访问上轮数据而重新执行）
       // 清理本次运行缓存的页面内容，防止跨任务累积内存占用
       this._pageReadCache.clear()

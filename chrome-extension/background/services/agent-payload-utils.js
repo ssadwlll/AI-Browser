@@ -82,6 +82,18 @@ export function normalizePayload(raw, toolName) {
   } else if (obj.ok && obj.result && Array.isArray(obj.result.pages)) {
     // inject_script_N 返回 {ok, result: {pages: [...], total, successCount}}，剥离包装层
     items = obj.result.pages
+  } else if (obj.ok && obj.result !== undefined && toolName === 'generate_script') {
+    // generate_script 返回 {ok, result}，剥离 ok 包装层，result 才是真正的数据
+    // result 可能是数组、对象或基本类型
+    const inner = obj.result
+    if (Array.isArray(inner)) {
+      items = inner
+    } else if (inner && typeof inner === 'object') {
+      items = [inner]
+    } else {
+      // 基本类型（数字/字符串/布尔）包装为 {value: ...}
+      items = [{ value: inner }]
+    }
   } else if (typeof obj === 'object') {
     // 单对象包装为数组
     items = [obj]
@@ -252,7 +264,7 @@ export async function storeToPayload(payloadStore, result, toolName, envelope) {
   const entryId = await payloadStore.add(toolName, result, summary, metadata)
   // 写入失败：返回错误提示，让调用方（agent-runner）记录为失败工具结果
   if (entryId === null) {
-    return `${smartTruncateResult(result, 2500)}\n\n[注意：数据存储失败，inject_script_N 将无法通过 window.__store 访问全量数据。可重新尝试或缩小数据量]`
+    return `${smartTruncateResult(result, 2500)}\n\n[注意：数据存储失败，无法通过 generate_script(data_refs) 操作全量数据。可重新尝试或缩小数据量]`
   }
   // 返回 schema+样例摘要（而非大段样本数据），让AI理解数据结构
   if (envelope) {
@@ -262,11 +274,11 @@ export async function storeToPayload(payloadStore, result, toolName, envelope) {
       : envelope.items.length === 1
       ? `window.__store.${entryId} 是长度为1的数组，访问元素用 window.__store.${entryId}[0]`
       : `window.__store.${entryId} 为空`
-    return `${schemaSummary}\n完整数据已存储(ID:${entryId})，inject_script_N 可通过 window.__store.${entryId} 访问。${typeHint}。`
+    return `${schemaSummary}\n完整数据已存储(ID:${entryId})，使用 generate_script(data_refs=["${entryId}"]) 操作。${typeHint}。`
   }
   // 兜底：无 envelope 时走旧逻辑
   const truncatedData = smartTruncateResult(result, 2500)
-  return `${truncatedData}\n\n[完整数据已存储(ID:${entryId})，共${metadata.count}条。inject_script_N 可通过 window.__store.${entryId} 访问]`
+  return `${truncatedData}\n\n[完整数据已存储(ID:${entryId})，共${metadata.count}条。使用 generate_script(data_refs=["${entryId}"]) 操作]`
 }
 
 /**
@@ -503,10 +515,10 @@ export function buildDataOverview(result, toolName) {
  */
 function generateOverviewHint(contentCount, simpleCount) {
   if (contentCount > 10) {
-    return `已显示10条有意义样本（共${contentCount}条）+${simpleCount}条简单数据。inject_script_N 可通过 window.__store.存储ID 访问全量数据`
+    return `已显示10条有意义样本（共${contentCount}条）+${simpleCount}条简单数据。操作全量数据请用 generate_script(data_refs=["存储ID"])`
   }
   if (contentCount > 0) {
-    return `已显示全部${contentCount}条有意义数据。另有${simpleCount}条简单数据。inject_script_N 可通过 window.__store.存储ID 访问全量数据`
+    return `已显示全部${contentCount}条有意义数据。另有${simpleCount}条简单数据。操作全量数据请用 generate_script(data_refs=["存储ID"])`
   }
-  return `已显示样本。inject_script_N 可通过 window.__store.存储ID 访问全量数据`
+  return `已显示样本。操作全量数据请用 generate_script(data_refs=["存储ID"])`
 }

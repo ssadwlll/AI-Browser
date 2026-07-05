@@ -34,7 +34,7 @@ export class TodoScheduler {
   getTemplate(userMessage, pageContent, searchResults) {
     const scriptHint = searchResults?.length > 0
       ? `\n  可用脚本: ${searchResults.slice(0, 5).map(s => `inject_script_${s.id}(${s.name})`).join(', ')}`
-      : '\n  (暂无匹配脚本，仅可使用DOM工具；复杂需求建议先 search_tools 查询脚本库)'
+      : '\n  (暂无匹配脚本，可使用DOM工具或generate_script动态生成代码)'
 
     return `请根据用户需求创建待办列表。
 
@@ -48,8 +48,7 @@ export class TodoScheduler {
 1. 先了解页面结构（get_interactive_elements / read_page_content）
 2. 根据需要提取数据（extract_content）或调用脚本（inject_script_N）
 3. 汇总结果（finish_task）
-
-注意：DOM 工具仅适合简单操作。若需要批量处理、深度采集或复杂计算，请用 search_tools 查找脚本库中的 inject_script_N。
+4. 如脚本库无合适脚本，可使用 generate_script 动态生成代码
 
 === 正确示例 ===
 [
@@ -124,7 +123,7 @@ export class TodoScheduler {
     if (status === 'done') {
       todo._status = 'done'
       this.totalCompleted++
-      // 存储输出数据（供 inject_script_N 通过 window.__store 访问全量数据）
+      // 存储输出数据（供 generate_script(data_refs=...) 注入到页面访问）
       if (outputData != null) {
         this.globalDataStore.set(todo.id, outputData, todo.action)
       }
@@ -171,7 +170,7 @@ export class TodoScheduler {
 
     if (todo.action === funcName) return todo
     if (todo.action?.startsWith('inject_script_') && funcName?.startsWith('inject_script_')) return todo
-    if (funcName === 'search_tools') return null
+    if (funcName === 'search_tools' || funcName === 'generate_script') return null
     if (funcName === 'finish_task') return todo
 
     return null

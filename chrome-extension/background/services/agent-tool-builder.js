@@ -343,6 +343,24 @@ export function buildTools(searchResults, currentPageUrl, round, scriptService, 
     tools.push(...buildScriptToolDefs(filteredScripts))
   }
 
+  // === generate_script（动态代码执行，操作全量数据）===
+  tools.push({
+    type: 'function',
+    function: {
+      name: 'generate_script',
+      description: '动态生成并执行JS代码，用于操作全量数据（过滤/去重/转换/统计）。当DOM工具无法完成且脚本库无合适脚本时使用。代码通过 window.__store.pX 访问存储的全量数据，用 return 返回结果。',
+      parameters: {
+        type: 'object',
+        properties: {
+          code: { type: 'string', description: '要执行的JS代码。通过 window.__store.p1 访问存储数据，用 return 返回结果。例: return window.__store.p1.filter(x => x.text.length > 5)' },
+          data_refs: { type: 'array', items: { type: 'string' }, description: '引用的数据ID列表，如 ["p1","p2"]。系统会把全量数据注入到 window.__store 供 code 访问' },
+          description: { type: 'string', description: '代码功能简述（便于追踪）' },
+        },
+        required: ['code'],
+      },
+    },
+  })
+
   // === create_todo（扁平列表）===
   tools.push({
     type: 'function',

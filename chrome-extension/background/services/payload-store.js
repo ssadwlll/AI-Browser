@@ -212,7 +212,7 @@ export class PayloadStore {
     return {
       count: entries.length,
       entries,
-      hint: 'inject_script_N 可通过 window.__store.id 访问全量数据'
+      hint: '使用 generate_script(data_refs=["id1","id2"]) 操作全量数据，或用 payloadStore.getData(id) 异步读取'
     }
   }
 
@@ -234,7 +234,7 @@ export class PayloadStore {
     })
     return {
       summary: lines.join('\n'),
-      hint: 'inject_script_N 可通过 window.__store.id 访问全量数据'
+      hint: '使用 generate_script(data_refs=["id1","id2"]) 操作全量数据'
     }
   }
 

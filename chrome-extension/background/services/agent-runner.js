@@ -387,6 +387,7 @@ export async function runAgent(ctx) {
 === 工具使用策略 ===
 - DOM工具（extract_content、click_element等）：用于页面探索、简单数据提取、交互操作
 - inject_script_N：用于批量处理、深度数据采集（N是search_tools查到的脚本ID）
+- generate_script：当脚本库没有合适脚本且DOM工具无法完成时，动态生成代码执行（过滤/去重/转换/统计等）
 - search_tools：搜索脚本库，查找可用的远程脚本
 - finish_task：完成所有任务后输出最终结果
 
@@ -399,6 +400,8 @@ export async function runAgent(ctx) {
 === 数据流转机制 ===
 工具返回的数据量较大时，系统会自动存储完整数据，只发回 schema+样例摘要（如"p1: 15条 | {title:string, url:string} | 样例: [...]"）。
 - 数据摘要可直接用于回答用户，或在 finish_task 中通过 data_refs 引用完整数据
+- 操作全量数据：generate_script(data_refs=["p1","p2"]) — 系统自动注入全量数据到页面，代码中通过 window.__store.p1 访问
+- 整合多份数据：generate_script(data_refs=["p1","p2"], code="return [...__store.p1, ...__store.p2]")
 
 === 任务边界处理 ===
 当用户请求超出当前可用工具能力时，请：
@@ -1280,6 +1283,74 @@ ${allData.length > 0 ? '全局存储:\n' + allData.join('\n') : ''}${payloadItem
               }
               recordMemory(configService, scriptId, memOk, execDuration, memOk ? '' : (execResult?.error || ''), memSummary).catch(() => {})
             }
+          } else if (funcName === 'generate_script') {
+            // 动态代码执行：把 data_refs 全量数据注入 window.__store，执行 code，返回 {ok, result}
+            const targetTab = await getTargetTab(tabId)
+            if (!targetTab) {
+              toolResult = JSON.stringify({ ok: false, error: '目标标签页不可用' })
+              executedTools.push({ name: `${funcName}(标签页不可用)`, result: toolResult })
+              postToUI(tabId, { type: 'agentStepResult', step: totalToolCalls, toolName: funcName, result: toolResult, done: false })
+              messages.push({ role: 'tool', tool_call_id: toolCall.id, content: toolResult })
+              continue
+            }
+            const code = typeof funcArgs.code === 'string' ? funcArgs.code : ''
+            const dataRefIds = normalizeDataRefs(funcArgs.data_refs)
+            if (!code.trim()) {
+              toolResult = JSON.stringify({ ok: false, error: 'code 参数不能为空' })
+              executedTools.push({ name: `${funcName}(空代码)`, result: toolResult })
+              postToUI(tabId, { type: 'agentStepResult', step: totalToolCalls, toolName: funcName, result: toolResult, done: false })
+              messages.push({ role: 'tool', tool_call_id: toolCall.id, content: toolResult })
+              continue
+            }
+            postToUI(tabId, { type: 'agentStep', step: totalToolCalls, toolName: funcName, toolArgs: { description: funcArgs.description || '', data_refs: dataRefIds }, status: 'running' })
+            try {
+              // 读取 data_refs 对应的全量数据
+              let storeData = {}
+              if (dataRefIds.length > 0) {
+                storeData = await payloadStore.getDataByIds(dataRefIds)
+                // 校验引用数据是否都存在
+                const missing = dataRefIds.filter(id => storeData[id] === undefined)
+                if (missing.length > 0) {
+                  toolResult = JSON.stringify({ ok: false, error: `引用的数据不存在: ${missing.join(', ')}` })
+                  executedTools.push({ name: `${funcName}(引用缺失)`, result: toolResult })
+                  postToUI(tabId, { type: 'agentStepResult', step: totalToolCalls, toolName: funcName, result: toolResult, done: false })
+                  messages.push({ role: 'tool', tool_call_id: toolCall.id, content: toolResult })
+                  continue
+                }
+              }
+              // 在页面中注入 window.__store 并执行 code
+              // 采用 new Function(code) 执行，支持 return 语法；注入 storeData 作为 window.__store
+              const [execResult] = await chrome.scripting.executeScript({
+                target: { tabId: targetTab.id },
+                func: (storeObj, userCode) => {
+                  try {
+                    window.__store = window.__store || {}
+                    if (storeObj && typeof storeObj === 'object') {
+                      for (const k of Object.keys(storeObj)) window.__store[k] = storeObj[k]
+                    }
+                    const fn = new Function(userCode)
+                    const r = fn()
+                    return { ok: true, result: r }
+                  } catch (e) {
+                    return { ok: false, error: e.message }
+                  }
+                },
+                args: [storeData, code],
+              })
+              const r = execResult?.result
+              if (r && r.ok) {
+                toolResult = JSON.stringify({ ok: true, result: r.result })
+              } else {
+                toolResult = JSON.stringify({ ok: false, error: r?.error || '代码执行失败' })
+              }
+            } catch (e) {
+              if (e.message?.includes('Cannot access a chrome:// URL') || e.message?.includes('Cannot access contents of url')) {
+                toolResult = JSON.stringify({ ok: false, error: '当前页面为系统页面，无法执行脚本。' })
+              } else {
+                toolResult = JSON.stringify({ ok: false, error: `执行失败: ${e.message}` })
+              }
+            }
+            executedTools.push({ name: funcName, result: toolResult })
           } else if (funcName === 'screenshot_visible') {
             toolResult = await (async () => {
               try {
