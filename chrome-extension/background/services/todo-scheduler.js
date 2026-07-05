@@ -7,6 +7,64 @@
 
 import { GlobalDataStore } from './global-data-store.js'
 
+/**
+ * 容错恢复：当 AI 生成的待办 JSON 因 description 含未转义引号而解析失败时，
+ * 用正则逐项提取字段。支持字段：id, action, description, url, selector 等。
+ * 核心思路：按 }, { 分割每个待办项，对每个字符串字段，值结束于下一个字段匹配位置之前的最后一个 "
+ */
+function _recoverTodoItemsFromString(str) {
+  if (typeof str !== 'string') return null
+  const trimmed = str.trim().replace(/^\[/, '').replace(/\]$/, '').trim()
+  if (!trimmed) return null
+
+  // 按 }, { 分割成单独的项（容忍换行和空格）
+  const itemStrs = trimmed.split(/\}\s*,\s*\{/).map((s, i, arr) => {
+    if (i === 0) return s.replace(/^\s*\{/, '')
+    if (i === arr.length - 1) return s.replace(/\}\s*$/, '')
+    return s
+  })
+
+  const items = []
+  for (const itemStr of itemStrs) {
+    const item = {}
+    // 匹配所有 "字段": " 的位置（字符串字段）
+    const fieldPattern = /"(\w+)"\s*:\s*"/g
+    const matches = []
+    let m
+    while ((m = fieldPattern.exec(itemStr)) !== null) {
+      matches.push({ key: m[1], valueStart: m.index + m[0].length, matchIndex: m.index })
+    }
+    // 对每个字符串字段，值结束于：下一个字段 matchIndex 之前的最后一个 "，或行尾
+    for (let i = 0; i < matches.length; i++) {
+      const { key, valueStart, matchIndex } = matches[i]
+      let valueEnd
+      if (i + 1 < matches.length) {
+        const nextMatchIndex = matches[i + 1].matchIndex
+        const segment = itemStr.slice(valueStart, nextMatchIndex)
+        const lastQ = segment.lastIndexOf('"')
+        valueEnd = lastQ >= 0 ? valueStart + lastQ : nextMatchIndex
+      } else {
+        const rest = itemStr.slice(valueStart)
+        const lastQ = rest.lastIndexOf('"')
+        valueEnd = lastQ >= 0 ? valueStart + lastQ : itemStr.length
+      }
+      let value = itemStr.slice(valueStart, valueEnd)
+      // 反转义常见转义序列
+      value = value.replace(/\\"/g, '"').replace(/\\n/g, '\n').replace(/\\t/g, '\t').replace(/\\\\/g, '\\')
+      item[key] = value
+    }
+    // 非字符串字段（数字、布尔）
+    const nonStrPattern = /"(\w+)"\s*:\s*(true|false|\d+\.?\d*)/g
+    while ((m = nonStrPattern.exec(itemStr)) !== null) {
+      if (!(m[1] in item)) {
+        item[m[1]] = m[2] === 'true' ? true : m[2] === 'false' ? false : Number(m[2])
+      }
+    }
+    if (Object.keys(item).length > 0) items.push(item)
+  }
+  return items.length > 0 ? items : null
+}
+
 // ===== 硬性规则常量 =====
 const HARD_RULES = {
   FAIL_THRESHOLD: 5,        // 连续5次无进展 → 强制finish_task
@@ -79,7 +137,15 @@ export class TodoScheduler {
         if (Array.isArray(parsed)) items = parsed
         else return { ok: false, error: 'items 必须是数组类型' }
       } catch (e) {
-        return { ok: false, error: `items 解析失败: ${e.message}` }
+        // 容错：AI 生成的 JSON 可能因 description 含未转义引号而解析失败
+        // （如新闻标题里的 "送" 这种），尝试用正则逐项提取
+        const recovered = _recoverTodoItemsFromString(items)
+        if (recovered && recovered.length > 0) {
+          console.warn('[TodoScheduler] JSON 解析失败，已通过容错恢复:', e.message, '恢复', recovered.length, '项')
+          items = recovered
+        } else {
+          return { ok: false, error: `items 解析失败: ${e.message}\n提示：description 中如有引号请用中文引号或转义` }
+        }
       }
     }
 
