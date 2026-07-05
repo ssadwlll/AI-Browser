@@ -1,14 +1,21 @@
 // ============ PayloadStore ============
 // 工具结果暂存区：超过阈值的结果存此处，只发摘要给AI
 // 支持按 sessionId 隔离：新任务只查自己 session 的数据
+// 数据存储在 chrome.storage.session（页面导航不丢失，Service Worker重启不丢失）
+// 内存索引用于快速查询摘要，全量数据按需从 storage 读取
 export class PayloadStore {
   constructor() {
-    this.entries = []
+    this.entries = []        // 内存索引：{id, sessionId, toolName, timestamp, summary, metadata}
     this.maxEntries = 30
-    this.maxRecallChars = 5000  // recall_data 单次返回上限
+    // 单条全量数据读取上限（用于生成_script 注入前的校验，避免超大 payload 撑爆页面内存）
+    this.maxEntryChars = 5000000
+    // chrome.storage.session 总配额约 10MB，预留 2MB 给其他模块，安全阈值 8MB
+    this._quotaBudgetBytes = 8 * 1024 * 1024
+    this._usedBytes = 0  // 近似已用字节数（基于 JSON.stringify 估算）
     // 单调递增计数器，避免 FIFO 淘汰后 ID 复用导致数据错乱
     this._idCounter = 0
     this._sessionId = ''  // 当前会话ID，用于任务隔离
+    this._storagePrefix = 'agent_data_'  // chrome.storage.session key前缀
   }
 
   /**
@@ -25,27 +32,137 @@ export class PayloadStore {
     return this._sessionId
   }
 
-  // 存储数据
-  add(toolName, data, summary, metadata) {
+  // ===== chrome.storage.session 操作 =====
+
+  async _storageSet(key, value) {
+    try {
+      await chrome.storage.session.set({ [key]: value })
+      return true
+    } catch (e) {
+      console.warn('[PayloadStore] storage.session写入失败:', e.message)
+      return false
+    }
+  }
+
+  async _storageGet(key) {
+    try {
+      const result = await chrome.storage.session.get(key)
+      return result[key] ?? null
+    } catch (e) {
+      console.warn('[PayloadStore] storage.session读取失败:', e.message)
+      return null
+    }
+  }
+
+  async _storageRemove(keys) {
+    try {
+      await chrome.storage.session.remove(keys)
+    } catch (e) {
+      console.warn('[PayloadStore] storage.session删除失败:', e.message)
+    }
+  }
+
+  // 存储数据（全量数据写入 chrome.storage.session，内存只存索引）
+  // 改为 async：先写入 storage，成功后再建索引；写入失败则不污染 entries
+  async add(toolName, data, summary, metadata) {
+    // 确保 data 是解析后的对象（不是JSON字符串），注入页面时 window.__store.p1 直接可用
+    let storedData = data
+    if (typeof storedData === 'string') {
+      try { storedData = JSON.parse(storedData) } catch { /* 保留原始字符串 */ }
+    }
+
+    // 大小校验：避免单条数据撑爆 chrome.storage.session 配额（10MB）
+    let dataChars = 0
+    try {
+      dataChars = JSON.stringify(storedData).length
+    } catch (e) {
+      console.warn('[PayloadStore] 数据序列化失败，拒绝写入:', e.message)
+      return null
+    }
+    if (dataChars > this.maxEntryChars) {
+      console.warn(`[PayloadStore] 数据过大 (${dataChars} > ${this.maxEntryChars})，拒绝写入: ${toolName}`)
+      return null
+    }
+
+    // 主动配额管理：写入前预估总用量，超阈值时淘汰最旧条目
+    // 避免盲目写入触发 QUOTA_BYTES 错误后才回滚（P1: quota 检查与隔离）
+    while (this.entries.length > 0 && (this._usedBytes + dataChars > this._quotaBudgetBytes)) {
+      const removed = this.entries.shift()
+      if (removed) {
+        const removedChars = removed._dataChars || 0
+        this._usedBytes = Math.max(0, this._usedBytes - removedChars)
+        await this._storageRemove(`${this._storagePrefix}${removed.id}`)
+        console.warn(`[PayloadStore] 配额预警，淘汰旧条目: ${removed.id} (${removedChars}字符)`)
+      }
+    }
+
     if (this.entries.length >= this.maxEntries) {
-      this.entries.shift()  // FIFO淘汰
+      // FIFO淘汰：移除最旧的条目
+      const removed = this.entries.shift()
+      if (removed) {
+        const removedChars = removed._dataChars || 0
+        this._usedBytes = Math.max(0, this._usedBytes - removedChars)
+        await this._storageRemove(`${this._storagePrefix}${removed.id}`)
+      }
     }
     // 使用单调递增计数器生成 ID，永不复用
     this._idCounter++
+    const entryId = `p${this._idCounter}`
+
+    // 先写入 storage，确认成功再建索引
+    const storageKey = `${this._storagePrefix}${entryId}`
+    const ok = await this._storageSet(storageKey, storedData)
+    if (!ok) {
+      console.warn(`[PayloadStore] 写入失败，回滚索引: ${entryId}`)
+      // 回滚计数器，避免 ID 跳号
+      this._idCounter--
+      return null
+    }
+    console.log(`[PayloadStore] 数据已写入session storage: ${entryId} (${dataChars}字符)`)
+
     const entry = {
-      id: `p${this._idCounter}`,
+      id: entryId,
       sessionId: this._sessionId,  // 绑定当前会话
       toolName,
       timestamp: Date.now(),
-      data,
       summary,
-      metadata: metadata || {}
+      metadata: metadata || {},
+      _dataChars: dataChars,  // 记录字节数，淘汰时用于扣减 _usedBytes
     }
     this.entries.push(entry)
-    return entry.id
+    this._usedBytes += dataChars
+    return entryId
   }
 
-  // 查询数据（默认只查当前session，除非显式指定跨session）
+  /**
+   * 获取条目的全量数据（从 chrome.storage.session 读取）
+   */
+  async getData(entryId) {
+    return this._storageGet(`${this._storagePrefix}${entryId}`)
+  }
+
+  /**
+   * 批量获取多个条目的全量数据
+   * @param {string[]} entryIds - 条目ID数组
+   * @returns {Object} - { p1: data1, p2: data2, ... }
+   */
+  async getDataByIds(entryIds) {
+    const keys = entryIds.map(id => `${this._storagePrefix}${id}`)
+    const result = {}
+    try {
+      const stored = await chrome.storage.session.get(keys)
+      for (const id of entryIds) {
+        const data = stored[`${this._storagePrefix}${id}`]
+        if (data !== undefined) result[id] = data
+      }
+    } catch (e) {
+      console.warn('[PayloadStore] 批量读取失败:', e.message)
+    }
+    return result
+  }
+
+  // 查询数据（同步，返回索引信息+schema+样例，不返回全量数据）
+  // 全量数据通过 getData/getDataByIds 异步获取
   query(options = {}) {
     let results = []
 
@@ -55,7 +172,7 @@ export class PayloadStore {
     // 按 entry_id 查询
     if (options.entry_id) {
       const entryId = options.entry_id.trim()
-      // "all" 表示查询所有条目的完整数据
+      // "all" 表示查询所有条目
       if (entryId === 'all') {
         results = sessionIdFilter
           ? this.entries.filter(e => e.sessionId === sessionIdFilter)
@@ -78,36 +195,25 @@ export class PayloadStore {
       return this._summaryAll(sessionIdFilter)
     }
 
-    // 应用 filter
-    if (options.filter && results.length > 0) {
-      results = this._applyFilter(results, options.filter)
+    // 返回索引信息（不含全量data）
+    if (results.length === 0) {
+      return { error: '未找到匹配数据', entries: [] }
     }
 
-    // 应用 fields
-    if (options.fields && results.length > 0) {
-      results = this._applyFields(results, options.fields)
+    const entries = results.map(e => ({
+      id: e.id,
+      toolName: e.toolName,
+      count: e.metadata?.count || 1,
+      schema: e.metadata?.schema || null,
+      sample: e.metadata?.sample || null,
+      summary: e.summary || ''
+    }))
+
+    return {
+      count: entries.length,
+      entries,
+      hint: 'inject_script_N 可通过 window.__store.id 访问全量数据'
     }
-
-    // 格式化并检查大小
-    const formatted = this._formatResult(results)
-    const charCount = JSON.stringify(formatted).length
-
-    if (charCount > this.maxRecallChars) {
-      // 不再返回warning阻塞LLM，而是自动截断返回核心数据
-      // 对数组数据：保留前5条 + 总数摘要
-      const truncated = this._autoTruncate(formatted, this.maxRecallChars)
-      if (truncated) {
-        truncated._note = `原始结果${charCount}字符已自动截断至核心数据。如需更多可指定 filter="前N条" 或 fields="指定字段"。`
-        return truncated
-      }
-      // 截断失败时才返回摘要（兜底）
-      return {
-        summary: this._summarizeEntries(results),
-        _note: `数据量较大，返回摘要。使用 filter="前N条" 或 fields="指定字段" 缩小范围获取详细数据。`
-      }
-    }
-
-    return formatted
   }
 
   // 汇总所有条目（支持按 sessionId 过滤）
@@ -115,154 +221,42 @@ export class PayloadStore {
     const entries = sessionIdFilter
       ? this.entries.filter(e => e.sessionId === sessionIdFilter)
       : this.entries
-    return {
-      summary: entries.map(e => `${e.id}(${e.toolName}:${e.metadata.count || 1}条)`).join(', ') || '无存储数据',
-      hint: '调用 recall_data(entry_id="xxx") 查询具体条目'
-    }
-  }
-
-  // 应用过滤条件
-  _applyFilter(entries, filter) {
-    const parsed = this._parseFilter(filter)
-    if (!parsed) return entries
-
-    return entries.map(entry => {
-      const data = Array.isArray(entry.data) ? entry.data : [entry.data]
-      let filtered = data
-
-      if (parsed.type === 'range') {
-        filtered = data.slice(parsed.start, parsed.end)
-      } else if (parsed.type === 'first') {
-        filtered = data.slice(0, parsed.n)
-      } else if (parsed.type === 'keyword') {
-        filtered = data.filter(item => {
-          // 防御循环引用导致 JSON.stringify 崩溃
-          let text = item.text || item.title || item.content
-          if (!text) {
-            try { text = JSON.stringify(item) } catch { text = String(item) }
-          }
-          return String(text).includes(parsed.keyword)
-        })
-      }
-
-      return { ...entry, data: filtered }
+    if (entries.length === 0) return { summary: '无存储数据', hint: '' }
+    // 使用 schema 格式化
+    const lines = entries.map(e => {
+      const count = e.metadata?.count || 1
+      const schemaStr = e.metadata?.schema
+        ? Object.entries(e.metadata.schema).map(([k, v]) => `${k}:${v}`).join(', ')
+        : ''
+      return schemaStr
+        ? `${e.id}(${e.toolName}): ${count}条 | {${schemaStr}}`
+        : `${e.id}(${e.toolName}): ${count}条`
     })
-  }
-
-  // 解析过滤条件
-  _parseFilter(filter) {
-    // "前N条"
-    const firstMatch = filter.match(/前(\d+)条/)
-    if (firstMatch) return { type: 'first', n: parseInt(firstMatch[1]) }
-
-    // "第N-M条"
-    const rangeMatch = filter.match(/第(\d+)[-~](\d+)条/)
-    if (rangeMatch) return { type: 'range', start: parseInt(rangeMatch[1]) - 1, end: parseInt(rangeMatch[2]) }
-
-    // "含关键词xxx"
-    const keywordMatch = filter.match(/含(.+)/)
-    if (keywordMatch) return { type: 'keyword', keyword: keywordMatch[1] }
-
-    // 其他尝试作为关键词
-    return { type: 'keyword', keyword: filter }
-  }
-
-  // 应用字段选择
-  _applyFields(entries, fields) {
-    const fieldList = fields.split(',').map(s => s.trim())
-
-    return entries.map(entry => {
-      const data = Array.isArray(entry.data) ? entry.data : [entry.data]
-
-      const projected = data.map(item => {
-        const newItem = {}
-        for (const f of fieldList) {
-          if (item[f] !== undefined) newItem[f] = item[f]
-          if (item.attrs && item.attrs[f] !== undefined) newItem[f] = item.attrs[f]
-        }
-        // 如果没有匹配任何字段，保留原始（可能是数组或对象）
-        if (Object.keys(newItem).length === 0) return item
-        return newItem
-      })
-
-      return { ...entry, data: projected }
-    })
-  }
-
-  // 格式化结果
-  _formatResult(entries) {
-    if (entries.length === 0) return { error: '未找到匹配数据', entries: [], queriedKeys: [] }
-
-    const allData = entries.flatMap(e => Array.isArray(e.data) ? e.data : [e.data])
-
-    if (entries.length === 1 && allData.length <= 10) {
-      return {
-        count: allData.length,
-        entries: entries.map(e => ({ id: e.id, toolName: e.toolName, count: Array.isArray(e.data) ? e.data.length : 1 })),
-        data: allData
-      }
-    }
-
     return {
-      count: allData.length,
-      entries: entries.map(e => ({ id: e.id, toolName: e.toolName, count: Array.isArray(e.data) ? e.data.length : 1 })),
-      data: allData
-    }
-  }
-
-  // 条目摘要
-  _summarizeEntries(entries) {
-    return entries.map(e => `${e.id}: ${e.summary || `${Array.isArray(e.data) ? e.data.length : 1}条数据`}`).join('\n')
-  }
-
-  // 自动截断大结果，保留核心数据
-  _autoTruncate(formatted, maxChars) {
-    try {
-      // 如果是数组：保留前5条
-      if (Array.isArray(formatted)) {
-        const kept = formatted.slice(0, 5)
-        const resultStr = JSON.stringify(kept)
-        if (resultStr.length <= maxChars) {
-          return { total: formatted.length, shown: kept.length, data: kept }
-        }
-        // 5条也太大，进一步压缩每条
-        const compressed = kept.map(item => {
-          if (item.text) return { text: item.text.slice(0, 50), attrs: item.attrs }
-          return JSON.stringify(item).slice(0, 80)
-        })
-        return { total: formatted.length, shown: compressed.length, data: compressed }
-      }
-      // 如果是对象含data数组：截断data
-      if (formatted.data && Array.isArray(formatted.data)) {
-        const kept = formatted.data.slice(0, 5)
-        const resultStr = JSON.stringify(kept)
-        if (resultStr.length <= maxChars) {
-          return { ...formatted, data: kept, total: formatted.data.length, shown: kept.length }
-        }
-        const compressed = kept.map(item => {
-          if (item.text) return { text: item.text.slice(0, 50), attrs: item.attrs }
-          return JSON.stringify(item).slice(0, 80)
-        })
-        return { ...formatted, data: compressed, total: formatted.data.length, shown: compressed.length }
-      }
-      // 字符串：直接截断
-      if (typeof formatted === 'string') {
-        return formatted.slice(0, maxChars)
-      }
-      return null
-    } catch {
-      return null
+      summary: lines.join('\n'),
+      hint: 'inject_script_N 可通过 window.__store.id 访问全量数据'
     }
   }
 
   // 清空（可选：只清空当前session的条目，或全部清空）
-  clear(options = {}) {
+  async clear(options = {}) {
+    const toRemove = []
     if (options.sessionOnly && this._sessionId) {
-      // 仅清除当前 session 的条目，保留其他 session
+      const removed = this.entries.filter(e => e.sessionId === this._sessionId)
+      toRemove.push(...removed.map(e => `${this._storagePrefix}${e.id}`))
+      // 扣减已用字节
+      let removedBytes = 0
+      for (const e of removed) removedBytes += (e._dataChars || 0)
+      this._usedBytes = Math.max(0, this._usedBytes - removedBytes)
       this.entries = this.entries.filter(e => e.sessionId !== this._sessionId)
     } else {
+      toRemove.push(...this.entries.map(e => `${this._storagePrefix}${e.id}`))
       this.entries = []
       this._idCounter = 0
+      this._usedBytes = 0
+    }
+    if (toRemove.length > 0) {
+      await this._storageRemove(toRemove)
     }
   }
 
@@ -285,32 +279,26 @@ export class PayloadStore {
     return recentEntries.length
   }
 
-  // 列出所有条目ID（用于阶段2上下文注入）
+  // 列出所有条目ID
   listEntryIds() {
     return this.entries.map(e => e.id)
   }
 
-  // 获取单个条目摘要（用于阶段2上下文注入）
+  // 获取单个条目摘要
   getEntrySummary(entryId) {
     const entry = this.entries.find(e => e.id === entryId)
     if (!entry) return null
-    // 如果数据包含URL列表（常见于extract_content结果），提取URL摘要
-    const data = entry.data
-    if (Array.isArray(data)) {
-      const urls = data.filter(d => d.attrs?.href).map(d => d.attrs.href)
-      if (urls.length > 0) {
-        return `${data.length}条数据，含${urls.length}个URL链接（可直接传给inject_script_*批量采集）`
-      }
-      return `${data.length}条数据: ${entry.summary || '结构化内容'}`
-    }
-    return entry.summary || `${typeof data === 'string' ? data.slice(0, 50) : '1条数据'}`
+    const count = entry.metadata?.count || 1
+    const schemaStr = entry.metadata?.schema
+      ? Object.entries(entry.metadata.schema).map(([k, v]) => `${k}:${v}`).join(', ')
+      : ''
+    if (schemaStr) return `${count}条 | {${schemaStr}}`
+    return entry.summary || `${count}条数据`
   }
 
-  // 获取指定条目的URL列表（用于直接传给脚本）
-  getEntryUrls(entryId) {
-    const entry = this.entries.find(e => e.id === entryId)
-    if (!entry) return []
-    const data = entry.data
+  // 获取指定条目的URL列表（异步，从 storage 读取数据）
+  async getEntryUrls(entryId) {
+    const data = await this.getData(entryId)
     if (!Array.isArray(data)) return []
     return data.filter(d => d.attrs?.href).map(d => d.attrs.href)
   }
@@ -323,7 +311,14 @@ export class PayloadStore {
     if (entries.length === 0) return null
     return {
       count: entries.length,
-      items: entries.map(e => ({ id: e.id, toolName: e.toolName, summary: e.summary }))
+      items: entries.map(e => ({
+        id: e.id,
+        toolName: e.toolName,
+        summary: e.summary,
+        schema: e.metadata?.schema || null,
+        sample: e.metadata?.sample || null,
+        count: e.metadata?.count || 1
+      }))
     }
   }
 }

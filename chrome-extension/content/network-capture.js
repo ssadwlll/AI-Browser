@@ -125,19 +125,35 @@
     try {
       const response = await origFetch.apply(this, arguments)
       const duration = Date.now() - start
-      // 异步流式读取响应体（不阻塞返回），并自动截断
-      readBodyStream(response).then(({ preview, size }) => {
+      // 关键：必须 clone() 后再读，否则原 response 的 body stream 被锁定，
+      // 调用方 await response.json()/text() 会抛 "body stream already read" / "ReadableStream is locked"
+      // clone() 不会重复读取网络，仅复制已缓冲的数据，开销可控
+      try {
+        const cloned = response.clone()
+        readBodyStream(cloned).then(({ preview, size }) => {
+          addCapture({
+            url, method,
+            status: response.status,
+            duration,
+            bodyPreview: preview,
+            bodySize: size,
+            reqHeaders: init?.headers ? safeJsonStringify(init.headers) : '',
+            type: 'fetch',
+            timestamp: Date.now(),
+          })
+        }).catch(() => {})
+      } catch (e) {
+        // clone() 在某些场景（如 opaque response）可能抛错，降级为不捕获 body
         addCapture({
           url, method,
           status: response.status,
           duration,
-          bodyPreview: preview,
-          bodySize: size,
-          reqHeaders: init?.headers ? safeJsonStringify(init.headers) : '',
+          bodyPreview: '',
+          bodySize: 0,
           type: 'fetch',
           timestamp: Date.now(),
         })
-      }).catch(() => {})
+      }
       return response
     } catch (err) {
       addCapture({
@@ -186,6 +202,28 @@
         status: 0,
         duration: Date.now() - start,
         error: 'XHR error',
+        type: 'xhr',
+        timestamp: Date.now(),
+      })
+    })
+    xhr.addEventListener('abort', () => {
+      addCapture({
+        url: xhr.__captureUrl,
+        method: xhr.__captureMethod,
+        status: 0,
+        duration: Date.now() - start,
+        error: 'aborted',
+        type: 'xhr',
+        timestamp: Date.now(),
+      })
+    })
+    xhr.addEventListener('timeout', () => {
+      addCapture({
+        url: xhr.__captureUrl,
+        method: xhr.__captureMethod,
+        status: 0,
+        duration: Date.now() - start,
+        error: 'timeout',
         type: 'xhr',
         timestamp: Date.now(),
       })

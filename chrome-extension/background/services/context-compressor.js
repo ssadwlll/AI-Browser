@@ -1,9 +1,8 @@
 // ============ ContextCompressor ============
-// LLM 驱动的上下文压缩 + 阶段交接摘要生成
+// LLM 驱动的上下文压缩
 // 职责：
 //   1. 替代规则驱动的 S/A/B/C 分级截断，用 LLM 生成语义摘要
-//   2. 阶段切换时生成交接摘要，解决 messages.length=0 导致的上下文失忆
-//   3. 使用与主任务相同的模型（小 temperature），额外消耗 1 次 LLM 调用
+//   2. 使用与主任务相同的模型（小 temperature），额外消耗 1 次 LLM 调用
 
 import { fetchWithTimeout } from '../../shared/utils.js'
 
@@ -32,31 +31,6 @@ const COMPRESSION_SYSTEM_PROMPT = `你是上下文压缩器。你的任务是将
 3. 保留失败信息，避免重复尝试
 4. 不要输出页面正文内容（已在用户消息中）
 5. 摘要总长度控制在 800 字符以内`
-
-const HANDOFF_SYSTEM_PROMPT = `你是阶段交接摘要生成器。AI Agent 正在从一个执行阶段切换到下一阶段，需要生成一份交接摘要让新阶段的 AI 能快速理解上下文。
-
-输出格式（严格遵守）：
-## 任务目标
-[用户原始需求的简要复述]
-
-## 前序阶段成果
-- [已完成的关键操作和获取的数据]
-
-## 关键发现
-- [对下一阶段有价值的发现]
-
-## 数据清单
-- [已收集的数据引用（ID、类型、数量）]
-
-## 需要注意的问题
-- [前序阶段遇到的困难和规避方案]
-
-规则：
-1. 只保留对下一阶段有用的信息
-2. 数据引用必须包含精确的 recall_data ID
-3. 不要输出页面正文内容（用户消息中已有）
-4. 页面信息只保留URL和标题
-5. 摘要总长度控制在 600 字符以内`
 
 export class ContextCompressor {
   constructor(configService) {
@@ -105,109 +79,46 @@ export class ContextCompressor {
       const controller = new AbortController()
       const timeoutId = setTimeout(() => controller.abort(), 15000)
 
-      const res = await fetchWithTimeout(url, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({
-          model: config.model,
-          messages: compressMessages,
-          temperature: 0.1,  // 低温度确保一致性
-          max_tokens: 1024,
-        }),
-        signal: controller.signal,
-      }, 15000)
+      try {
+        const res = await fetchWithTimeout(url, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({
+            model: config.model,
+            messages: compressMessages,
+            temperature: 0.1,  // 低温度确保一致性
+            max_tokens: 1024,
+          }),
+          signal: controller.signal,
+        }, 15000)
 
-      clearTimeout(timeoutId)
+        if (!res.ok) {
+          console.warn('[ContextCompressor] LLM压缩失败，回退到规则压缩:', res.status)
+          return this._ruleBasedFallback(messagesToCompress, userMessage)
+        }
 
-      if (!res.ok) {
-        console.warn('[ContextCompressor] LLM压缩失败，回退到规则压缩:', res.status)
-        return this._ruleBasedFallback(messagesToCompress, userMessage)
-      }
+        const data = await res.json()
+        const summary = data.choices?.[0]?.message?.content?.trim()
 
-      const data = await res.json()
-      const summary = data.choices?.[0]?.message?.content?.trim()
+        if (!summary || summary.length < 50) {
+          console.warn('[ContextCompressor] LLM摘要过短，回退到规则压缩')
+          return this._ruleBasedFallback(messagesToCompress, userMessage)
+        }
 
-      if (!summary || summary.length < 50) {
-        console.warn('[ContextCompressor] LLM摘要过短，回退到规则压缩')
-        return this._ruleBasedFallback(messagesToCompress, userMessage)
-      }
+        this._compressionCount++
+        console.log(`[ContextCompressor] LLM压缩成功 (第${this._compressionCount}次), 输入${inputText.length}字符 → 输出${summary.length}字符`)
 
-      this._compressionCount++
-      console.log(`[ContextCompressor] LLM压缩成功 (第${this._compressionCount}次), 输入${inputText.length}字符 → 输出${summary.length}字符`)
-
-      return {
-        role: 'system',
-        content: `[上下文摘要] 以下为早期操作的语义压缩摘要：\n${summary}\n---\n原始用户需求: ${userMessage.slice(0, 200)}`
+        return {
+          role: 'system',
+          content: `[上下文摘要] 以下为早期操作的语义压缩摘要：\n${summary}\n---\n原始用户需求: ${userMessage.slice(0, 200)}`
+        }
+      } finally {
+        // 无论成功/失败/异常，都清理定时器避免悬挂
+        clearTimeout(timeoutId)
       }
     } catch (e) {
       console.warn('[ContextCompressor] LLM压缩异常，回退到规则压缩:', e.message)
       return this._ruleBasedFallback(messagesToCompress, userMessage)
-    }
-  }
-
-  /**
-   * 生成阶段交接摘要（用于阶段切换时保留上下文）
-   * @param {Array} messages - 当前阶段的消息数组
-   * @param {string} userMessage - 原始用户消息
-   * @param {object} workingMemory - WorkingMemory 实例
-   * @param {number} fromStage - 切换前的阶段
-   * @param {number} toStage - 切换后的阶段
-   * @param {string} reason - 切换原因
-   * @returns {string} 交接摘要文本
-   */
-  async generateHandoff(messages, userMessage, workingMemory, fromStage, toStage, reason) {
-    // 构建输入：消息摘要 + WorkingMemory
-    const inputText = this._messagesToText(messages.slice(1))  // 跳过 system prompt
-
-    let memoryContext = ''
-    if (workingMemory) {
-      memoryContext = `\n\n=== 工作记忆 ===\n${workingMemory.toHandoffContext()}`
-    }
-
-    // 如果消息量很小，直接用 WorkingMemory 的交接摘要
-    if (inputText.length < 500 && workingMemory) {
-      return workingMemory.toHandoffContext()
-    }
-
-    try {
-      const config = await this.configService.getAIConfig()
-      const url = await this.configService.getAIProxyUrl()
-      const auth = await this.configService.getAppAuth()
-      const headers = await this.configService.generateAuthHeaders(auth.appKey, auth.appSecret)
-
-      const handoffMessages = [
-        { role: 'system', content: HANDOFF_SYSTEM_PROMPT },
-        { role: 'user', content: `Agent 从 Stage ${fromStage} 切换到 Stage ${toStage}，原因: ${reason}。\n\n请生成交接摘要：\n\n${inputText.slice(0, 4000)}${memoryContext}` }
-      ]
-
-      const controller = new AbortController()
-      const timeoutId = setTimeout(() => controller.abort(), 15000)
-
-      const res = await fetchWithTimeout(url, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({
-          model: config.model,
-          messages: handoffMessages,
-          temperature: 0.1,
-          max_tokens: 800,
-        }),
-        signal: controller.signal,
-      }, 15000)
-
-      clearTimeout(timeoutId)
-
-      if (!res.ok) {
-        console.warn('[ContextCompressor] 交接摘要生成失败，使用WorkingMemory:', res.status)
-        return workingMemory ? workingMemory.toHandoffContext() : ''
-      }
-
-      const data = await res.json()
-      const summary = data.choices?.[0]?.message?.content?.trim()
-      return summary || (workingMemory ? workingMemory.toHandoffContext() : '')
-    } catch (e) {
-      console.warn('[ContextCompressor] 交接摘要生成异常，使用WorkingMemory:', e.message)
-      return workingMemory ? workingMemory.toHandoffContext() : ''
     }
   }
 
@@ -241,8 +152,8 @@ export class ContextCompressor {
       } else if (m.role === 'tool') {
         const toolName = toolNameMap.get(m.tool_call_id) || '未知工具'
         const content = typeof m.content === 'string' ? m.content : JSON.stringify(m.content || '')
-        // 限制每条工具结果的表示长度（recall_data 结果通常很大，只保留前150字符）
-        const maxLen = toolName === 'recall_data' ? 150 : 300
+        // 限制每条工具结果的表示长度，避免上下文压缩后仍过大
+        const maxLen = 300
         parts.push(`[工具结果:${toolName}]: ${content.slice(0, maxLen)}${content.length > maxLen ? '...(截断)' : ''}`)
       } else if (m.role === 'system') {
         const content = typeof m.content === 'string' ? m.content : JSON.stringify(m.content || '')

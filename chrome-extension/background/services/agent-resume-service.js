@@ -6,13 +6,68 @@ import { DBService } from './db-service.js'
 import { safeJsonStringify } from '../../shared/utils.js'
 
 const STORE = 'agent_snapshots'
-const SNAPSHOT_INTERVAL_MS = 10000  // 每 10 秒快照一次
+const SNAPSHOT_INTERVAL_MS = 10000  // 每 10 秒快照一次（内存 setInterval，SW 终止时会丢失）
+const SNAPSHOT_ALARM_NAME = 'agent-snapshot-backup'  // 闹钟名（SW 重启后仍能触发，作为兜底）
+const ALARM_BACKUP_INTERVAL_MIN = 1  // 闹钟最小周期 1 分钟（chrome.alarms 限制）
 const MAX_SNAPSHOTS_PER_TAB = 3     // 每个标签页最多保留 3 个快照
 
 export class AgentResumeService {
   constructor() {
     this._snapshotTimers = new Map()  // tabId -> timer
     this._activeSnapshots = new Map() // tabId -> latest snapshot id
+    this._stateProviders = new Map()  // tabId -> stateProvider（供 alarm 回调用）
+    this._alarmRegistered = false
+  }
+
+  /**
+   * 注册兜底闹钟（仅注册一次，所有 tab 共用）
+   * MV3 SW 在 30 秒不活动后会被终止，setInterval 会被销毁。
+   * chrome.alarms 由浏览器持久化，SW 重启后仍能触发，作为断点续传的双保险。
+   *
+   * 注意：监听器只挂载一次，避免 stopPeriodicSnapshot 后再次启动时累积监听器
+   */
+  _ensureBackupAlarm() {
+    if (this._alarmRegistered) return
+    try {
+      // 监听器只挂载一次：用 hasListener 守卫避免重复注册
+      if (!this._alarmListenerBound) {
+        const handler = (alarm) => {
+          if (alarm.name === SNAPSHOT_ALARM_NAME) {
+            // 闹钟触发时为所有活跃 tabId 各做一次快照
+            this._backupAllActive().catch(e => {
+              console.warn('[AgentResume] 闹钟兜底快照失败:', e.message)
+            })
+          }
+        }
+        // hasListener 通过引用比较，确保同一函数不会重复注册
+        if (!chrome.alarms.onAlarm.hasListener(handler)) {
+          chrome.alarms.onAlarm.addListener(handler)
+        }
+        this._alarmListener = handler
+        this._alarmListenerBound = true
+      }
+      chrome.alarms.create(SNAPSHOT_ALARM_NAME, { periodInMinutes: ALARM_BACKUP_INTERVAL_MIN })
+      this._alarmRegistered = true
+      console.log('[AgentResume] 兜底闹钟已注册，周期', ALARM_BACKUP_INTERVAL_MIN, '分钟')
+    } catch (e) {
+      console.warn('[AgentResume] 注册兜底闹钟失败:', e.message)
+    }
+  }
+
+  /**
+   * 闹钟兜底：为所有活跃 tabId 各做一次快照
+   */
+  async _backupAllActive() {
+    const entries = [...this._stateProviders.entries()]
+    if (entries.length === 0) return
+    for (const [tabId, provider] of entries) {
+      try {
+        const state = provider()
+        if (state) await this.saveSnapshot(tabId, state)
+      } catch (e) {
+        console.warn('[AgentResume] 闹钟兜底快照 tabId=' + tabId + ' 失败:', e.message)
+      }
+    }
   }
 
   /**
@@ -23,6 +78,12 @@ export class AgentResumeService {
   startPeriodicSnapshot(tabId, stateProvider) {
     // 清除旧定时器
     this.stopPeriodicSnapshot(tabId)
+
+    // 注册兜底闹钟（仅注册一次）
+    this._ensureBackupAlarm()
+
+    // 保存 stateProvider 供闹钟回调用（SW 终止后 setInterval 会丢失，但闹钟仍可触发）
+    this._stateProviders.set(tabId, stateProvider)
 
     const timer = setInterval(async () => {
       try {
@@ -48,6 +109,12 @@ export class AgentResumeService {
       clearInterval(timer)
       this._snapshotTimers.delete(tabId)
     }
+    this._stateProviders.delete(tabId)
+    // 如果没有活跃任务，可以注销兜底闹钟（保留也无害，但为节省资源可以注销）
+    if (this._snapshotTimers.size === 0 && this._alarmRegistered) {
+      try { chrome.alarms.clear(SNAPSHOT_ALARM_NAME) } catch {}
+      this._alarmRegistered = false
+    }
   }
 
   /**
@@ -62,10 +129,10 @@ export class AgentResumeService {
       createdAt: Date.now(),
       state: safeJsonStringify(state),  // 序列化以避免循环引用
       // 提取关键字段用于快速检索
-      userMessage: state.userMessage?.slice(0, 200) || '',
+      userMessage: String(state.userMessage || '').slice(0, 200),
       currentRound: state.currentRound || 0,
       totalRounds: state.totalRounds || 0,
-      currentStage: state.todoState?.currentStage || 1,
+      currentTodoIndex: state.todoState?.currentTodoIndex || 0,
       totalCompleted: state.todoState?.totalCompleted || 0,
       totalTodos: state.todoState?.totalTodos || 0,
     }
@@ -174,7 +241,7 @@ export class AgentResumeService {
         userMessage: s.userMessage,
         currentRound: s.currentRound,
         totalRounds: s.totalRounds,
-        currentStage: s.currentStage,
+        currentTodoIndex: s.currentTodoIndex,
         progress: s.totalTodos > 0 ? `${s.totalCompleted}/${s.totalTodos}` : '0/0',
       })
     }

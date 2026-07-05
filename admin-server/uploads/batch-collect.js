@@ -23,7 +23,7 @@
 //       },
 //       "maxPages": {
 //         "type": "number",
-//         "description": "最大采集页数，默认10，最大20"
+//         "description": "最多处理几个URL，默认20，最大20。不传则处理全部URL"
 //       }
 //     }
 //   },

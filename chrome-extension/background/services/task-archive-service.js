@@ -57,12 +57,8 @@ export class TaskArchiveService {
       toolStats: {},
       toolSuccessRate: 0,
       
-      // 阶段统计
-      stageStats: {
-        stage1: { rounds: 0, tools: 0 },
-        stage2: { rounds: 0, tools: 0 },
-        stage3: { rounds: 0, tools: 0 },
-      },
+      // 阶段统计（用对象便于动态 key 扩展，避免未知 stage 触发 undefined 访问崩溃）
+      stageStats: {},
       stageSwitchCount: 0,
       
       // 关键决策路径
@@ -84,13 +80,15 @@ export class TaskArchiveService {
       let totalErrors = 0
       
       for (const round of output.conversationLog) {
-        // 阶段统计
+        // 阶段统计（动态创建 key，防御 stage 为 0/4/字符串/undefined 等异常值导致访问 undefined 崩溃）
         const stage = round.stage || 1
-        analysis.stageStats[`stage${stage}`].rounds++
+        const stageKey = `stage${stage}`
+        if (!analysis.stageStats[stageKey]) analysis.stageStats[stageKey] = { rounds: 0, tools: 0 }
+        analysis.stageStats[stageKey].rounds++
         
         // 工具统计
         if (round.toolResults && round.toolResults.length > 0) {
-          analysis.stageStats[`stage${stage}`].tools += round.toolResults.length
+          analysis.stageStats[stageKey].tools += round.toolResults.length
           
           for (const result of round.toolResults) {
             totalTools++
@@ -198,7 +196,9 @@ export class TaskArchiveService {
     
     const intersection = words1.filter(w => words2.includes(w))
     const union = [...new Set([...words1, ...words2])]
-    
+
+    // 防御：两输入都为空（或仅含停用词）时 union.length 为 0，避免返回 NaN 导致后续 sort 不确定
+    if (union.length === 0) return 0
     return intersection.length / union.length
   }
 
@@ -294,6 +294,8 @@ export class TaskArchiveService {
     const json = JSON.stringify(archive, null, 2)
     const blob = new Blob([json], { type: 'application/json' })
     const url = URL.createObjectURL(blob)
+    // 30秒后自动释放 Blob URL，避免内存泄漏
+    setTimeout(() => URL.revokeObjectURL(url), 30000)
     
     return {
       url,
@@ -319,6 +321,8 @@ export class TaskArchiveService {
     const json = JSON.stringify(allArchives, null, 2)
     const blob = new Blob([json], { type: 'application/json' })
     const url = URL.createObjectURL(blob)
+    // 30秒后自动释放 Blob URL，避免内存泄漏
+    setTimeout(() => URL.revokeObjectURL(url), 30000)
     
     return {
       url,

@@ -6,8 +6,16 @@
 (function () {
   'use strict'
 
-  // 防止重复注入
-  if (document.getElementById('img-batch-panel')) return
+  // 避免重复注入
+  if (document.getElementById('img-batch-panel')) {
+    return {
+      ok: true,
+      data: [],
+      count: 0,
+      hint: '批量图片下载面板已存在。用 extract_content 提取已选图片URL',
+      panelSelector: '#img-batch-panel img.cell-thumb'
+    }
+  }
 
   // ==================== 最小ZIP实现（STORE方式，无压缩） ====================
   function createZip(files) {
@@ -663,4 +671,13 @@
   renderGrid()
   updateSummary()
 
+  // ===== 返回标准化信封（供 AI 下一轮调用使用） =====
+  return {
+    ok: true,
+    data: [],
+    count: allImages.length,
+    hint: '批量图片下载面板已注入页面，共扫描到 ' + allImages.length + ' 张图片。下一步用 extract_content 提取图片URL',
+    panelSelector: '#img-batch-panel img.cell-thumb',
+    panelInfo: '面板功能：图片网格预览、按类型筛选、勾选下载。可在面板内手动选择后下载ZIP'
+  }
 })()

@@ -1,15 +1,240 @@
 // ============ Agent 主运行循环 ============
 // 从 agent-service.js 提取的 run() 方法
-// 包含：LLM API 调用、工具执行分发、待办进度管理、阶段切换
+// 包含：LLM API 调用、工具执行分发、待办进度管理
 
 import { executeDOMTool } from './agent-dom-executor.js'
-import { shouldStoreToPayload, storeToPayload, smartTruncateResult, buildDataOverview } from './agent-payload-utils.js'
+import { shouldStoreToPayload, storeToPayload, smartTruncateResult, buildDataOverview, normalizePayload, formatSchemaSummary } from './agent-payload-utils.js'
 import { runJudge, saveToChatHistoryStorage, getTargetTab, recordMemory } from './agent-judge.js'
-import { buildPhase1Tools, buildPhase2Tools } from './agent-tool-builder.js'
+import { buildTools } from './agent-tool-builder.js'
 import { WorkingMemory } from './working-memory.js'
 import { ContextCompressor } from './context-compressor.js'
 import { ScratchpadService } from './scratchpad-service.js'
 import { OutputService } from './output-service.js'
+import { fetchWithTimeout } from '../../shared/utils.js'
+
+// 上传对话归档到后端（在 finish_task 时调用，非阻塞主流程）
+async function uploadConversationArchive(configService, data) {
+  const syncConfig = await configService.getSyncConfig()
+  if (!syncConfig.serverUrl || !syncConfig.appKey || !syncConfig.appSecret) {
+    console.log('[ConversationArchive] 未配置后端服务器，跳过上传')
+    return
+  }
+  const baseUrl = String(syncConfig.serverUrl).replace(/\/+$/, '')
+  const url = `${baseUrl}/api/conversation-archives`
+  const headers = await configService.generateAuthHeaders(syncConfig.appKey, syncConfig.appSecret)
+  headers['Content-Type'] = 'application/json'
+  // 单条消息可能较大（16轮 × 30KB ≈ 500KB），使用 60s 超时
+  const res = await fetchWithTimeout(url, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(data),
+  }, 60000)
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    throw new Error(`HTTP ${res.status}: ${text.slice(0, 200)}`)
+  }
+  const json = await res.json()
+  if (!json.success) throw new Error(json.error || '上传失败')
+  return json.data
+}
+
+// 从后端检索历史成功任务经验（RAG）
+// 调用 POST /api/conversation-archives/rag，返回格式化的经验提示字符串（无匹配返回 null）
+// 检索 RAG 历史经验（同时校验脚本是否在当前可用工具列表中，避免推荐已删除的脚本）
+// availableScriptIds: 当前已注册的 inject_script_N 的 ID 集合，用于过滤历史经验
+async function retrieveRAGExperiences(configService, userMessage, pageUrl, availableScriptIds = null) {
+  const syncConfig = await configService.getSyncConfig()
+  if (!syncConfig.serverUrl || !syncConfig.appKey || !syncConfig.appSecret) {
+    return null  // 未配置后端，跳过
+  }
+  const baseUrl = String(syncConfig.serverUrl).replace(/\/+$/, '')
+  const url = `${baseUrl}/api/conversation-archives/rag`
+  const headers = await configService.generateAuthHeaders(syncConfig.appKey, syncConfig.appSecret)
+  headers['Content-Type'] = 'application/json'
+  const res = await fetchWithTimeout(url, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ userMessage, pageUrl, topK: 3 }),
+  }, 15000)
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    throw new Error(`HTTP ${res.status}: ${text.slice(0, 200)}`)
+  }
+  const json = await res.json()
+  if (!json.success) throw new Error(json.error || 'RAG 检索失败')
+  const data = json.data || {}
+  const matches = Array.isArray(data.matches) ? data.matches : []
+  if (matches.length === 0) return null
+
+  // 格式化为可读的经验提示
+  const lines = []
+  const usedVector = data.usedVectorRank === true
+  lines.push(`[RAG 检索到 ${matches.length} 条相似历史任务经验，命中关键词: ${(data.keywords || []).join(', ')}${usedVector ? '，向量语义精排生效' : '，关键词匹配'}]`)
+  matches.forEach((m, i) => {
+    const vecScoreStr = (usedVector && typeof m.vectorScore === 'number') ? `，语义相似度=${m.vectorScore.toFixed(2)}` : ''
+    lines.push(`\n--- 经验 ${i + 1}（任务 ${m.taskId}，${m.totalToolCalls} 次工具调用，${(m.durationMs / 1000).toFixed(0)}s${vecScoreStr}）${m.domainBoost ? ' [同域名加权]' : ''} ---`)
+    lines.push(`用户原始请求: ${m.userMessage}`)
+    if (m.summary) lines.push(`任务总结: ${m.summary}`)
+
+    // 选择器反馈：区分可用/已失效
+    if (m.selectorFeedback && m.selectorFeedback.length > 0) {
+      const validSels = m.selectorFeedback.filter(s => !s.isStale)
+      const staleSels = m.selectorFeedback.filter(s => s.isStale)
+      if (validSels.length > 0) {
+        lines.push(`✅ 已验证可用选择器（${validSels.length} 个，可直接使用）:`)
+        validSels.forEach(s => {
+          const succInfo = s.successCount > 0 ? ` (成功${s.successCount}次)` : ''
+          lines.push(`  - ${s.selector}${succInfo}`)
+        })
+      }
+      if (staleSels.length > 0) {
+        lines.push(`❌ 已失效选择器（${staleSels.length} 个，请勿使用，可能页面已改版）:`)
+        staleSels.forEach(s => {
+          lines.push(`  - ${s.selector} (失败${s.failCount}次，最后失败: ${s.lastFailureAt || '未知'})`)
+        })
+      }
+    } else if (m.selectors && m.selectors.length > 0) {
+      // 没有反馈数据时降级为原始列表（首次任务或后端不可用）
+      lines.push(`成功使用的选择器（未验证，仅供参考）: ${m.selectors.join(', ')}`)
+    }
+
+    if (m.scriptsUsed && m.scriptsUsed.length > 0) {
+      // 过滤掉当前工具列表中不存在的脚本（避免推荐已删除/下架的脚本）
+      // m.scriptsUsed 形如 ["脚本 #10", "脚本 #9"]
+      const filterScripts = (arr) => {
+        if (!availableScriptIds || availableScriptIds.size === 0) return arr
+        return arr.filter(s => {
+          const match = String(s).match(/#(\d+)/)
+          if (!match) return true  // 格式异常，保留
+          return availableScriptIds.has(Number(match[1]))
+        })
+      }
+      const validScripts = filterScripts(m.scriptsUsed)
+      const droppedCount = m.scriptsUsed.length - validScripts.length
+      if (validScripts.length > 0) {
+        lines.push(`调用的脚本: ${validScripts.join(', ')}`)
+      }
+      if (droppedCount > 0) {
+        lines.push(`⚠️ 历史经验中有 ${droppedCount} 个脚本当前不可用（已从工具列表中移除，请改用 DOM 工具或 search_tools 查找其他可用脚本）`)
+      }
+    }
+    if (m.toolsUsed && m.toolsUsed.length > 0) {
+      // 工具调用顺序也过滤掉不可用的 inject_script_N
+      const filterTools = (arr) => {
+        if (!availableScriptIds || availableScriptIds.size === 0) return arr
+        return arr.filter(t => {
+          const match = String(t).match(/^inject_script_(\d+)$/)
+          if (!match) return true  // 非 inject_script_N 工具，保留
+          return availableScriptIds.has(Number(match[1]))
+        })
+      }
+      const validTools = filterTools(m.toolsUsed)
+      if (validTools.length > 0) {
+        lines.push(`工具调用顺序: ${validTools.join(' → ')}`)
+      }
+    }
+  })
+  // 根据反馈状态定制尾部提示
+  const hasAnyStale = matches.some(m => m.selectorFeedback?.some(s => s.isStale))
+  const staleTip = hasAnyStale
+    ? '⚠️ 已失效选择器来自旧版页面，请勿直接使用。优先使用"✅ 已验证可用"的选择器，并以 detect_page_template 实时结果为准。'
+    : '⚠️ 以上为历史经验参考，仅供参考选择器/脚本方向。当前页面结构可能不同，请基于实际 detect_page_template 结果决定。'
+  lines.push(staleTip)
+  return lines.join('\n')
+}
+
+// 上报选择器使用结果到后端（用于构建反馈闭环，加速 RAG 失效检测）
+// 设计原则：非阻塞主流程，失败时静默降级（不影响任务执行）
+// 仅上报使用 selector 的工具，且页面有明确 host 时才上报
+let _feedbackQueue = Promise.resolve()
+function reportSelectorFeedback(configService, { host, selector, toolName, taskId, resultStatus, itemCount }) {
+  if (!host || !selector || !['success', 'failure'].includes(resultStatus)) return Promise.resolve()
+  // 串行化上报，避免并发请求风暴
+  _feedbackQueue = _feedbackQueue.then(async () => {
+    try {
+      const syncConfig = await configService.getSyncConfig()
+      if (!syncConfig.serverUrl || !syncConfig.appKey || !syncConfig.appSecret) return
+      const baseUrl = String(syncConfig.serverUrl).replace(/\/+$/, '')
+      const url = `${baseUrl}/api/selector-feedback/report`
+      const headers = await configService.generateAuthHeaders(syncConfig.appKey, syncConfig.appSecret)
+      headers['Content-Type'] = 'application/json'
+      await fetchWithTimeout(url, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ host, selector, toolName, taskId, resultStatus, itemCount: itemCount || 0 }),
+      }, 8000)
+    } catch (e) {
+      console.warn('[SelectorFeedback] 上报失败（非致命）:', e.message)
+    }
+  })
+  return _feedbackQueue
+}
+
+// 解析 host：从 url 提取 hostname
+function _extractHost(url) {
+  try { return new URL(url).hostname || '' } catch { return '' }
+}
+
+// 统一规范 data_refs 参数：兼容数组、字符串（"p1,p2"）、undefined
+function normalizeDataRefs(raw) {
+  if (Array.isArray(raw)) return raw.map(s => String(s).trim()).filter(Boolean)
+  if (typeof raw === 'string' && raw.length > 0) return raw.split(',').map(s => s.trim()).filter(Boolean)
+  return []
+}
+
+// 流式输出大字符串：超过阈值时一次性发送，避免逐字符 setTimeout 累计超时
+const STREAM_CHAR_THRESHOLD = 2000
+const STREAM_DELAY_MS = 15
+
+/** 将文本流式发送到 UI；超长内容采用分段/一次性发送以避免 15ms/字符累计超时 */
+async function streamToUI(postToUI, tabId, text) {
+  if (!text) {
+    postToUI(tabId, { type: 'streamDone' })
+    return
+  }
+  if (text.length > STREAM_CHAR_THRESHOLD) {
+    // 分段一次性发送：每段不超过 8000 字符，避免单条消息过大
+    const SEGMENT = 8000
+    for (let i = 0; i < text.length; i += SEGMENT) {
+      postToUI(tabId, { type: 'streamChunk', content: text.slice(i, i + SEGMENT) })
+      // 让出 UI 主线程，避免消息风暴
+      await new Promise(r => setTimeout(r, 30))
+    }
+  } else {
+    for (const char of text) {
+      postToUI(tabId, { type: 'streamChunk', content: char })
+      await new Promise(r => setTimeout(r, STREAM_DELAY_MS))
+    }
+  }
+  postToUI(tabId, { type: 'streamDone' })
+}
+
+/**
+ * 带超时的 DOM 工具执行（避免 Promise.race 中的 setTimeout 残留）
+ * 当 executeDOMTool 先完成时，自动清理定时器，避免悬挂的定时器占用资源
+ * @param {number} tabId - 目标标签页 ID
+ * @param {string} funcName - 工具函数名
+ * @param {object} funcArgs - 工具参数
+ * @param {number} timeoutMs - 超时毫秒数
+ * @returns {Promise<{ok: boolean, error?: string}>}
+ */
+async function executeDOMToolWithTimeout(tabId, funcName, funcArgs, timeoutMs) {
+  let timeoutId = null
+  try {
+    const result = await Promise.race([
+      executeDOMTool(tabId, funcName, funcArgs),
+      new Promise((_, reject) => {
+        timeoutId = setTimeout(() => reject(new Error('动作超时')), timeoutMs)
+      }),
+    ])
+    return result
+  } catch (e) {
+    return { ok: false, error: e.message }
+  } finally {
+    // 无论 Promise.race 谁先完成，都清理定时器
+    if (timeoutId !== null) clearTimeout(timeoutId)
+  }
+}
 
 /**
  * Agent 主运行循环
@@ -24,17 +249,33 @@ export async function runAgent(ctx) {
     postToUI, yieldUI, checkPortConnected,
     tabId, userMessage, chatHistory,
     toolRecordingService, // Feature 4: 工具调用录制
+    modelInfo, // 模型单独配置（temperature / context_window / max_tokens），可选
   } = ctx
 
   const startTime = Date.now()
   await domainPolicy.load()
 
-  let maxRounds = 15
+  // ===== 应用全局设置（从后端读取，缓存兜底） =====
+  // agent_max_rounds: Agent 模式最大执行轮数
+  // agent_system_prompt: Agent 模式系统提示词
+  let appSettings = null
+  try {
+    appSettings = await configService.getAppSettings()
+  } catch (e) {
+    console.warn('[Agent] 读取应用设置失败，使用默认值:', e.message)
+  }
+  const backendMaxRounds = appSettings?.agent_max_rounds || 30
+  const backendSystemPrompt = appSettings?.agent_system_prompt || ''
+
+  // 兼容旧逻辑：本地 agentConfig.maxRounds 仅作 fallback（后端不可用时）
+  // 后端设置优先，避免用户本地改值导致与后台不一致
+  let maxRounds = backendMaxRounds
   let enableJudge = true
   let debug = false
   try {
     const agentCfg = await configService.getAgentConfig()
-    if (agentCfg?.maxRounds >= 5) maxRounds = agentCfg.maxRounds
+    // 仅在后端读取失败（appSettings=null）时使用本地 agentConfig.maxRounds
+    if (!appSettings && agentCfg?.maxRounds >= 5) maxRounds = agentCfg.maxRounds
     enableJudge = agentCfg?.enableJudge !== false
     debug = agentCfg?.debug === true
   } catch {}
@@ -48,14 +289,28 @@ export async function runAgent(ctx) {
 
   // ===== 对话全景窗口消息发送 =====
   let _conversationChannel = null
+  // _allRoundsData: 收集所有轮次的完整数据，用于任务结束时上传到后端
+  const _allRoundsData = []
   const _sendToConversationViewer = (type, payload) => {
     try {
+      // 收集 round 数据用于后端上传
+      if (type === 'conversationRound' && payload && payload.round) {
+        _allRoundsData.push(payload)
+      }
       if (!_conversationChannel) _conversationChannel = new BroadcastChannel('ai-browser-conversation')
       _conversationChannel.postMessage({ type, payload })
     } catch (e) { console.warn('[ConversationViewer] 发送失败', e) }
   }
 
-  const MAX_TOOL_CALLS = Math.min(200, Math.max(30, maxRounds * 3))
+  // 上限策略：完全信任后端 agent_max_rounds 配置（管理员可调）
+  // 仅保留一个绝对硬上限防止后端配错（如配成 9999），不影响正常使用
+  const ABSOLUTE_MAX_ROUNDS = 100
+  const effectiveMaxRounds = Math.min(maxRounds, ABSOLUTE_MAX_ROUNDS)
+  if (effectiveMaxRounds !== maxRounds) {
+    console.warn(`[Agent] maxRounds ${maxRounds} 超过绝对硬上限 ${ABSOLUTE_MAX_ROUNDS}，自动收敛`)
+  }
+  // 工具调用上限：基础 30，按轮数缩放，但不超过 300（每轮平均 3 次工具调用）
+  const MAX_TOOL_CALLS = Math.min(300, Math.max(30, effectiveMaxRounds * 3))
   let aiRequestCount = 0
   let totalToolCalls = 0
   let searchResults = []
@@ -75,10 +330,7 @@ export async function runAgent(ctx) {
   const workingMemory = new WorkingMemory()
   const contextCompressor = new ContextCompressor(configService)
   let hasSearchedTools = false
-  let _roundRecallDataCount = 0  // 每轮recall_data调用次数
   todoScheduler.clear()
-  let currentPhase = 1
-  const _recallDataCallCount = new Map()
   const _usedSelectorToolCombo = new Set()
 
   const rawHistory = (chatHistory || [])
@@ -96,6 +348,19 @@ export async function runAgent(ctx) {
       break
     }
   }
+  // 清理末尾连续的孤儿 user 消息（上次任务中断导致未配对 assistant 回复）
+  // 场景：用户发消息 → Agent 中断 → 用户重发相同消息
+  // 此时历史为 [..., {user: 第一次}, {user: 第二次}]，AI 看到两条相同消息会重复执行
+  // 兜底保护：即使前端 sidepanel 未回滚，此处也清理掉重复的孤儿消息
+  while (rawHistory.length >= 1) {
+    const last = rawHistory[rawHistory.length - 1]
+    if (last?.role === 'user' && last?.content === userMessage) {
+      // 末尾 user 消息内容等于本次新消息 → 移除（agent-runner 会重新添加本次消息）
+      rawHistory.pop()
+    } else {
+      break
+    }
+  }
   const cleanHistory = rawHistory.map(m => {
     const { toolCalls, tool_calls, ...clean } = m
     // 对长assistant消息进行压缩：保留前500字符+摘要标记
@@ -109,88 +374,38 @@ export async function runAgent(ctx) {
     return clean
   })
 
-  // ===== Stage 1 系统提示词 =====
-  const phase1SystemPrompt = `你是AI Browser智能体，一个能操作网页、调用脚本、整理数据的自主助手。你通过三阶段调度系统执行任务。
-
-=== 三阶段调度系统 ===
-系统将任务拆分为三个阶段，每个阶段有不同的工具权限，阶段间自动切换：
-
-Stage 1（页面探索）：使用DOM工具直接在页面上操作（点击、提取、导航等）
-  - 目标：获取页面结构信息，提取关键数据（如列表条目、链接、文本等）
-  - 原则：只做页面级的探索和数据提取，不逐条深入处理细节
-Stage 2（脚本处理）：调用服务端脚本批量处理数据
-  - 目标：用专用脚本高效完成需要批量操作的任务（如逐页获取详情、批量转换等）
-  - 脚本以 inject_script_N 形式调用，N 是脚本的实际ID数字（请先 search_tools 查看可用脚本的ID，切勿编造不存在的脚本ID）
-Stage 3（结果汇总）：输出最终结果
-  - 目标：汇总所有已收集的数据，用 finish_task 输出
+  // ===== 统一系统提示词（优先使用后端配置，兜底使用内置默认） =====
+  // 后端 agent_system_prompt 用于集中控制所有客户端的 Agent 行为规范
+  const DEFAULT_SYSTEM_PROMPT = `你是AI Browser智能体，一个能操作网页、调用脚本、整理数据的自主助手。
 
 === 工作流程 ===
-1. 了解当前页面：使用 get_interactive_elements / read_page_content 获取页面概览
-2. 规划任务：调用 create_todo 创建三阶段待办列表
-3. 系统自动校验待办合规性和数据依赖合法性
-4. 按待办顺序执行工具操作，系统自动追踪进度
-5. 每个阶段完成后系统自动切换到下一阶段
-6. 所有待办完成 → 调用 finish_task 汇报结果
+1. 了解当前页面：使用 get_interactive_elements / read_page_content 获取页面概览（系统可能已自动注入页面内容，如有则直接使用）
+2. 规划任务：复杂任务调用 create_todo 创建待办列表；简单任务（1-2步可完成）直接执行，无需创建待办
+3. 按待办顺序执行工具操作，系统自动追踪进度
+4. 所有待办完成 → 调用 finish_task 汇报结果
 
-=== Stage 1 可用工具 ===
-read_page_content: 读取当前页面标题、URL和正文
-extract_content: 提取指定选择器的内容（支持:contains伪类）
-click_element: 点击元素
-fill_input: 填写输入框
-wait_for_element: 等待元素出现
-navigate_to: 导航到URL
-go_back / go_forward: 浏览器前进/后退
-find_text_on_page: 在页面文本中搜索关键词
-get_element_info: 获取元素详细信息
-get_interactive_elements: 获取可交互元素列表
-scroll_page: 滚动页面
-hover_element: 悬停元素
-select_dropdown: 选择下拉框选项
-press_key: 按键
-recall_data: 查询已存储的工具执行结果（当结果被自动截断为摘要时，用此工具查看完整数据）
-create_todo: 创建分阶段待办列表
-search_tools: 搜索工具库，查找可用脚本
-finish_task: 任务完成，汇报结果
+=== 工具使用策略 ===
+- DOM工具（extract_content、click_element等）：用于页面探索、简单数据提取、交互操作
+- inject_script_N：用于批量处理、深度数据采集（N是search_tools查到的脚本ID）
+- search_tools：搜索脚本库，查找可用的远程脚本
+- finish_task：完成所有任务后输出最终结果
+
+=== 脚本选择优先级（必须遵守） ===
+1️⃣ 优先查看系统注入的"📋 当前可用脚本库"清单，按 urlPattern 匹配当前页面选择 inject_script_N
+2️⃣ 清单未明确匹配时，主动调用 search_tools 用任务关键词搜索脚本库
+3️⃣ 以上都无匹配时，使用 DOM 工具组合完成（navigate_to + extract_content + click_element）
+❌ 严禁：脚本库已有可用脚本却跳过，造成重复造轮子
 
 === 数据流转机制 ===
-工具返回的数据量较大时，系统会自动存储完整数据，只发回摘要+存储ID（如"存储ID: p1"）。
-需要查看完整数据时，调用 recall_data(entry_id="p1")。
-设置 dataOutputKey 的待办，其输出数据会自动存入全局存储，供后续阶段通过 dataDependKeys 引用。
-
-=== 待办模板 ===
-每个子待办需指定:
-- action: 使用的工具名称（Stage2必须使用 inject_script_N 格式，N为脚本ID数字）
-- dataDependKeys: 依赖的数据key列表（从之前待办的dataOutputKey获取）
-- dataOutputKey: 输出数据的语义key（供后续待办引用，无输出设为null）
-
-重要：待办列表创建后不可修改，请在 create_todo 时充分规划。
-
-=== 各阶段职责 ===
-Stage 1（页面探索）：获取页面信息和关键数据
-  典型流程：1. 了解页面结构  2. 提取所需条目
-  注意：不要在Stage1逐条深入处理，需要批量操作的任务交给Stage2的脚本
-Stage 2（脚本处理）：用专用脚本批量处理
-  典型流程：将Stage1提取的数据传给脚本，由脚本高效完成
-Stage 3（结果汇总）：整理并输出结果
-
-=== 示例（以新闻页面为例）===
-用户要求"采集新闻列表和内页内容"：
-  Stage1: [get_interactive_elements] + [extract_content 提取标题和链接, dataOutputKey="links"]
-  Stage2: [inject_script_9 批量获取内页, dataDependKeys=["links"], dataOutputKey="details"]
-  Stage3: [finish_task 汇总, dataDependKeys=["links","details"]]
-
-=== 硬性规则（系统强制执行） ===
-- Stage 1 不暴露 inject_script_* 工具（必须先在页面探索完才能用脚本）
-- 连续4次无进展 → 系统自动切换到Stage 2
-- 连续3次脚本失败 → 系统自动切换到Stage 3
+工具返回的数据量较大时，系统会自动存储完整数据，只发回 schema+样例摘要（如"p1: 15条 | {title:string, url:string} | 样例: [...]"）。
+- 数据摘要可直接用于回答用户，或在 finish_task 中通过 data_refs 引用完整数据
 
 === 任务边界处理 ===
 当用户请求超出当前可用工具能力时，请：
-1. 检查工具列表：如果不存在完成该请求的工具（如导出文件、下载、写入本地等），直接调用 finish_task 说明
-2. 提供替代方案：将数据以用户要求的格式（如CSV、表格）输出在 summary 中，让用户复制使用
-3. 不要反复尝试无法完成的操作，避免陷入循环
+1. 直接调用 finish_task 说明情况并提供替代方案
+2. 不要反复尝试无法完成的操作，避免陷入循环
 
-当连续5次工具调用都无法推进任务时，请调用 finish_task 汇报当前已有结果，说明遇到的困难。
+当连续5次工具调用都无法推进任务时，请调用 finish_task 汇报当前已有结果。
 
 === 输出规范 ===
 - 自然语言总结结果，不输出原始JSON
@@ -199,11 +414,11 @@ Stage 3（结果汇总）：整理并输出结果
 === 对话上下文 ===
 你正在与用户进行连续对话。如果上下文中存在"上轮任务数据"或"历史存储数据"，表示之前已执行过任务并产生了结果。
 - 这些数据可供你参考和使用，无需重新执行页面操作
-- 用户的新需求可能是：继续处理、补充信息、导出结果、修改格式等任何合理请求
-- 根据实际需求选择：直接复用历史数据，或执行新操作获取新数据
-- 获取历史数据：recall_data(entry_id="all")`
+- 完整数据可通过 finish_task(data_refs) 在最终输出中引用`
 
-  const systemMsg = { role: 'system', content: phase1SystemPrompt }
+  const systemPrompt = backendSystemPrompt || DEFAULT_SYSTEM_PROMPT
+
+  const systemMsg = { role: 'system', content: systemPrompt }
 
   // ===== 自动读取页面内容 =====
   let autoPageContent = null
@@ -278,11 +493,90 @@ Stage 3（结果汇总）：整理并输出结果
     const pageContentBrief = (autoPageContent.content || '').slice(0, 500)
     let pageContextMsg = `[已执行 read_page_content] 标题: ${autoPageContent.title || '无标题'} | URL: ${autoPageContent.url || ''}\n页面正文: ${pageContentBrief}\n\n⚠️ read_page_content 已自动执行，请勿重复调用此工具。如需更多内容可滚动页面(scroll_page)后再次提取。`
     if (searchResults.length > 0) {
-      pageContextMsg += `\n\n已匹配到 ${searchResults.length} 个专用脚本（当前阶段不暴露脚本工具，如DOM工具无法完成任务将自动切换到脚本模式）。`
+      pageContextMsg += `\n\n已匹配到 ${searchResults.length} 个专用脚本，可直接使用：\n` + searchResults.slice(0, 5).map(s => {
+        const params = s.toolConfig?.parameters?.properties ? Object.keys(s.toolConfig.parameters.properties) : []
+        const paramHint = params.length > 0 ? `（参数: ${params.join(', ')}）` : ''
+        return `  - inject_script_${s.id}(${s.name})${paramHint}: ${(s.description || '').slice(0, 80)}`
+      }).join('\n')
     } else {
-      pageContextMsg += '\n暂无匹配的专用脚本，可使用本地DOM工具操作页面。'
+      pageContextMsg += '\n暂无匹配的专用脚本，请使用本地DOM工具（extract_content/click_element/scroll_page等）完成任务。'
     }
     _injections.push(pageContextMsg)
+
+    // ===== 注入完整脚本索引（让 AI 全局可见所有可用脚本，避免盲目调用 DOM 工具） =====
+    // 即使 autoSearch 关键词没命中，AI 也能根据完整列表主动选择合适脚本
+    try {
+      const allScripts = await toolService.fetchAgentIndex()
+      if (allScripts.length > 0) {
+        // 当前页面 URL 用于匹配 urlPattern
+        const currentUrl = autoPageContent.url || ''
+        let currentHost = ''
+        try { currentHost = new URL(currentUrl).hostname || '' } catch {}
+
+        // 按 urlPattern 优先级排序：匹配当前页面 host 的脚本排前面
+        const sorted = [...allScripts].sort((a, b) => {
+          const aMatch = a.urlPattern && currentHost && a.urlPattern.includes(currentHost) ? 1 : 0
+          const bMatch = b.urlPattern && currentHost && b.urlPattern.includes(currentHost) ? 1 : 0
+          return bMatch - aMatch
+        })
+
+        // 拼接脚本索引（每个一行，限制总长度避免上下文膨胀）
+        const lines = sorted.map(s => {
+          const host = s.urlPattern ? ` [适用: ${s.urlPattern.slice(0, 40)}]` : ''
+          return `  - inject_script_${s.id}(${s.name})${host}: ${s.description || '无描述'}`
+        })
+        // 限制总长度在 4000 字符以内（约 30-50 个脚本）
+        let scriptIndex = lines.join('\n')
+        if (scriptIndex.length > 4000) {
+          scriptIndex = scriptIndex.slice(0, 4000) + `\n  ...（共 ${allScripts.length} 个脚本，已截断）`
+        }
+        const indexMsg = `\n\n📋 当前可用脚本库（共 ${allScripts.length} 个，按当前页面匹配度排序）:\n${scriptIndex}\n\n⚠️ 优先使用上述脚本库中的 inject_script_N，脚本库中没有合适的再使用 DOM 工具组合。`
+        _injections.push(indexMsg)
+        console.log(`[Agent] 已注入全脚本索引: ${allScripts.length} 个脚本`)
+      }
+    } catch (e) {
+      console.warn('[Agent] 全脚本索引注入失败（非致命）:', e.message)
+    }
+
+    // ===== 自动页面模板识别 + RAG 经验检索（仅首轮注入，加速决策） =====
+    try {
+      const targetTab = await getTargetTab(tabId)
+      if (targetTab) {
+        // 收集当前可用脚本 ID 集合（用于过滤 RAG 历史经验中已删除的脚本）
+        // 避免 AI 借鉴历史经验调用不存在的 inject_script_N
+        const availableScriptIds = new Set(searchResults.map(s => Number(s.id)).filter(Boolean))
+
+        // 并行执行：页面模板识别 + RAG 经验检索
+        const [templateResult, ragExperiences] = await Promise.allSettled([
+          executeDOMToolWithTimeout(targetTab.id, 'detect_page_template', {}, 5000),
+          retrieveRAGExperiences(configService, userMessage, autoPageContent.url || '', availableScriptIds),
+        ])
+
+        // 注入页面模板识别结果
+        if (templateResult.status === 'fulfilled' && templateResult.value?.ok) {
+          const tpl = templateResult.value.result
+          if (tpl && tpl.pageType) {
+            const selHint = tpl.recommendedSelectors ? Object.entries(tpl.recommendedSelectors).map(([k, v]) => `${k}=${v}`).join(', ') : ''
+            const tplMsg = `[已自动执行 detect_page_template] 页面类型: ${tpl.pageType}（${tpl.pageTypeReason}）\n推荐选择器: ${selHint || '无'}\n${tpl.suggestion || ''}\n⚠️ detect_page_template 已自动执行，请勿重复调用。`
+            _injections.push(tplMsg)
+            console.log('[Agent] 页面模板识别:', tpl.pageType, '| 选择器:', selHint)
+          }
+        } else if (templateResult.status === 'rejected') {
+          console.warn('[Agent] 页面模板识别失败（非致命）:', templateResult.reason?.message)
+        }
+
+        // 注入 RAG 经验
+        if (ragExperiences.status === 'fulfilled' && ragExperiences.value) {
+          _injections.push(ragExperiences.value)
+          console.log('[Agent] RAG 经验已注入上下文')
+        } else if (ragExperiences.status === 'rejected') {
+          console.warn('[Agent] RAG 检索失败（非致命）:', ragExperiences.reason?.message)
+        }
+      }
+    } catch (e) {
+      console.warn('[Agent] 页面模板/RAG 注入失败（非致命）:', e.message)
+    }
+
     // 初始化 WorkingMemory
     workingMemory.init(sessionId, userMessage, autoPageContent)
     const pageUrl = autoPageContent.url || ''
@@ -313,19 +607,26 @@ Stage 3（结果汇总）：整理并输出结果
     if (payloadSummary) {
       parts.push(`上一轮执行的工具及结果（${payloadSummary.count}条）：`)
       for (const item of payloadSummary.items) {
-        // 显示完整摘要，帮助LLM理解数据内容
-        parts.push(`  - ${item.id}(${item.toolName}): ${item.summary}`)
+        // schema+样例格式，让AI理解数据结构
+        if (item.schema) {
+          const schemaStr = Object.entries(item.schema).map(([k, v]) => `${k}:${v}`).join(', ')
+          const sampleStr = item.sample && item.sample.length > 0 ? JSON.stringify(item.sample).slice(0, 120) : ''
+          let line = `  - ${item.id}(${item.toolName}): ${item.count}条 | {${schemaStr}}`
+          if (sampleStr) line += ` | 样例: ${sampleStr}`
+          parts.push(line)
+        } else {
+          parts.push(`  - ${item.id}(${item.toolName}): ${item.summary}`)
+        }
       }
     }
     if (globalSummaries.length > 0) {
       parts.push(`\n全局存储数据：\n${globalSummaries.join('\n')}`)
     }
-    _injections.push(`=== 上轮任务数据 ===\n${parts.join('\n')}\n\n你可以用 recall_data(entry_id="all") 获取完整数据，根据用户需求决定如何使用。`)
+    _injections.push(`=== 上轮任务数据 ===\n${parts.join('\n')}\n\n这些数据可直接在 finish_task 中通过 data_refs 引用作为最终输出。`)
   }
 
   // ===== 简单请求快速路径 =====
   // 检测用户请求是否为纯数据操作（导出、格式化、翻译等）且已有上轮数据
-  // 此类请求不需要页面探索和脚本执行，直接进入Stage3模式
   const SIMPLE_REQUEST_PATTERNS = ['导出', 'csv', 'excel', '格式化', '整理成', '转换', '翻译', '汇总', '合并', '去重', '统计', '分析', '列表', '重新输出', '再给我']
   // 追问模式：短消息 + 有上轮数据，视为对上次结果的追问
   const isFollowUp = cleanHistory.length > 0
@@ -339,36 +640,39 @@ Stage 3（结果汇总）：整理并输出结果
     || isFollowUp
 
   if (isSimpleDataRequest) {
-    currentPhase = 3
     const allData = todoScheduler.globalDataStore.getAllSummaries()
-    const payloadItems = payloadSummary ? payloadSummary.items.map(i => `  - ${i.id}(${i.toolName}): ${i.summary}`).join('\n') : ''
+    const payloadItems = payloadSummary ? payloadSummary.items.map(i => {
+      if (i.schema) {
+        const schemaStr = Object.entries(i.schema).map(([k, v]) => `${k}:${v}`).join(', ')
+        return `  - ${i.id}(${i.toolName}): ${i.count}条 | {${schemaStr}}`
+      }
+      return `  - ${i.id}(${i.toolName}): ${i.summary}`
+    }).join('\n') : ''
     const quickPrompt = `你是AI Browser智能体。用户请求是对已有数据的简单操作或追问，无需页面探索或脚本执行，直接回答即可。
 
 === 可用工具 ===
-recall_data: 查询已存储的数据（每轮限2次）
-finish_task: 输出结果
+finish_task: 输出结果（通过 data_refs 可引用完整数据）
 
 === 执行要点 ===
-1. 下方已有上轮数据摘要，直接使用即可
-2. 如需完整数据，可调用1次recall_data
-3. 处理完成后立即调用finish_task输出结果
-4. 如果用户是在追问（如"在哪里呢"、"怎么用"），直接回答问题，无需查数据
+1. 下方已有上轮数据摘要（含schema+样例），直接使用即可
+2. 处理完成后立即调用finish_task输出结果
+3. 如果用户是在追问（如"在哪里呢"、"怎么用"），直接回答问题，无需查数据
 
 === 上轮数据 ===
 ${allData.length > 0 ? '全局存储:\n' + allData.join('\n') : ''}${payloadItems ? '\n工具结果:\n' + payloadItems : ''}`
     messages.length = 0
     messages.push({ role: 'system', content: quickPrompt })
     messages.push({ role: 'user', content: userMessage })
-    _debugLog('⚡ 简单请求快速路径', isFollowUp ? '追问模式，跳过Stage1/2' : '跳过Stage1/2，直接Stage3模式')
+    _debugLog('⚡ 简单请求快速路径', isFollowUp ? '追问模式，直接回答' : '数据操作，跳过页面探索')
   }
 
   postToUI(tabId, { type: 'agentStart' })
-  _debugLog('🐛 调试模式已开启', '待办调度系统：系统驱动进度追踪、收敛提示、阶段切换')
-  _debugLog('⚙️ Agent配置', { maxRounds, enableJudge, debug })
+  _debugLog('🐛 调试模式已开启', '待办驱动调度系统：全工具可用、待办进度追踪、收敛提示')
+  _debugLog('⚙️ Agent配置', { maxRounds: effectiveMaxRounds, enableJudge, debug })
   _debugLog('📋 系统提示词', systemMsg.content)
 
   // ===== 主循环开始 =====
-  while (aiRequestCount < maxRounds) {
+  while (aiRequestCount < effectiveMaxRounds) {
     // 检查是否被新任务中止
     const curState = agentStates.get(tabId)
     if (curState?.aborted) {
@@ -387,7 +691,6 @@ ${allData.length > 0 ? '全局存储:\n' + allData.join('\n') : ''}${payloadItem
     }
 
     aiRequestCount++
-    _roundRecallDataCount = 0  // 每轮重置recall_data计数
     
     // ===== 清理临时消息（_temp标记） =====
     // 上一轮注入的依赖数据已使用完毕，清理避免累积膨胀
@@ -399,124 +702,6 @@ ${allData.length > 0 ? '全局存储:\n' + allData.join('\n') : ''}${payloadItem
         }
       }
       _debugLog('🧹 清理临时消息', { removed: tempMsgs.length })
-    }
-    
-    // ===== 同步 currentPhase =====
-    if (todoScheduler.parentTodo && todoScheduler.currentStage !== currentPhase) {
-      const newPhase = todoScheduler.currentStage
-      _debugLog('🔄 阶段正常完成，同步 currentPhase', { from: currentPhase, to: newPhase })
-
-      // 记录阶段切换到 WorkingMemory
-      workingMemory.addStageSwitch(currentPhase, newPhase, `阶段${currentPhase}待办全部完成`, aiRequestCount)
-
-      // 生成阶段交接摘要（LLM驱动 + WorkingMemory补充）
-      const handoffSummary = await contextCompressor.generateHandoff(
-        messages, userMessage, workingMemory, currentPhase, newPhase,
-        `阶段${currentPhase}待办全部完成`
-      )
-
-      if (newPhase === 2) {
-        let scriptList = ''
-        if (searchResults.length > 0) {
-          scriptList = '\n\n=== 已匹配的专用脚本 ===\n' + searchResults.map(s => {
-            const params = s.toolConfig?.parameters?.properties ? Object.keys(s.toolConfig.parameters.properties) : []
-            const paramHint = params.length > 0 ? `（参数: ${params.join(', ')}）` : ''
-            return `  - inject_script_${s.id}(${s.name})${paramHint}: ${(s.description || '').slice(0, 80)}`
-          }).join('\n')
-        }
-        let dataSummary = ''
-        const summaries = todoScheduler.globalDataStore.getAllSummaries()
-        if (summaries.length > 0) {
-          dataSummary = '\n\n=== 全局存储数据 ===\n  ' + summaries.join('\n  ')
-          const allUrls = todoScheduler.globalDataStore.getAllUrls()
-          if (allUrls.length > 0) {
-            dataSummary += `\n\n💡 已有${allUrls.length}个URL链接，可直接传给inject_script_*作为参数。`
-          }
-        }
-        
-        // ===== 依赖数据自动注入（不进入 messages 历史，标记 _temp） =====
-        let dependDataInjection = ''
-        const currentTodo = todoScheduler.getCurrentTodo()
-        if (currentTodo?.dataDependKeys?.length > 0) {
-          _debugLog('📦 依赖数据注入', { keys: currentTodo.dataDependKeys })
-          const dependDataItems = []
-          for (const key of currentTodo.dataDependKeys) {
-            const data = todoScheduler.globalDataStore.get(key)
-            if (data) {
-              dependDataItems.push({ key, data })
-            }
-          }
-          if (dependDataItems.length > 0) {
-            dependDataInjection = '\n\n=== 依赖数据已自动加载 ===\n以下数据已从全局存储自动注入，可直接使用，无需 recall_data：\n'
-            for (const { key, data } of dependDataItems) {
-              // 精简展示（截断到2000字符，避免注入过大）
-              const dataPreview = typeof data === 'string' ? data : JSON.stringify(data)
-              const truncatedPreview = dataPreview.length > 2000 ? dataPreview.slice(0, 2000) + '\n...(数据过长已截断，完整数据存储于全局)' : dataPreview
-              dependDataInjection += `\n【${key}】:\n${truncatedPreview}\n`
-            }
-            dependDataInjection += '\n⚠️ 此数据为本轮临时注入（不进入历史），下轮自动清理。'
-          }
-        }
-        
-        const phase2Prompt = `你是AI Browser智能体，现在进入 Stage 2（脚本处理阶段）。
-
-=== 核心任务 ===
-查看待办列表中 Stage 2 的子待办，使用专用脚本完成批量处理。
-
-=== Stage 2 可用工具 ===
-search_tools: 搜索工具库，查找可用脚本
-inject_script_N: 执行ID为N的脚本（请使用 search_tools 查到的脚本ID，勿编造）
-recall_data: 查询已存储的工具执行结果（每轮限2次）
-read_page_content: 读取当前页面（仅辅助查看，不算任务进展）
-finish_task: 任务完成，汇报结果
-
-=== 执行要点 ===
-1. 优先调用 inject_script_* 执行脚本，这是Stage2的主要工作
-2. 当前待办的依赖数据已自动注入上下文，直接使用即可，无需recall_data重复查询
-3. 脚本执行成功后，结果会自动存入全局存储，直接调用 finish_task 汇报即可
-4. read_page_content 只在需要确认页面状态时使用，不应替代脚本执行
-5. 如果脚本未匹配或多次失败，调用 finish_task 说明原因${scriptList}`
-        // 阶段切换：清空消息但注入交接摘要，保留上下文连续性
-        messages.length = 0
-        messages.push({ role: 'system', content: phase2Prompt })
-        if (handoffSummary) {
-          messages.push({ role: 'system', content: `=== 前序阶段交接 ===\n${handoffSummary}` })
-        }
-        // 依赖数据临时注入（标记 _temp，下轮清理）
-        if (dependDataInjection) {
-          messages.push({ role: 'system', content: dependDataInjection, _temp: true })
-        }
-        messages.push({ role: 'user', content: userMessage + (dataSummary || '\n\n（无已收集数据，请直接使用脚本或搜索工具库。）') })
-        _debugLog('🔄 Stage2提示词已注入（正常完成路径）', { scriptCount: searchResults.length, dataKeys: summaries.length, hasHandoff: !!handoffSummary, hasDependData: !!dependDataInjection })
-      } else if (newPhase === 3) {
-        const allData = todoScheduler.globalDataStore.getAllSummaries()
-        const phase3Prompt = `你是AI Browser智能体，现在进入 Stage 3（结果汇总阶段）。
-
-=== 核心任务 ===
-汇总前面阶段收集的所有数据，输出结构化的最终结果。
-
-=== Stage 3 可用工具 ===
-recall_data: 查询已存储的数据（每轮限2次，仅当上下文中的数据摘要不够时使用）
-finish_task: 输出最终汇总结果
-
-=== 执行要点 ===
-1. 下方已有全局存储数据摘要和依赖数据，优先直接使用，避免浪费轮次
-2. 将数据整理为清晰的汇总：包含数据条数、核心字段、代表性样本
-3. 调用 finish_task 输出结果，用自然语言描述而非原始JSON
-4. 如果用户要求导出/格式转换（如CSV、表格），直接在finish_task的summary中输出格式化文本
-
-=== 全局存储数据 ===
-${allData.length > 0 ? allData.join('\n') : '（无数据）'}`
-        // 阶段切换：清空消息但注入交接摘要
-        messages.length = 0
-        messages.push({ role: 'system', content: phase3Prompt })
-        if (handoffSummary) {
-          messages.push({ role: 'system', content: `=== 前序阶段交接 ===\n${handoffSummary}` })
-        }
-        messages.push({ role: 'user', content: userMessage + '\n\n请汇总所有已收集的数据并输出最终结果。' })
-        _debugLog('🔄 Stage3提示词已注入（正常完成路径）', { dataKeys: allData.length, hasHandoff: !!handoffSummary })
-      }
-      currentPhase = newPhase
     }
 
     // ===== Port 连接检查 =====
@@ -531,7 +716,7 @@ ${allData.length > 0 ? allData.join('\n') : '（无数据）'}`
     await yieldUI()
 
     // 收敛提示
-    const convergencePrompt = todoScheduler.getConvergencePrompt(aiRequestCount, maxRounds)
+    const convergencePrompt = todoScheduler.getConvergencePrompt(aiRequestCount, effectiveMaxRounds)
     if (convergencePrompt) {
       _debugLog('💡 系统收敛提示', convergencePrompt)
       _injections.push(convergencePrompt)
@@ -539,38 +724,22 @@ ${allData.length > 0 ? allData.join('\n') : '（无数据）'}`
 
     // 待办进度上下文
     if (todoScheduler.parentTodo) {
-      const stageCtx = todoScheduler.getStageContext()
-      if (stageCtx) _injections.push(stageCtx)
+      const progressCtx = todoScheduler.getProgressContext()
+      if (progressCtx) _injections.push(progressCtx)
     }
 
     // ===== WorkingMemory 结构化上下文注入 =====
-    // 去重策略：
-    //   - 阶段切换后前2轮，交接摘要已包含完整 WorkingMemory 信息，不重复注入
-    //   - 页面信息已在 userMessage 中，toContext 跳过 includePage
-    //   - 交接摘要覆盖 discoveries/decisions/dataRefs/stageHistory，只补充 errors
+    // 每轮都注入完整 WorkingMemory（不含页面信息，避免与 userMessage 重复）
     if (aiRequestCount > 1) {
-      const roundsSinceStageSwitch = workingMemory.state.stageHistory.length > 0
-        ? aiRequestCount - (workingMemory.state.stageHistory[workingMemory.state.stageHistory.length - 1]?.round || 0)
-        : 999
-      if (roundsSinceStageSwitch > 2) {
-        // 距阶段切换超过2轮，注入完整 WorkingMemory（不含页面信息，避免与 userMessage 重复）
-        const memoryContext = workingMemory.toContext({ includeErrors: true, includePage: false, maxLen: 1200 })
-        if (memoryContext) _injections.push(memoryContext)
-      } else {
-        // 阶段切换后前2轮，只注入错误和排除信息（交接摘要已包含其他信息）
-        const recentErrors = workingMemory.state.errors.slice(-3)
-        const excluded = workingMemory.state.excluded
-        const extraParts = []
-        if (recentErrors.length > 0) {
-          extraParts.push(`近期错误:\n${recentErrors.map(e => `  - ${e.tool}: ${e.error}`).join('\n')}`)
-        }
-        if (excluded.length > 0) {
-          extraParts.push(`已排除: ${excluded.join('; ')}`)
-        }
-        if (extraParts.length > 0) {
-          _injections.push(extraParts.join('\n\n'))
-        }
-      }
+      const memoryContext = workingMemory.toContext({ includeErrors: true, includePage: false, maxLen: 1200 })
+      if (memoryContext) _injections.push(memoryContext)
+    }
+
+    // ===== shouldForceFinish 检查 =====
+    const forceFinish = todoScheduler.shouldForceFinish()
+    if (forceFinish.force) {
+      _debugLog('🚨 硬性规则触发强制完成', forceFinish)
+      _injections.push(`⚠️ 系统检测到${forceFinish.reason}，请立即调用 finish_task 汇报当前已有结果。不要再尝试其他操作。`)
     }
 
     // 获取当前页面URL
@@ -580,36 +749,41 @@ ${allData.length > 0 ? allData.join('\n') : '（无数据）'}`
       currentPageUrl = tab?.url || ''
     } catch {}
 
-    postToUI(tabId, { type: 'agentStatus', text: `阶段${currentPhase} 第${aiRequestCount}轮` })
+    postToUI(tabId, { type: 'agentStatus', text: `第${aiRequestCount}轮` })
 
-    // 构建工具列表
-    let tools
-    if (currentPhase === 1) {
-      tools = buildPhase1Tools(currentPageUrl, aiRequestCount + 1, scriptService, filteredScriptsCache, domainMismatchLogged)
-    } else if (currentPhase === 2) {
-      tools = buildPhase2Tools(searchResults, currentPageUrl, aiRequestCount + 1, scriptService, filteredScriptsCache, domainMismatchLogged)
-    } else {
-      tools = [
-        { type: 'function', function: { name: 'recall_data', description: '从已存储的工具结果中查询数据', parameters: { type: 'object', properties: { entry_id: { type: 'string' }, tool_name: { type: 'string' }, filter: { type: 'string' }, fields: { type: 'string' } } } } },
-        { type: 'function', function: { name: 'finish_task', description: '任务完成，汇报结果', parameters: { type: 'object', properties: { summary: { type: 'string', description: '完成摘要' } }, required: ['summary'] } } }
-      ]
-    }
+    // 构建工具列表（全工具可用）
+    const tools = buildTools(searchResults, currentPageUrl, aiRequestCount + 1, scriptService, filteredScriptsCache, domainMismatchLogged)
 
-    console.log(`[Agent] 阶段${currentPhase} 第${aiRequestCount}轮API请求, tools:${tools.length}个, 已搜到${searchResults.length}个脚本`)
-    _debugLog(`🔧 阶段${currentPhase} 第${aiRequestCount}轮 工具(${tools.length}个)`, tools.map(t => `  ${t.function.name}`).join('\n'))
+    console.log(`[Agent] 第${aiRequestCount}轮API请求, tools:${tools.length}个, 已搜到${searchResults.length}个脚本`)
+    _debugLog(`🔧 第${aiRequestCount}轮 工具(${tools.length}个)`, tools.map(t => `  ${t.function.name}`).join('\n'))
 
     // 系统消息聚合
     const systemNudges = []
     while (_injections.length > 0) systemNudges.push(_injections.shift())
     if (systemNudges.length > 0) {
-      messages.push({ role: 'system', content: systemNudges.join('\n') })
+      // _temp 标记：本轮注入的临时系统消息，下一轮 AI 请求前会被清理（见上方 _temp 清理逻辑）
+      // 避免逐轮累积 system 消息导致上下文膨胀
+      messages.push({ role: 'system', content: systemNudges.join('\n'), _temp: true })
     }
 
     const config = await configService.getAIConfig()
     const auth = await configService.getAppAuth()
+    // 模型单独配置优先：优先使用选中模型的 temperature / max_tokens（来自后端 ai_models 表）
+    // modelInfo 由 sidepanel 在 agentStart 时传入，包含 temperature / contextWindow / maxTokens
+    const modelTemperature = (modelInfo && typeof modelInfo.temperature === 'number')
+      ? modelInfo.temperature
+      : (config.temperature ?? 0.3)
+    const modelMaxTokens = (modelInfo && modelInfo.maxTokens)
+      ? modelInfo.maxTokens
+      : (config.maxTokens || 2048)
+    // 构造请求体：剥离内部字段（_temp）避免污染 AI 请求
+    const messagesForAI = messages.map(({ _temp, ...rest }) => rest)
     const body = {
-      model: config.model, messages, temperature: 0.3,
-      max_tokens: Math.min(Math.max(config.maxTokens || 2048, 2048), 4096),
+      model: config.model, messages: messagesForAI,
+      temperature: modelTemperature,
+      // max_tokens 控制单次输出上限：下限 2048（保证工具调用参数完整），
+      // 上限 32768（避免超大输出导致响应慢/费用高），由后台 modelInfo.maxTokens 控制
+      max_tokens: Math.min(Math.max(modelMaxTokens || 2048, 2048), 32768),
       tools, tool_choice: 'auto',
     }
 
@@ -737,10 +911,11 @@ ${allData.length > 0 ? allData.join('\n') : '（无数据）'}`
       if (msg.tool_calls && msg.tool_calls.length > 0) {
         console.log('[Agent] tool_calls:', msg.tool_calls.map(t => t.function.name).join(', '))
         _debugLog(`📥 第${aiRequestCount}轮 LLM响应: tool_calls`, msg.tool_calls.map(t => `${t.function.name}(${JSON.stringify(t.function.arguments || {})})`).join('\n'))
-        // 输出已存储数据信息
+        // 输出已存储数据信息（从内存索引读取，无需异步）
         const storedDataSummary = payloadStore.entries.filter(e => e.sessionId === sessionId).map(e => {
-          const dataPreview = Array.isArray(e.data) ? `数组${e.data.length}条` : typeof e.data === 'object' ? '对象' : `字符串${String(e.data).length}字符`
-          return `${e.id}: ${e.toolName} (${dataPreview})`
+          const count = e.metadata?.count || 1
+          const schemaStr = e.metadata?.schema ? Object.entries(e.metadata.schema).map(([k, v]) => `${k}:${v}`).join(', ') : ''
+          return schemaStr ? `${e.id}: ${e.toolName} (${count}条 | {${schemaStr}})` : `${e.id}: ${e.toolName} (${count}条)`
         })
         if (storedDataSummary.length > 0) {
           _debugLog(`💾 已存储数据 (${storedDataSummary.length}条)`, storedDataSummary.join('\n'))
@@ -785,73 +960,8 @@ ${allData.length > 0 ? allData.join('\n') : '（无数据）'}`
           // Feature 4: 工具调用计时起点
           const _toolStartTime = Date.now()
           let toolResult
-          if (funcName === 'recall_data') {
-            _roundRecallDataCount++
-            // 每轮限制recall_data最多2次，防止循环浪费轮次
-            if (_roundRecallDataCount > 2) {
-              toolResult = JSON.stringify({ error: '本轮recall_data已用完(限2次)，请直接使用已有数据推进任务，或调用finish_task输出结果。', hint: '避免反复查询相同数据浪费轮次' })
-              console.log('[Agent] recall_data 被拦截：本轮已调用2次')
-            } else {
-            const entryIds = (funcArgs.entry_id || '').split(',').map(s => s.trim()).filter(Boolean)
-            const mode = funcArgs.mode || 'summary'  // 支持 mode 参数
-            
-            let overLimitIds = []
-            for (const eid of entryIds) {
-              const count = (_recallDataCallCount.get(eid) || 0) + 1
-              _recallDataCallCount.set(eid, count)
-              if (count > 3) overLimitIds.push(`${eid}(已查${count}次)`)
-            }
-            if (overLimitIds.length > 0) {
-              _injections.push(`💡 提示：以下存储数据已查询3次以上：${overLimitIds.join(', ')}。建议推进下一步操作或调用finish_task。`)
-            }
-            // 先查 PayloadStore，再回退查 GlobalDataStore
-            let queryResult = payloadStore.query(funcArgs)
-            const isPayloadEmpty = queryResult?.error || (Array.isArray(queryResult?.entries) && queryResult.entries.length === 0)
-            if (isPayloadEmpty && todoScheduler.globalDataStore) {
-              const gdsResult = todoScheduler.globalDataStore.query(funcArgs)
-              if (gdsResult && !gdsResult.error) {
-                // GlobalDataStore 结果必须走截断：将完整数据存入 PayloadStore，只发摘要
-                if (gdsResult.entries && gdsResult.entries.length > 0) {
-                  const truncatedEntries = gdsResult.entries.map(entry => {
-                    const fullData = entry.value ?? entry.data
-                    const dataStr = typeof fullData === 'string' ? fullData : JSON.stringify(fullData || '')
-                    if (dataStr.length > 1500) {
-                      // 大数据：存入 PayloadStore，只返回摘要+ID
-                      const storeId = payloadStore.add('recall_data', fullData, entry.summary || dataStr.slice(0, 100), { sourceKey: entry.id || entry.key, count: Array.isArray(fullData) ? fullData.length : 1 })
-                      // 同步更新 WorkingMemory 数据引用
-                      workingMemory.addDataRef(entry.id || entry.key, storeId, Array.isArray(fullData) ? fullData.length : 1, entry.summary || 'GlobalDataStore数据')
-                      return { id: entry.id || entry.key, storeId, summary: entry.summary || dataStr.slice(0, 150), hint: `数据已存储(ID:${storeId})，如需完整内容请用 recall_data(entry_id="${storeId}", mode="full")` }
-                    }
-                    // 小数据：直接返回
-                    return entry
-                  })
-                  queryResult = { entries: truncatedEntries, count: gdsResult.count, source: 'GlobalDataStore' }
-                } else {
-                  queryResult = gdsResult
-                }
-              }
-            }
-            
-            // ===== mode="full" 时返回完整数据 =====
-            if (mode === 'full' && queryResult?.entries?.length > 0) {
-              const fullDataEntries = queryResult.entries.map(entry => {
-                // 从 PayloadStore 获取完整数据
-                const fullEntry = payloadStore.entries.find(e => e.id === entry.id || e.id === entry.storeId)
-                const fullData = fullEntry?.data || entry.value || entry.data
-                return { id: entry.id || entry.storeId, data: fullData }
-              })
-              // 完整数据返回（标记 _temp，下轮清理）
-              toolResult = JSON.stringify({ ok: true, entries: fullDataEntries, mode: 'full', _hint: '完整数据已返回，此消息为本轮临时注入（下轮清理）' })
-              console.log(`[Agent] recall_data mode=full，返回完整数据（${fullDataEntries.length}条）`)
-            } else {
-              // mode="summary"（默认）：返回精简摘要
-              toolResult = JSON.stringify(queryResult)
-              console.log('[Agent] recall_data:', funcArgs, '→', JSON.stringify(queryResult).slice(0, 100))
-            }
-            
-            postToUI(tabId, { type: 'agentStepResult', step: totalToolCalls, toolName: 'recall_data', result: typeof queryResult === 'object' ? JSON.stringify(queryResult).slice(0, 200) : queryResult, done: false })
-            } // end of else (recall_data正常执行)
-          } else if (funcName === 'finish_task') {
+
+          if (funcName === 'finish_task') {
             console.log('[Agent] finish_task, summary:', funcArgs.summary, 'data_refs:', funcArgs.data_refs)
 
             // ===== finish_task 也需要更新待办进度 =====
@@ -861,31 +971,36 @@ ${allData.length > 0 ? allData.join('\n') : '（无数据）'}`
                 todoScheduler.markTodoResult('done', { summary: funcArgs.summary })
                 todoScheduler.recordProgress()
               }
-              postToUI(tabId, { type: 'agentTodoUpdate', data: { stages: todoScheduler.parentTodo.stages || [], progress: todoScheduler.getProgress(), currentStage: todoScheduler.currentStage, lastTool: 'finish_task', lastProgress: true } })
+              postToUI(tabId, { type: 'agentTodoUpdate', data: { items: todoScheduler.parentTodo.items || [], progress: todoScheduler.getProgress(), currentTodoIndex: todoScheduler.currentTodoIndex, lastTool: 'finish_task', lastProgress: true } })
             }
 
-            // ===== 处理 data_refs 参数：自动注入引用数据 =====
+            // ===== 处理 data_refs 参数：自动注入引用数据（异步从 storage 读取） =====
             let referencedDataContent = ''
-            const dataRefsStr = funcArgs.data_refs || ''
-            if (dataRefsStr) {
-              const dataRefIds = dataRefsStr.split(',').map(s => s.trim()).filter(Boolean)
+            const dataRefIds = normalizeDataRefs(funcArgs.data_refs)
+            if (dataRefIds.length > 0) {
               _debugLog('📦 finish_task 数据引用', { refs: dataRefIds })
+              const storeData = await payloadStore.getDataByIds(dataRefIds)
               for (const refId of dataRefIds) {
+                const data = storeData[refId]
                 const entry = payloadStore.entries.find(e => e.id === refId)
-                if (entry?.data) {
-                  // 格式化数据输出
-                  const dataPreview = typeof entry.data === 'string' ? entry.data : JSON.stringify(entry.data, null, 2)
-                  referencedDataContent += `\n\n=== 数据 ${refId} (${entry.toolName}) ===\n${dataPreview}`
+                if (data !== undefined) {
+                  const dataPreview = typeof data === 'string' ? data : JSON.stringify(data, null, 2)
+                  // 单条引用数据超过 50KB 截断，避免最终输出过长
+                  const MAX_REF_CHARS = 50000
+                  const truncated = dataPreview.length > MAX_REF_CHARS
+                    ? dataPreview.slice(0, MAX_REF_CHARS) + `\n...(已截断，原始 ${dataPreview.length} 字符)`
+                    : dataPreview
+                  referencedDataContent += `\n\n=== 数据 ${refId} (${entry?.toolName || 'unknown'}) ===\n${truncated}`
                 }
               }
               if (referencedDataContent) {
                 referencedDataContent = '\n\n【引用的完整数据】' + referencedDataContent
               }
             }
-            
+
             const payloadSummary = payloadStore.getSummaryForFinish()
             if (payloadSummary) {
-              const summaryHint = `\n[存储数据汇总] 共${payloadSummary.count}条存储：${payloadSummary.items.map(e => `${e.id}(${e.toolName})`).join(', ')}。需要详细内容可调用 recall_data(entry_id="all")`
+              const summaryHint = `\n[存储数据汇总] 共${payloadSummary.count}条存储：${payloadSummary.items.map(e => `${e.id}(${e.toolName}:${e.count}条)`).join(', ')}。可在 finish_task 中通过 data_refs 引用完整数据。`
               messages.push({ role: 'system', content: summaryHint })
             }
             const summary = funcArgs.summary || '任务已完成'
@@ -904,12 +1019,40 @@ ${allData.length > 0 ? allData.join('\n') : '（无数据）'}`
               } catch (e) { console.warn('[Agent] 事后自评失败（非致命）:', e.message) }
             }
             
-            // 流式输出完整内容（summary + referencedData + judgeMsg）
-            for (const char of finalOutput) {
-              postToUI(tabId, { type: 'streamChunk', content: char })
-              await new Promise(r => setTimeout(r, 15))
+            // ===== 对话全景：finish_task 也发送本轮数据（修复最后一轮AI输出缺失） =====
+            _roundToolResults.push({
+              toolName: 'finish_task',
+              args: funcArgs,
+              result: { ok: true, summary, judgeResult },
+              finalResult: finalOutput,
+              ok: true,
+              isFinishTask: true,
+            })
+            const finishRoundData = {
+              round: aiRequestCount,
+              request: {
+                messages: _requestMessagesSnapshot.map(m => {
+                  if (m.role === 'tool') return { role: m.role, content: m.content }
+                  return {
+                    role: m.role,
+                    content: typeof m.content === 'string' ? (m.content.length > 800 ? m.content.slice(0, 400) + '\n...(已压缩)' : m.content) : m.content,
+                    tool_calls: m.tool_calls?.map(tc => ({ name: tc.function?.name, args: tc.function?.arguments }))
+                  }
+                }),
+                toolsCount: tools.length
+              },
+              response: msg,
+              toolResults: _roundToolResults,
+              storedData: payloadStore.entries.filter(e => e.sessionId === sessionId).map(e => ({
+                id: e.id, toolName: e.toolName, count: e.metadata?.count || 1, schema: e.metadata?.schema || null
+              })),
+              isFinishRound: true,
             }
-            postToUI(tabId, { type: 'streamDone' })
+            _sendToConversationViewer('conversationRound', finishRoundData)
+
+            // 流式输出完整内容（summary + referencedData + judgeMsg）
+            // 使用 streamToUI 避免逐字符 setTimeout 在大数据时累计超时
+            await streamToUI(postToUI, tabId, finalOutput)
             
             // 只调用一次 saveToChatHistoryStorage（保存完整输出）
             await saveToChatHistoryStorage(finalOutput, executedTools.map(t => ({ name: t.name, result: typeof t.result === 'string' ? t.result : JSON.stringify(t.result || '') })))
@@ -937,7 +1080,7 @@ ${allData.length > 0 ? allData.join('\n') : '（无数据）'}`
                 id: e.id,
                 toolName: e.toolName,
                 summary: e.summary,
-                count: Array.isArray(e.data) ? e.data.length : 1,
+                count: e.metadata?.count || 1,
               })),
               judgeResult: judgeResult || null,
             }
@@ -947,7 +1090,26 @@ ${allData.length > 0 ? allData.join('\n') : '（无数据）'}`
             } catch (e) {
               console.warn('[OutputService] 保存失败（非致命）:', e.message)
             }
-            
+
+            // ===== 上传对话归档到后端（便于后台管理页面查看） =====
+            try {
+              await uploadConversationArchive(configService, {
+                taskId: _taskId,
+                sessionId,
+                userMessage,
+                model: config.model,
+                totalRounds: aiRequestCount,
+                totalToolCalls: totalToolCalls,
+                status: judgeResult?.verdict || 'unknown',
+                durationMs: endTime - _startTime,
+                summary,
+                rounds: _allRoundsData,
+              })
+              console.log(`[ConversationArchive] 已上传至后端: taskId=${_taskId}`)
+            } catch (e) {
+              console.warn('[ConversationArchive] 上传失败（非致命）:', e.message)
+            }
+
             // ===== 任务完成后关闭待办面板 =====
             // 延迟2秒关闭，让用户看到最终完成状态后再自动关闭
             setTimeout(() => {
@@ -957,7 +1119,7 @@ ${allData.length > 0 ? allData.join('\n') : '（无数据）'}`
                 bc.close()
               } catch {}
               try {
-                chrome.tabs.sendMessage(tabId, { type: 'todoUpdate', data: { stages: [], progress: { total: 0, completed: 0 }, currentStage: 1, _taskDone: true } }).catch(() => {})
+                chrome.tabs.sendMessage(tabId, { type: 'todoUpdate', data: { items: [], progress: { total: 0, completed: 0 }, currentTodoIndex: 0, _taskDone: true } }).catch(() => {})
               } catch {}
               // 对话全景：发送任务完成标记
               _sendToConversationViewer('conversationTaskDone', null)
@@ -987,9 +1149,7 @@ ${allData.length > 0 ? allData.join('\n') : '（无数据）'}`
             const existingIds = new Set(searchResults.map(s => s.id))
             for (const r of newResults) { if (!existingIds.has(r.id)) { searchResults.push(r); existingIds.add(r.id) } }
             if (newResults.length === 0) {
-              const noResultHint = currentPhase === 2
-                ? `未找到与"${query}"匹配的专用脚本。请尝试搜索其他关键词，如果多次搜索无果，请调用finish_task总结当前结果并告知用户需要开发专用脚本。`
-                : `未找到与"${query}"匹配的专用工具。你可以用本地DOM工具直接在页面上操作，也可以尝试搜索其他关键词。`
+              const noResultHint = `未找到与"${query}"匹配的专用脚本。你可以用本地DOM工具直接在页面上操作，或尝试搜索其他关键词。`
               toolResult = JSON.stringify({ ok: true, result: noResultHint })
             } else {
               toolResult = JSON.stringify(newResults.slice(0, 5).map(t => ({ id: t.id, name: t.name, description: t.description, toolType: t.toolType, toolConfig: t.toolConfig ? '已配置' : '未配置' })))
@@ -997,22 +1157,19 @@ ${allData.length > 0 ? allData.join('\n') : '（无数据）'}`
             executedTools.push({ name: 'search_tools', result: { ok: newResults.length > 0, count: newResults.length } })
             postToUI(tabId, { type: 'agentSearchResult', results: newResults.slice(0, 5) })
           } else if (funcName === 'create_todo') {
-            let stagesArg = funcArgs.stages || []
-            if (typeof stagesArg === 'string') { try { const parsed = JSON.parse(stagesArg.trim()); if (Array.isArray(parsed)) stagesArg = parsed } catch {} }
+            let itemsArg = funcArgs.items || []
+            if (typeof itemsArg === 'string') { try { const parsed = JSON.parse(itemsArg.trim()); if (Array.isArray(parsed)) itemsArg = parsed } catch {} }
 
             // ===== 脚本ID存在性校验 =====
             // 提取所有 inject_script_N 的 action，检查对应脚本是否在搜索结果中
             const availableScriptIds = new Set(searchResults.map(s => `inject_script_${s.id}`))
             const scriptIdErrors = []
-            if (Array.isArray(stagesArg)) {
-              for (const stage of stagesArg) {
-                if (!Array.isArray(stage?.subTodos)) continue
-                for (const todo of stage.subTodos) {
-                  if (todo.action && todo.action.startsWith('inject_script_')) {
-                    if (!availableScriptIds.has(todo.action)) {
-                      const available = [...availableScriptIds].join(', ') || '（请先调用 search_tools 搜索）'
-                      scriptIdErrors.push(`待办 ${todo.id || '?'} 的 action "${todo.action}" 对应的脚本不存在。当前可用脚本: ${available}`)
-                    }
+            if (Array.isArray(itemsArg)) {
+              for (const item of itemsArg) {
+                if (item.action && item.action.startsWith('inject_script_')) {
+                  if (!availableScriptIds.has(item.action)) {
+                    const available = [...availableScriptIds].join(', ') || '（请先调用 search_tools 搜索）'
+                    scriptIdErrors.push(`待办 ${item.id || '?'} 的 action "${item.action}" 对应的脚本不存在。当前可用脚本: ${available}`)
                   }
                 }
               }
@@ -1021,11 +1178,11 @@ ${allData.length > 0 ? allData.join('\n') : '（无数据）'}`
               toolResult = JSON.stringify({ ok: false, error: `待办列表校验失败：\n${scriptIdErrors.join('\n')}\n请使用 search_tools 查询到的脚本ID，勿编造不存在的脚本。` })
               _debugLog('❌ 脚本ID不存在', scriptIdErrors)
             } else {
-              const submitResult = todoScheduler.submitTodo(stagesArg)
+              const submitResult = todoScheduler.submitTodo(itemsArg)
               if (submitResult.ok) {
                 const progress = todoScheduler.getProgress()
-                toolResult = JSON.stringify({ ok: true, result: `待办列表已创建并通过校验：共${progress.total}个待办。系统将按待办顺序驱动执行，自动跟踪进度和切换阶段。当前待办: ${todoScheduler.getCurrentTodo()?.id || '无'} - ${todoScheduler.getCurrentTodo()?.description || ''}` })
-                _debugLog('📋 待办列表已创建', { total: progress.total, currentStage: todoScheduler.currentStage })
+                toolResult = JSON.stringify({ ok: true, result: `待办列表已创建并通过校验：共${progress.total}个待办。系统将按待办顺序驱动执行，自动跟踪进度。当前待办: ${todoScheduler.getCurrentTodo()?.id || '无'} - ${todoScheduler.getCurrentTodo()?.description || ''}` })
+                _debugLog('📋 待办列表已创建', { total: progress.total, currentTodoIndex: todoScheduler.currentTodoIndex })
               } else {
                 const errors = submitResult.errors || [submitResult.error || '校验失败']
                 toolResult = JSON.stringify({ ok: false, error: `待办列表校验失败：\n${errors.join('\n')}\n请修正后重新提交。` })
@@ -1036,7 +1193,7 @@ ${allData.length > 0 ? allData.join('\n') : '（无数据）'}`
             executedTools.push({ name: 'create_todo', result: { ok: isCreateTodoOk, total: todoScheduler.totalTodos || 0 } })
             postToUI(tabId, { type: 'agentStepResult', step: totalToolCalls, toolName: 'create_todo', result: toolResult, done: false })
             if (isCreateTodoOk) {
-              postToUI(tabId, { type: 'agentTodoUpdate', data: { stages: todoScheduler.parentTodo?.stages || [], progress: todoScheduler.getProgress(), currentStage: todoScheduler.currentStage } })
+              postToUI(tabId, { type: 'agentTodoUpdate', data: { items: todoScheduler.parentTodo?.items || [], progress: todoScheduler.getProgress(), currentTodoIndex: todoScheduler.currentTodoIndex } })
             }
           } else if (funcName === 'read_page_content') {
             const targetTab = await getTargetTab(tabId)
@@ -1136,7 +1293,7 @@ ${allData.length > 0 ? allData.join('\n') : '（无数据）'}`
               } catch (e) { return JSON.stringify({ ok: false, error: `截图失败: ${e.message}` }) }
             })()
             executedTools.push({ name: funcName, result: toolResult })
-          } else if (['extract_content','click_element','fill_input','wait_for_element','save_as_file','navigate_to','go_back','find_text_on_page','get_element_info','scroll_page','hover_element','select_dropdown','press_key','go_forward','get_interactive_elements'].includes(funcName)) {
+          } else if (['extract_content','click_element','fill_input','wait_for_element','save_as_file','navigate_to','go_back','find_text_on_page','get_element_info','scroll_page','hover_element','select_dropdown','press_key','go_forward','get_interactive_elements','detect_page_template'].includes(funcName)) {
             const selectorTools = ['extract_content', 'get_element_info', 'find_text_on_page']
             if (selectorTools.includes(funcName) && funcArgs.selector) {
               const comboKey = `${funcArgs.selector}|${funcName}`
@@ -1151,14 +1308,14 @@ ${allData.length > 0 ? allData.join('\n') : '（无数据）'}`
               postToUI(tabId, { type: 'agentStepResult', step: totalToolCalls, toolName: funcName, result: toolResult, done: false })
               messages.push({ role: 'tool', tool_call_id: toolCall.id, content: toolResult })
               _intercepted = true
-            } else if (funcName === 'navigate_to' && aiRequestCount / maxRounds >= 0.85) {
-              _debugLog('💡 预算提示: navigate_to接近预算上限', { round: aiRequestCount, maxRounds })
-              _injections.push(`💡 提示：已使用${Math.round(aiRequestCount / maxRounds * 100)}%预算，导航新页面可能消耗较多轮次。请评估剩余轮次能否完成，如不能请调用finish_task汇总已有结果。`)
+            } else if (funcName === 'navigate_to' && aiRequestCount / effectiveMaxRounds >= 0.85) {
+              _debugLog('💡 预算提示: navigate_to接近预算上限', { round: aiRequestCount, maxRounds: effectiveMaxRounds })
+              _injections.push(`💡 提示：已使用${Math.round(aiRequestCount / effectiveMaxRounds * 100)}%预算，导航新页面可能消耗较多轮次。请评估剩余轮次能否完成，如不能请调用finish_task汇总已有结果。`)
               const targetTab = await getTargetTab(tabId)
               if (!targetTab) { toolResult = JSON.stringify({ ok: false, error: '目标标签页不可用' }) }
               else {
                 postToUI(tabId, { type: 'agentStep', step: totalToolCalls, toolName: funcName, toolArgs: funcArgs, status: 'running' })
-                const domResult = await Promise.race([ executeDOMTool(targetTab.id, funcName, funcArgs), new Promise((_, reject) => setTimeout(() => reject(new Error('动作超时')), ACTION_TIMEOUT_MS)) ]).catch(e => ({ ok: false, error: e.message }))
+                const domResult = await executeDOMToolWithTimeout(targetTab.id, funcName, funcArgs, ACTION_TIMEOUT_MS)
                 toolResult = JSON.stringify(domResult)
                 executedTools.push({ name: funcName, result: domResult })
               }
@@ -1167,7 +1324,7 @@ ${allData.length > 0 ? allData.join('\n') : '（无数据）'}`
               if (!targetTab) { toolResult = JSON.stringify({ ok: false, error: '目标标签页不可用' }) }
               else {
                 postToUI(tabId, { type: 'agentStep', step: totalToolCalls, toolName: funcName, toolArgs: funcArgs, status: 'running' })
-                const domResult = await Promise.race([ executeDOMTool(targetTab.id, funcName, funcArgs), new Promise((_, reject) => setTimeout(() => reject(new Error('动作超时')), ACTION_TIMEOUT_MS)) ]).catch(e => ({ ok: false, error: e.message }))
+                const domResult = await executeDOMToolWithTimeout(targetTab.id, funcName, funcArgs, ACTION_TIMEOUT_MS)
                 toolResult = JSON.stringify(domResult)
                 executedTools.push({ name: funcName, result: domResult })
               }
@@ -1198,13 +1355,6 @@ ${allData.length > 0 ? allData.join('\n') : '（无数据）'}`
               hasProgress = Array.isArray(results) && results.length > 0
               if (matchedTodo && hasProgress) todoScheduler.markTodoResult('done', parsed)
               else if (matchedTodo) todoScheduler.markTodoResult('failed')
-            } else if (funcName === 'recall_data') {
-              const data = parsed?.data || parsed?.result || parsed
-              if (parsed?.error) hasProgress = false
-              else if (Array.isArray(data) && data.length > 0) hasProgress = true
-              else if (data && typeof data === 'object' && !Array.isArray(data)) hasProgress = (data.count > 0) || (data.entries?.length > 0) || (Array.isArray(data.data) && data.data.length > 0)
-              else if (typeof data === 'string' && data.length > 10 && !data.includes('无存储数据') && !data.includes('未找到')) hasProgress = true
-              if (matchedTodo && hasProgress) todoScheduler.markTodoResult('done', parsed)
             } else if (funcName === 'create_todo') {
               hasProgress = parsed?.ok === true
               if (hasProgress && matchedTodo) todoScheduler.markTodoResult('done', parsed)
@@ -1216,11 +1366,12 @@ ${allData.length > 0 ? allData.join('\n') : '（无数据）'}`
             }
           } catch {}
 
-          // ===== 进度记录（Stage 2 中 read_page_content 不重置 stageFailCount） =====
+          // ===== 进度记录 =====
+          // 只有实际推进任务的工具才重置 failCount
+          // read_page_content / scroll_page 在没有待办匹配时不算进展
           if (hasProgress) {
-            if (currentPhase === 2 && funcName === 'read_page_content') {
-              // Stage 2 中 read_page_content 成功不算进展，不重置 stageFailCount
-            } else {
+            const isNonProgressTool = (funcName === 'read_page_content' || funcName === 'scroll_page') && !matchedTodo
+            if (!isNonProgressTool) {
               todoScheduler.recordProgress()
             }
           } else {
@@ -1229,57 +1380,7 @@ ${allData.length > 0 ? allData.join('\n') : '（无数据）'}`
 
           // 发送待办进度更新
           if (todoScheduler.parentTodo) {
-            postToUI(tabId, { type: 'agentTodoUpdate', data: { stages: todoScheduler.parentTodo.stages || [], progress: todoScheduler.getProgress(), currentStage: todoScheduler.currentStage, lastTool: funcName, lastProgress: hasProgress } })
-          }
-
-          // 检查硬性规则
-          const stageSwitch = todoScheduler.shouldSwitchStage()
-          if (stageSwitch.switch) {
-            _debugLog('🔄 硬性规则触发阶段切换', stageSwitch)
-            // 记录到 WorkingMemory
-            workingMemory.addStageSwitch(currentPhase, stageSwitch.to, stageSwitch.reason, aiRequestCount)
-            // 生成阶段交接摘要
-            const handoffSummary = await contextCompressor.generateHandoff(
-              messages, userMessage, workingMemory, currentPhase, stageSwitch.to, stageSwitch.reason
-            )
-            todoScheduler.forceSwitchToStage(stageSwitch.to)
-            currentPhase = stageSwitch.to
-            if (stageSwitch.to === 2) {
-              let scriptList = ''
-              if (searchResults.length > 0) {
-                scriptList = '\n\n=== 已匹配的专用脚本 ===\n' + searchResults.map(s => {
-                  const params = s.toolConfig?.parameters?.properties ? Object.keys(s.toolConfig.parameters.properties) : []
-                  const paramHint = params.length > 0 ? `（参数: ${params.join(', ')}）` : ''
-                  return `  - inject_script_${s.id}(${s.name})${paramHint}: ${(s.description || '').slice(0, 80)}`
-                }).join('\n')
-              }
-              const phase2Prompt = `你是AI Browser智能体，现在使用远程专用脚本执行任务。\n\n=== 工作流程 ===\n1. 查看待办列表中Stage 2的子待办\n2. 如需数据参数，先 recall_data 获取已收集的数据\n3. 调用 inject_script_* 执行脚本\n4. 完成后 → finish_task\n\n=== Stage 2 可用工具 ===\nsearch_tools, inject_script_*, recall_data, read_page_content, finish_task\n\n=== 脚本使用指南 ===\n- 直接调用匹配到的脚本，不要犹豫\n- 如果脚本需要URL列表参数，先 recall_data 获取\n- 脚本执行成功后，基于结果直接 finish_task\n- 多次搜索无果或脚本失败 → 调用 finish_task 总结失败原因${scriptList}`
-              let dataSummary = ''
-              const summaries = todoScheduler.globalDataStore.getAllSummaries()
-              if (summaries.length > 0) {
-                dataSummary = '\n\n=== 全局存储数据 ===\n  ' + summaries.join('\n  ')
-                const allUrls = todoScheduler.globalDataStore.getAllUrls()
-                if (allUrls.length > 0) dataSummary += `\n\n💡 已有${allUrls.length}个URL链接，可直接传给inject_script_*作为参数。`
-              }
-              messages.length = 0
-              messages.push({ role: 'system', content: phase2Prompt })
-              if (handoffSummary) {
-                messages.push({ role: 'system', content: `=== 前序阶段交接 ===\n${handoffSummary}` })
-              }
-              messages.push({ role: 'user', content: userMessage + (dataSummary || '\n\n（无已收集数据，请直接使用脚本或搜索工具库。）') })
-              _debugLog('🔄 Stage2提示词已注入', { scriptCount: searchResults.length, dataKeys: summaries.length, hasHandoff: !!handoffSummary })
-            } else if (stageSwitch.to === 3) {
-              const allData = todoScheduler.globalDataStore.getAllSummaries()
-              const phase3Prompt = `你是AI Browser智能体，正在执行Stage 3数据汇总。\n\n=== 工作流程 ===\n1. 查看全局存储中的所有数据摘要\n2. 生成结构化汇总\n3. 调用 finish_task 输出汇总\n\n=== Stage 3 可用工具 ===\nfinish_task, recall_data\n\n=== 全局存储数据 ===\n${allData.length > 0 ? allData.join('\n') : '（无数据）'}`
-              messages.length = 0
-              messages.push({ role: 'system', content: phase3Prompt })
-              if (handoffSummary) {
-                messages.push({ role: 'system', content: `=== 前序阶段交接 ===\n${handoffSummary}` })
-              }
-              messages.push({ role: 'user', content: userMessage + '\n\n请汇总所有已收集的数据并输出最终结果。' })
-              _debugLog('🔄 Stage3提示词已注入', { dataKeys: allData.length, hasHandoff: !!handoffSummary })
-            }
-            postToUI(tabId, { type: 'agentTodoUpdate', data: { stages: todoScheduler.parentTodo?.stages || [], progress: todoScheduler.getProgress(), currentStage: todoScheduler.currentStage, stageSwitch } })
+            postToUI(tabId, { type: 'agentTodoUpdate', data: { items: todoScheduler.parentTodo.items || [], progress: todoScheduler.getProgress(), currentTodoIndex: todoScheduler.currentTodoIndex, lastTool: funcName, lastProgress: hasProgress } })
           }
 
           postToUI(tabId, { type: 'agentStepResult', step: totalToolCalls, toolName: funcName, result: toolResult, done: false })
@@ -1293,47 +1394,65 @@ ${allData.length > 0 ? allData.join('\n') : '（无数据）'}`
             }
           }
 
-          // ===== 工具结果处理：支持 return_mode =====
-          // AI 可自主决定返回模式：summary（概览）或 full（完整数据）
+          // ===== 工具结果处理：标准化信封 + 存储 =====
           let finalResult
           const returnMode = funcArgs.return_mode || 'summary'
-          
+
           // 数据采集类工具支持 return_mode
           const dataTools = ['extract_content', 'get_interactive_elements', 'get_element_info']
-          
+
           if (dataTools.includes(funcName) && returnMode === 'full') {
-            // return_mode="full": 直接返回完整数据（不截断，不存储，标记_temp）
-            finalResult = toolResult
-            console.log(`[Agent] ${funcName} return_mode=full，返回完整数据（${toolResult.length}字符）`)
+            // return_mode="full": 存储纯数组数据，返回 schema+样例摘要
+            const envelope = normalizePayload(toolResult, funcName)
+            // 存入 envelope.items（纯数组），而非原始 toolResult（含 ok/_overview 等包装）
+            // 这样 window.__store.p1 直接就是数组，AI可 .filter()/.map() 遍历
+            const storeId = await payloadStore.add(funcName, envelope.items, formatSchemaSummary('?', funcName, envelope),
+              { count: envelope.count, schema: envelope.schema, sample: envelope.sample })
+            if (storeId === null) {
+              // 存储失败：返回失败标记，避免后续引用不存在的数据
+              finalResult = JSON.stringify({ ok: false, error: '数据存储失败（可能超过配额），请尝试缩小采集范围后重试' })
+              console.warn(`[Agent] ${funcName} return_mode=full 存储失败`)
+            } else {
+              const summaryText = formatSchemaSummary(storeId, funcName, envelope)
+              const typeHint = envelope.items.length > 1
+                ? `共${envelope.items.length}条数据，schema 见上方`
+                : envelope.items.length === 1
+                ? `共1条数据`
+                : `数据为空`
+              finalResult = `${summaryText}\n完整数据已存储(ID:${storeId})，可在 finish_task 中通过 data_refs=["${storeId}"] 引用。${typeHint}。`
+              console.log(`[Agent] ${funcName} return_mode=full，存储全量数据，返回schema摘要（存储ID:${storeId}）`)
+              // 同步更新 WorkingMemory
+              workingMemory.addDataRef(funcName, storeId, envelope.count, summaryText)
+            }
           } else if (dataTools.includes(funcName) && returnMode === 'summary') {
-            // return_mode="summary"（默认）：返回概览，让 AI 了解数据内容
-            const overview = buildDataOverview(toolResult, funcName)
-            // 存储完整数据到 PayloadStore（供后续需要时获取）
-            const storeId = payloadStore.add(funcName, toolResult, overview._hint || '', { count: overview._overview?.total || 1 })
-            overview._stored = storeId
-            overview._hint += `。完整数据已存储(ID:${storeId})，如需全部可设置 return_mode="full"`
-            finalResult = JSON.stringify(overview)
-            console.log(`[Agent] ${funcName} return_mode=summary，返回概览（存储ID:${storeId}）`)
-            // 同步更新 WorkingMemory
-            if (storeId) {
+            // return_mode="summary"（默认）：标准化 + 存储纯数组数据，返回 schema+样例
+            const envelope = normalizePayload(toolResult, funcName)
+            const storeId = await payloadStore.add(funcName, envelope.items, formatSchemaSummary('?', funcName, envelope),
+              { count: envelope.count, schema: envelope.schema, sample: envelope.sample })
+            if (storeId === null) {
+              finalResult = JSON.stringify({ ok: false, error: '数据存储失败（可能超过配额），请尝试缩小采集范围后重试' })
+              console.warn(`[Agent] ${funcName} return_mode=summary 存储失败`)
+            } else {
+              const summaryText = formatSchemaSummary(storeId, funcName, envelope)
+              const overview = buildDataOverview(toolResult, funcName)
+              overview._stored = storeId
+              overview._schemaHint = summaryText
+              finalResult = JSON.stringify(overview)
+              console.log(`[Agent] ${funcName} return_mode=summary，返回概览（存储ID:${storeId}）`)
+              // 同步更新 WorkingMemory
               const count = overview._overview?.content_count || overview._overview?.total || 1
-              workingMemory.addDataRef(funcName, storeId, count, overview._hint)
+              workingMemory.addDataRef(funcName, storeId, count, summaryText)
             }
           } else if (shouldStoreToPayload(toolResult, funcName)) {
-            // 其他工具：原有存储逻辑
-            finalResult = storeToPayload(payloadStore, toolResult, funcName)
+            // 其他工具：标准化 + 存储纯数组
+            const envelope = normalizePayload(toolResult, funcName)
+            finalResult = await storeToPayload(payloadStore, envelope.items, funcName, envelope)
             const storeId = payloadStore.entries[payloadStore.entries.length - 1]?.id
             console.log('[Agent] payloadStore 存储:', funcName, '→ ID:', storeId)
             // 同步更新 WorkingMemory 的数据引用
             if (storeId) {
-              try {
-                const parsed = typeof toolResult === 'string' ? JSON.parse(toolResult) : toolResult
-                const count = Array.isArray(parsed?.result) ? parsed.result.length :
-                  (parsed?.total || parsed?.data?.length || 1)
-                const summary = funcName.includes('inject_script') ? '脚本处理结果' :
-                  funcName.includes('read_page') ? '页面内容' : '工具结果'
-                workingMemory.addDataRef(funcName, storeId, count, summary)
-              } catch {}
+              const summaryText = formatSchemaSummary(storeId, funcName, envelope)
+              workingMemory.addDataRef(funcName, storeId, envelope.count, summaryText)
             }
           } else {
             finalResult = smartTruncateResult(toolResult)
@@ -1341,13 +1460,58 @@ ${allData.length > 0 ? allData.join('\n') : '（无数据）'}`
           messages.push({ role: 'tool', tool_call_id: toolCall.id, content: finalResult })
           // ===== 对话全景：收集工具执行结果 =====
           _roundToolResults.push({ toolName: funcName, args: funcArgs, result: toolResult, finalResult, ok: !toolResult?.includes('error') && !toolResult?.includes('skipped') })
+
+          // ===== 选择器反馈上报：构建主动学习闭环 =====
+          // 仅对使用 selector/selectorHint 的工具上报，且仅在有明确页面 host 时
+          // 判定成功/失败：基于工具返回的元素数量（0 个视为失效）
+          try {
+            const usedSelector = funcArgs.selector || funcArgs.selectorHint || null
+            if (usedSelector && typeof usedSelector === 'string' && usedSelector.length > 0 && autoPageContent?.url) {
+              const host = _extractHost(autoPageContent.url)
+              if (host) {
+                let itemCount = 0
+                let isFailure = false
+                try {
+                  const parsed = JSON.parse(toolResult)
+                  if (parsed?.ok === false) {
+                    isFailure = true
+                  } else if (parsed?.result) {
+                    // 解析元素数量：extract_content/get_interactive_elements/get_element_info 的返回结构
+                    if (Array.isArray(parsed.result)) {
+                      itemCount = parsed.result.length
+                    } else if (parsed.result.elements && Array.isArray(parsed.result.elements)) {
+                      itemCount = parsed.result.elements.length
+                    } else if (parsed.result.items && Array.isArray(parsed.result.items)) {
+                      itemCount = parsed.result.items.length
+                    } else if (parsed.result.total) {
+                      itemCount = Number(parsed.result.total) || 0
+                    } else if (parsed.result.count) {
+                      itemCount = Number(parsed.result.count) || 0
+                    }
+                    // 0 元素视为失效
+                    if (itemCount === 0) isFailure = true
+                  }
+                } catch {}
+                reportSelectorFeedback(configService, {
+                  host,
+                  selector: usedSelector,
+                  toolName: funcName,
+                  taskId: _taskId,
+                  resultStatus: isFailure ? 'failure' : 'success',
+                  itemCount,
+                })
+              }
+            }
+          } catch (e) {
+            // 上报失败不影响主流程
+          }
+
           await new Promise(r => setTimeout(r, 200))
         }
 
         // ===== 对话全景：发送本轮完整数据 =====
         const roundData = {
           round: aiRequestCount,
-          stage: currentPhase,
           request: {
             messages: _requestMessagesSnapshot.map(m => {
               // tool 消息已经是经过 smartTruncateResult/storeToPayload 处理的结果，不应再截断
@@ -1366,7 +1530,7 @@ ${allData.length > 0 ? allData.join('\n') : '（无数据）'}`
           response: msg,
           toolResults: _roundToolResults,
           storedData: payloadStore.entries.filter(e => e.sessionId === sessionId).map(e => ({
-            id: e.id, toolName: e.toolName, preview: Array.isArray(e.data) ? `数组${e.data.length}条` : typeof e.data === 'object' ? '对象' : `字符串${String(e.data).length}字符`, data: e.data
+            id: e.id, toolName: e.toolName, count: e.metadata?.count || 1, schema: e.metadata?.schema || null
           }))
         }
         _sendToConversationViewer('conversationRound', roundData)
@@ -1376,21 +1540,71 @@ ${allData.length > 0 ? allData.join('\n') : '（无数据）'}`
         try {
           await scratchpadService.save(sessionId, workingMemory.state, {
             round: aiRequestCount,
-            stage: currentPhase,
+            todoIndex: todoScheduler.currentTodoIndex,
           })
         } catch (e) {
           console.warn('[ScratchpadService] 保存失败（非致命）:', e.message)
         }
 
-        // ===== 消息上下文压缩（LLM驱动 + WorkingMemory 增强） =====
-        const MAX_MESSAGES = 40
-        if (messages.length > MAX_MESSAGES) {
-          const keepRecent = Math.floor(MAX_MESSAGES * 0.6)
+        // ===== 消息上下文压缩（基于 token 估算，动态适配模型 context window） =====
+        // 借鉴 AI 编程工具策略：充分利用大窗口模型（128K/200K），按实际容量动态调整
+        // 1 token ≈ 3-4 字符（中英混合），保守按 3.5 字符/token 估算
+        const estimateContextChars = (msgs) => {
+          let total = 0
+          for (const m of msgs) {
+            if (typeof m.content === 'string') total += m.content.length
+            // tool_calls 的 arguments 也计入
+            if (Array.isArray(m.tool_calls)) {
+              for (const tc of m.tool_calls) {
+                total += (tc.function?.arguments || '').length
+              }
+            }
+          }
+          return total
+        }
+
+        // 动态计算可用上下文预算（基于模型 context window）
+        // modelInfo.contextWindow 来自后端 ai_models 表，单位 token
+        const modelContextTokens = (modelInfo && modelInfo.contextWindow) || 32000  // 默认 32K
+        // 预留空间：tools 定义(~2K) + system(~1K) + WorkingMemory(~1K) + AI响应(~4K) + 安全余量(15%)
+        const RESERVED_TOKENS = 8000
+        const SAFETY_RATIO = 0.85
+        const availableTokens = Math.max(8000, Math.floor(modelContextTokens * SAFETY_RATIO) - RESERVED_TOKENS)
+        // 转换为字符阈值（1 token ≈ 3.5 字符保守估算）
+        const MAX_CONTEXT_CHARS = Math.floor(availableTokens * 3.5)
+        // 压缩后保留 60% 字符预算给近期上下文
+        const COMPRESS_KEEP_RATIO = 0.6
+
+        const currentChars = estimateContextChars(messages)
+        if (currentChars > MAX_CONTEXT_CHARS) {
+          // 按字符预算保留近期上下文，至少 12 条确保 tool_calls 配对完整
+          const targetChars = Math.floor(MAX_CONTEXT_CHARS * COMPRESS_KEEP_RATIO)
+          let keepRecent = 0
+          let keptChars = 0
+          // 从末尾向前累计，直到达到目标字符数
+          for (let i = messages.length - 1; i >= 0; i--) {
+            const m = messages[i]
+            const mChars = (typeof m.content === 'string' ? m.content.length : 0)
+              + (Array.isArray(m.tool_calls) ? m.tool_calls.reduce((s, tc) => s + (tc.function?.arguments || '').length, 0) : 0)
+            if (keptChars + mChars > targetChars && keepRecent >= 12) break
+            keptChars += mChars
+            keepRecent++
+          }
+          // 确保 keepRecent 包含完整的 tool_calls 配对（assistant + 对应 tool 消息）
+          // 向前扩展直到最近一个 assistant.tool_calls 之前
+          while (keepRecent < messages.length) {
+            const idx = messages.length - keepRecent - 1
+            if (idx < 0) break
+            if (messages[idx].role === 'assistant' && messages[idx].tool_calls) break
+            keepRecent++
+          }
           let cutOff = messages.length - keepRecent
           if (cutOff > 1) {
+            // 跳过 tool 消息起点（避免从 tool 消息中间切断导致配对破坏）
             while (cutOff < messages.length && messages[cutOff]?.role === 'tool') cutOff++
           }
           if (cutOff > 1) {
+            console.log(`[Agent] 上下文压缩: ${currentChars}字符 > ${MAX_CONTEXT_CHARS}字符(modelCtx=${modelContextTokens}t), 保留近${keepRecent}条(${keptChars}字符), 压缩前${cutOff - 1}条`)
             // 使用 ContextCompressor 进行 LLM 驱动压缩
             const summaryMsg = await contextCompressor.compress(messages, cutOff, userMessage, workingMemory)
             if (summaryMsg) {
@@ -1411,17 +1625,48 @@ ${allData.length > 0 ? allData.join('\n') : '（无数据）'}`
         // 纯文本回复
         console.log('[Agent] 纯文本回复（无tool_calls）:', (msg.content || '').slice(0, 80))
         const content = msg.content || ''
+        // ===== 检测：AI 输出了类工具调用文本但未走标准 tool_calls（如 <function=xxx> 标签） =====
+        // 这种情况不能直接结束任务，否则 finish_task 永远不会被执行，待办卡死
+        const looksLikeToolCall = /<function\s*=\s*[\w_]+|<parameter\s*=\s*\w+>|call\s+function[:：]\s*\w+/i.test(content)
+        if (looksLikeToolCall) {
+          console.warn('[Agent] 检测到 AI 用文本格式输出工具调用，注入纠正提示')
+          _injections.push(`⚠️ 你上一轮的输出被识别为纯文本，工具调用未执行。请使用标准 tool_calls JSON 格式重新调用工具（不要用 <function=xxx> 标签）。如果任务已完成，请直接调用 finish_task。当前剩余轮次：${effectiveMaxRounds - aiRequestCount}`)
+          // 不结束任务，继续下一轮，让 AI 重新用正确格式调用
+          messages.push({ role: 'assistant', content: content || '(空文本)', _parseFailedToolCall: true })
+          messages.push({ role: 'user', content: '请用标准 tool_calls 格式重新发起调用，或调用 finish_task 结束任务。', _temp: true })
+          continue
+        }
+        // ===== 对话全景：纯文本回复也发送本轮数据（修复 AI 输出未在全景显示） =====
+        const textRoundData = {
+          round: aiRequestCount,
+          request: {
+            messages: _requestMessagesSnapshot.map(m => {
+              if (m.role === 'tool') return { role: m.role, content: m.content }
+              return {
+                role: m.role,
+                content: typeof m.content === 'string' ? (m.content.length > 800 ? m.content.slice(0, 400) + '\n...(已压缩)' : m.content) : m.content,
+                tool_calls: m.tool_calls?.map(tc => ({ name: tc.function?.name, args: tc.function?.arguments }))
+              }
+            }),
+            toolsCount: tools.length
+          },
+          response: msg,
+          toolResults: [],
+          storedData: payloadStore.entries.filter(e => e.sessionId === sessionId).map(e => ({
+            id: e.id, toolName: e.toolName, count: e.metadata?.count || 1, schema: e.metadata?.schema || null
+          })),
+          isTextOnlyRound: true,
+        }
+        _sendToConversationViewer('conversationRound', textRoundData)
         const textContent = content || 'AI未返回有效响应，请重试。'
         if (content) {
-          for (const char of content) {
-            try { postToUI(tabId, { type: 'streamChunk', content: char }) } catch {}
-            await new Promise(r => setTimeout(r, 15))
-          }
+          // 使用 streamToUI 统一流式逻辑（内部已发送 streamDone）
+          await streamToUI(postToUI, tabId, content)
         } else {
           console.warn('[Agent] AI返回空内容且无工具调用，强制结束')
           postToUI(tabId, { type: 'streamChunk', content: textContent })
+          postToUI(tabId, { type: 'streamDone' })
         }
-        postToUI(tabId, { type: 'streamDone' })
         await saveToChatHistoryStorage(textContent)
         return
       }
@@ -1433,9 +1678,15 @@ ${allData.length > 0 ? allData.join('\n') : '（无数据）'}`
   }
 
   // ===== 循环结束：达到最大轮次 =====
-  postToUI(tabId, { type: 'agentError', error: 'Agent达到最大请求次数，请简化任务重试' })
-  _debugLog('🛑 Agent终止: 达到最大轮次', { maxRounds, executedToolsCount: executedTools.length })
-  const finalNote = `⚠️ Agent 已达到最大请求次数（${maxRounds} 轮）。任务可能未完成，请简化需求后重试。`
+  // 上限完全由后端 agent_max_rounds 控制（仅 ABSOLUTE_MAX_ROUNDS=100 防配错）
+  const reachedRounds = aiRequestCount
+  const reachedToolCalls = totalToolCalls
+  postToUI(tabId, { type: 'agentError', error: `Agent达到最大请求次数（已执行 ${reachedRounds}/${effectiveMaxRounds} 轮），请简化任务重试` })
+  _debugLog('🛑 Agent终止: 达到最大轮次', { effectiveMaxRounds, maxRounds, aiRequestCount, executedToolsCount: executedTools.length })
+  const capNote = effectiveMaxRounds < maxRounds
+    ? `（后端配置 ${maxRounds} 轮，超过绝对硬上限 100，已收敛为 ${effectiveMaxRounds} 轮）`
+    : ''
+  const finalNote = `⚠️ Agent 已达到最大请求次数上限，任务可能未完成。\n实际执行：${reachedRounds}/${effectiveMaxRounds} 轮 AI 请求，${reachedToolCalls} 次工具调用${capNote}。\n建议：1) 拆分任务为更小子任务 2) 简化需求描述 3) 后端调高 agent_max_rounds 配置（当前=${maxRounds}）。`
   const toolCallsSummary = executedTools.length > 0
     ? executedTools.filter(t => !t.name?.includes('search_tools') && !t.name?.includes('read_page_content')).slice(0, 15)
     : []

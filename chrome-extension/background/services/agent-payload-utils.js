@@ -1,12 +1,125 @@
 // ============ PayloadStore 工具函数（纯函数，无 this 依赖） ============
 
 /**
+ * 从数据中自动检测 schema（字段名→类型）
+ * 取前2条数据合并字段，生成类型映射
+ */
+export function autoDetectSchema(items) {
+  if (!Array.isArray(items) || items.length === 0) return null
+  const schema = {}
+  const samples = items.slice(0, 2)
+  for (const item of samples) {
+    if (!item || typeof item !== 'object') continue
+    // 处理扁平字段
+    for (const [k, v] of Object.entries(item)) {
+      if (k === 'attrs' && typeof v === 'object' && v !== null) {
+        // 展开 attrs 子字段
+        for (const [ak, av] of Object.entries(v)) {
+          const key = `attrs.${ak}`
+          if (!schema[key]) schema[key] = Array.isArray(av) ? 'array' : typeof av
+        }
+        continue
+      }
+      if (!schema[k]) schema[k] = Array.isArray(v) ? 'array' : typeof v
+    }
+  }
+  return Object.keys(schema).length > 0 ? schema : null
+}
+
+/**
+ * 提取2条截断样例数据（用于摘要，控制长度）
+ */
+export function extractSamples(items, maxFieldLen = 60) {
+  if (!Array.isArray(items) || items.length === 0) return []
+  return items.slice(0, 2).map(item => {
+    if (!item || typeof item !== 'object') return String(item).slice(0, maxFieldLen)
+    const truncated = {}
+    for (const [k, v] of Object.entries(item)) {
+      if (k === 'attrs' && typeof v === 'object' && v !== null) {
+        truncated.attrs = {}
+        for (const [ak, av] of Object.entries(v)) {
+          truncated.attrs[ak] = typeof av === 'string' ? av.slice(0, maxFieldLen) : av
+        }
+        continue
+      }
+      truncated[k] = typeof v === 'string' ? v.slice(0, maxFieldLen) : v
+    }
+    return truncated
+  })
+}
+
+/**
+ * 标准化工具输出为统一信封格式
+ * {items, schema, count, source, sample}
+ * 所有数据工具的输出经此包装后格式一致
+ */
+export function normalizePayload(raw, toolName) {
+  // 已经是标准信封格式
+  if (raw && typeof raw === 'object' && raw._envelope === true) return raw
+
+  // 统一为对象
+  let obj = raw
+  if (typeof raw === 'string') {
+    try { obj = JSON.parse(raw) } catch { obj = null }
+  }
+
+  // null/undefined
+  if (obj == null) {
+    return { _envelope: true, items: [], schema: null, count: 0, source: toolName, sample: [] }
+  }
+
+  // 提取数据数组：支持多种嵌套结构
+  let items = []
+  if (Array.isArray(obj)) {
+    items = obj
+  } else if (obj.ok && Array.isArray(obj.result)) {
+    items = obj.result
+  } else if (obj.ok && obj.result && Array.isArray(obj.result.elements)) {
+    items = obj.result.elements
+  } else if (Array.isArray(obj.pages)) {
+    // inject_script 批量结果
+    items = obj.pages
+  } else if (obj.ok && obj.result && Array.isArray(obj.result.pages)) {
+    // inject_script_N 返回 {ok, result: {pages: [...], total, successCount}}，剥离包装层
+    items = obj.result.pages
+  } else if (typeof obj === 'object') {
+    // 单对象包装为数组
+    items = [obj]
+  }
+
+  const schema = autoDetectSchema(items)
+  const sample = extractSamples(items)
+
+  return { _envelope: true, items, schema, count: items.length, source: toolName, sample }
+}
+
+/**
+ * 生成 schema+样例 的摘要文本（用于 messages 注入）
+ * 格式：p1(tool): 15条(数组) | {field:string, ...} | 样例: [...]
+ * 关键：标注数据类型（数组/对象/字符串），让 AI 知道 window.__store.p1 的实际格式
+ */
+export function formatSchemaSummary(entryId, toolName, envelope) {
+  const countStr = `${envelope.count}条`
+  // 标注数据类型，让AI知道 window.__store.pX 的实际结构
+  // 注意：存储的始终是数组，长度1时需用 [0] 访问元素
+  const dataType = envelope.items.length > 1 ? `数组(长度${envelope.items.length})` : envelope.items.length === 1 ? '长度1的数组' : '空数组'
+  const schemaStr = envelope.schema
+    ? Object.entries(envelope.schema).map(([k, v]) => `${k}:${v}`).join(', ')
+    : '未知结构'
+  const sampleStr = envelope.sample && envelope.sample.length > 0
+    ? JSON.stringify(envelope.sample).slice(0, 150)
+    : ''
+  let result = `${entryId}(${toolName}): ${countStr}(${dataType}) | {${schemaStr}}`
+  if (sampleStr) result += ` | 样例: ${sampleStr}`
+  return result
+}
+
+/**
  * 判断工具结果是否需要存入 payloadStore
  * 关键：大数据存储，小数据智能截断
  */
 export function shouldStoreToPayload(result, toolName) {
   // 这些工具结果不需要存储（查询类/搜索类）
-  if (toolName === 'recall_data') return false
   if (toolName === 'search_tools') return false
   if (toolName === 'create_todo') return false
   if (toolName === 'finish_task') return false
@@ -52,7 +165,7 @@ function generatePayloadSummary(result, toolName) {
         if (!parts.length) parts.push(JSON.stringify(item).slice(0, 50))
         return `[${i}] ${parts.join(' | ')}`
       }).join('\n  ')
-      return `已获取${count}条数据（字段: ${fields}）\n  样本预览:\n  ${samples}${count > 3 ? `\n  ...(共${count}条，可用recall_data查看全部)` : ''}`
+      return `已获取${count}条数据（字段: ${fields}）\n  样本预览:\n  ${samples}${count > 3 ? `\n  ...(共${count}条)` : ''}`
     }
 
     // 对象类型
@@ -127,19 +240,33 @@ function generatePayloadSummary(result, toolName) {
 }
 
 /**
- * 存入 payloadStore 并返回带样本的截断结果
- * 关键改进：AI能看到前10条样本数据，无需recall_data即可理解内容
+ * 存入 payloadStore 并返回带 schema+样例 的截断结果
+ * 关键改进：AI能看到schema+样例，无需额外查询即可理解数据结构
  */
-export function storeToPayload(payloadStore, result, toolName) {
+export async function storeToPayload(payloadStore, result, toolName, envelope) {
   const summary = generatePayloadSummary(result, toolName)
-  const metadata = {
-    count: getPayloadCount(result),
-    sample: getPayloadSample(result)
+  // 使用标准化信封的 schema 和 sample
+  const metadata = envelope
+    ? { count: envelope.count, schema: envelope.schema, sample: envelope.sample }
+    : { count: getPayloadCount(result), sample: getPayloadSample(result) }
+  const entryId = await payloadStore.add(toolName, result, summary, metadata)
+  // 写入失败：返回错误提示，让调用方（agent-runner）记录为失败工具结果
+  if (entryId === null) {
+    return `${smartTruncateResult(result, 2500)}\n\n[注意：数据存储失败，inject_script_N 将无法通过 window.__store 访问全量数据。可重新尝试或缩小数据量]`
   }
-  const entryId = payloadStore.add(toolName, result, summary, metadata)
-  // 返回截断后的样本数据（而非纯摘要），让AI直接看到内容，减少recall_data需求
+  // 返回 schema+样例摘要（而非大段样本数据），让AI理解数据结构
+  if (envelope) {
+    const schemaSummary = formatSchemaSummary(entryId, toolName, envelope)
+    const typeHint = envelope.items.length > 1
+      ? `window.__store.${entryId} 是数组（长度${envelope.items.length}），可直接 .filter()/.map()/.forEach() 遍历`
+      : envelope.items.length === 1
+      ? `window.__store.${entryId} 是长度为1的数组，访问元素用 window.__store.${entryId}[0]`
+      : `window.__store.${entryId} 为空`
+    return `${schemaSummary}\n完整数据已存储(ID:${entryId})，inject_script_N 可通过 window.__store.${entryId} 访问。${typeHint}。`
+  }
+  // 兜底：无 envelope 时走旧逻辑
   const truncatedData = smartTruncateResult(result, 2500)
-  return `${truncatedData}\n\n[完整数据已存储(ID:${entryId})，共${metadata.count}条。如需更多数据可用 recall_data(entry_id="${entryId}") 查询]`
+  return `${truncatedData}\n\n[完整数据已存储(ID:${entryId})，共${metadata.count}条。inject_script_N 可通过 window.__store.${entryId} 访问]`
 }
 
 /**
@@ -376,10 +503,10 @@ export function buildDataOverview(result, toolName) {
  */
 function generateOverviewHint(contentCount, simpleCount) {
   if (contentCount > 10) {
-    return `已显示10条有意义样本（共${contentCount}条）+${simpleCount}条简单数据。如需完整数据，调用时设置 return_mode="full"`
+    return `已显示10条有意义样本（共${contentCount}条）+${simpleCount}条简单数据。inject_script_N 可通过 window.__store.存储ID 访问全量数据`
   }
   if (contentCount > 0) {
-    return `已显示全部${contentCount}条有意义数据。另有${simpleCount}条简单数据。如需完整数据，设置 return_mode="full"`
+    return `已显示全部${contentCount}条有意义数据。另有${simpleCount}条简单数据。inject_script_N 可通过 window.__store.存储ID 访问全量数据`
   }
-  return `已显示样本。如需完整数据，设置 return_mode="full"`
+  return `已显示样本。inject_script_N 可通过 window.__store.存储ID 访问全量数据`
 }

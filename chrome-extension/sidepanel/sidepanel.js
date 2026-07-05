@@ -118,6 +118,12 @@ function showView(viewId) {
 
   const tp = document.getElementById('toolboxPanel')
   if (tp) { tp.classList.remove('show'); tp.style.display = 'none' }
+
+  // 进入设置视图时刷新只读字段：temperature / 上下文窗口大小 / agent_max_rounds / 系统提示词
+  // 这些值由后台或当前选中模型的单独配置控制，可能在切换模型后已变化
+  if (viewId === 'settingsView') {
+    loadSettings().catch(e => console.warn('[showView] 刷新设置失败:', e.message))
+  }
 }
 
 // 导航栏点击
@@ -546,7 +552,14 @@ async function sendMessage(text) {
       renderAttachmentPreview()
     }
 
-    if (!chrome.runtime?.id) { finishStreaming('扩展已重载，请重新打开侧边栏'); return }
+    if (!chrome.runtime?.id) {
+      // 扩展已重载，重置流式状态并提示用户（不能调用未定义的 finishStreaming，直接内联实现）
+      isStreaming = false
+      sendBtn.disabled = false
+      if (currentPort) { try { currentPort.disconnect() } catch {} currentPort = null }
+      updateStreamingMessage(streamDiv, '❌ 扩展已重载，请重新打开侧边栏')
+      return
+    }
     currentPort = chrome.runtime.connect({ name: 'ai-stream' })
     currentPort.postMessage({
       type: 'streamStart',
@@ -799,16 +812,6 @@ function summarizeToolResult(toolName, rawResult) {
       return '文本搜索完成'
     case 'wait_for_element':
       return '目标元素已出现'
-    case 'recall_data':
-      if (parsed) {
-        if (Array.isArray(parsed)) return `查询到 ${parsed.length} 条记录`
-        if (typeof parsed === 'string') return parsed.length > 100 ? parsed.slice(0, 100) + '...' : parsed
-        if (parsed.result) {
-          if (Array.isArray(parsed.result)) return `查询到 ${parsed.result.length} 条记录`
-          if (typeof parsed.result === 'string') return parsed.result.length > 100 ? parsed.result.slice(0, 100) + '...' : parsed.result
-        }
-      }
-      return '已查询存储数据'
     case 'create_todo':
       if (parsed?.ok && parsed.totalTodos) return `已创建待办列表（${parsed.totalTodos}个待办）`
       if (parsed?.errors) return '待办创建失败：' + parsed.errors.slice(0, 2).join('；')
@@ -872,7 +875,14 @@ async function runAgent(userText, pageContext) {
   const toolResults = [] // 收集工具执行结果，streamDone时一并存入历史
 
   try {
-    if (!chrome.runtime?.id) { finishStreaming('扩展已重载，请重新打开侧边栏'); return }
+    if (!chrome.runtime?.id) {
+      // 扩展已重载，重置流式状态并提示用户（不能调用未定义的 finishStreaming，直接内联实现）
+      isStreaming = false
+      sendBtn.disabled = false
+      if (currentPort) { try { currentPort.disconnect() } catch {} currentPort = null }
+      updateStreamingMessage(streamDiv, '❌ 扩展已重载，请重新打开侧边栏')
+      return
+    }
     currentPort = chrome.runtime.connect({ name: 'agent-stream' })
 
     // 先注册消息监听器，再发送 agentStart（避免响应比监听器先到达）
@@ -929,6 +939,15 @@ async function runAgent(userText, pageContext) {
         updateStreamingMessage(streamDiv, '\u274C ' + msg.error)
         card.querySelector('.agent-step-icon').textContent = '\u274C'
         card.querySelector('.agent-step-title').textContent = 'Agent 异常: ' + msg.error
+        // 回滚最后一条未完成的 user message（避免下次发消息时历史里残留孤儿 user 消息）
+        // 场景：用户发送消息 → Agent 中断/异常 → 用户重新发送相同消息
+        // 不回滚会导致 chatHistory = [..., {user: 第一次}, {user: 第二次}]，AI 看到两条相同消息
+        const last = chatHistory[chatHistory.length - 1]
+        if (last && last.role === 'user' && last.content === agentUserMessage) {
+          chatHistory.pop()
+          callService('storageService', 'saveChatHistory', chatHistory)
+          console.log('[SidePanel] Agent 异常，已回滚最后一条未完成的 user message')
+        }
         isStreaming = false
         sendBtn.disabled = false
         currentPort = null
@@ -937,13 +956,21 @@ async function runAgent(userText, pageContext) {
 
     currentPort.onDisconnect.addListener(() => {
       console.log('[SidePanel] Agent port 断开')
+      // port 异常断开（如扩展重载、浏览器关闭 sidepanel）时同样回滚未完成的 user message
+      // 避免下次启动时残留孤儿 user 消息导致重复触发
+      const last = chatHistory[chatHistory.length - 1]
+      if (last && last.role === 'user' && last.content === agentUserMessage && isStreaming) {
+        chatHistory.pop()
+        callService('storageService', 'saveChatHistory', chatHistory)
+        console.log('[SidePanel] Agent port 异常断开，已回滚最后一条未完成的 user message')
+      }
       isStreaming = false
       sendBtn.disabled = false
       currentPort = null
     })
 
     // Agent 模式 PDF 附件处理
-    let agentUserMessage = pageContext ? userText + pageContext : userText
+    let agentUserMessage = userText
     if (attachedPdf && attachedPdf.text) {
       const pagesInfo = attachedPdf.pages ? `（共 ${Array.isArray(attachedPdf.pages) ? attachedPdf.pages.length : attachedPdf.pages} 页）` : ''
       agentUserMessage = `【PDF 文档：${attachedPdf.name}${pagesInfo}】\n${attachedPdf.text}\n\n【以上为 PDF 内容，请据此回答以下问题】\n${agentUserMessage}`
@@ -960,6 +987,14 @@ async function runAgent(userText, pageContext) {
       type: 'agentStart',
       userMessage: agentUserMessage,
       chatHistory,
+      // 传递选中模型的单独配置（temperature / context_window / max_tokens）
+      // Agent 模式按模型覆盖全局配置
+      modelInfo: currentModelInfo ? {
+        modelId: currentModelInfo.modelId,
+        temperature: currentModelInfo.temperature,
+        contextWindow: currentModelInfo.contextWindow,
+        maxTokens: currentModelInfo.maxTokens,
+      } : null,
     })
   } catch (e) {
     updateStreamingMessage(streamDiv, '\u274C ' + e.message)
@@ -991,6 +1026,18 @@ document.querySelectorAll('.quick-btn').forEach(btn => {
 
 // 新对话
 function startNewChat() {
+  // 完整重置：附件、流式状态、Agent 状态、port 连接
+  // 避免 Agent 运行中点新建对话后 isStreaming 仍为 true 导致新消息被静默丢弃
+  if (currentPort) {
+    try { currentPort.disconnect() } catch {}
+    currentPort = null
+  }
+  isStreaming = false
+  agentMode = false
+  agentStepCards = []
+  attachedImage = null
+  attachedPdf = null
+  persistAttachments()
   chatHistory = []
   callService('storageService', 'clearChatHistory')
   chatMessages.innerHTML = `
@@ -1031,25 +1078,64 @@ async function loadSettings() {
   const syncConfig = await callService('configService', 'getSyncConfig')
   const selectionEnabled = await callService('configService', 'getSelectionToolsEnabled')
   const agentConfig = await callService('configService', 'getAgentConfig')
+  // 应用全局设置（从后端读取，缓存兜底）
+  // 包含 agent_max_rounds、agent_system_prompt、pdf_max_size、image_max_size
+  let appSettings = null
+  try {
+    appSettings = await callService('configService', 'getAppSettings')
+  } catch (e) {
+    console.warn('[loadSettings] 读取应用设置失败:', e.message)
+  }
 
   // 服务端连接
   document.getElementById('syncServerUrl').value = syncConfig.serverUrl || ''
   document.getElementById('syncAppKey').value = syncConfig.appKey || ''
   document.getElementById('syncAppSecret').value = syncConfig.appSecret || ''
 
-  // AI 模型配置
-  document.getElementById('aiSystemPrompt').value = aiConfig.systemPrompt || ''
-  document.getElementById('aiTemperature').value = aiConfig.temperature ?? 0.7
-  document.getElementById('tempValue').textContent = aiConfig.temperature ?? 0.7
-  document.getElementById('aiMaxTokens').value = aiConfig.maxTokens || 4096
+  // ===== AI 模型配置（系统提示词 / temperature / max_tokens 改为只读，由后台或模型单独配置控制） =====
+  // 系统提示词：显示后台 agent_system_prompt（只读）
+  const sysPromptEl = document.getElementById('aiSystemPrompt')
+  if (sysPromptEl) {
+    sysPromptEl.value = appSettings?.agent_system_prompt || aiConfig.systemPrompt || ''
+    sysPromptEl.readOnly = true
+    sysPromptEl.placeholder = '系统提示词由后台配置'
+  }
+  // Temperature：只读，由选中模型的单独配置控制
+  const tempEl = document.getElementById('aiTemperature')
+  const tempValueEl = document.getElementById('tempValue')
+  if (tempEl) {
+    tempEl.disabled = true
+    // 显示当前选中模型的 temperature（无选中模型时显示 aiConfig 兜底值）
+    const displayTemp = (currentModelInfo && typeof currentModelInfo.temperature === 'number')
+      ? currentModelInfo.temperature
+      : (aiConfig.temperature ?? 0.7)
+    tempEl.value = displayTemp
+    if (tempValueEl) tempValueEl.textContent = displayTemp
+  }
+  // 上下文窗口大小：只读，由选中模型的 context_window 单独配置控制
+  // 注意：context_window 是模型输入上下文上限，与 LLM 输出 max_tokens 不同
+  // Agent 调用 LLM 时使用 modelInfo.maxTokens 控制 max_tokens 输出
+  const maxTokensEl = document.getElementById('aiMaxTokens')
+  if (maxTokensEl) {
+    maxTokensEl.disabled = true
+    const displayContextWindow = (currentModelInfo && currentModelInfo.contextWindow)
+      ? currentModelInfo.contextWindow
+      : (aiConfig.contextWindow || 8192)
+    maxTokensEl.value = displayContextWindow
+  }
 
   const toggle = document.getElementById('selectionToolsToggle')
   toggle.classList.toggle('on', selectionEnabled !== false)
 
-  // Agent 配置
-  const agentRounds = agentConfig.maxRounds || 15
-  document.getElementById('agentMaxRounds').value = agentRounds
-  document.getElementById('agentRoundsValue').textContent = agentRounds
+  // ===== Agent 模式：最大执行轮次由后台配置（只读） =====
+  const agentRounds = appSettings?.agent_max_rounds || agentConfig.maxRounds || 30
+  const agentRoundsEl = document.getElementById('agentMaxRounds')
+  if (agentRoundsEl) {
+    agentRoundsEl.value = agentRounds
+    agentRoundsEl.disabled = true
+  }
+  const agentRoundsValueEl = document.getElementById('agentRoundsValue')
+  if (agentRoundsValueEl) agentRoundsValueEl.textContent = agentRounds
   // 调试模式
   const debugToggle = document.getElementById('agentDebugToggle')
   if (debugToggle) {
@@ -1131,6 +1217,11 @@ async function loadModelSelect(selectedModel) {
         item.dataset.supportsVision = String(model.supports_vision)
         item.dataset.supportsTools = String(model.supports_tools)
         item.dataset.displayName = model.display_name || model.model_id
+        // 保存模型的单独配置（temperature / context_window / max_tokens）
+        // 用于 Agent 模式按模型覆盖全局配置
+        item.dataset.temperature = model.temperature != null ? model.temperature : 0.7
+        item.dataset.contextWindow = model.context_window || 8192
+        item.dataset.maxTokens = model.max_tokens || 4096
 
         const nameEl = document.createElement('span')
         nameEl.className = 'model-item-name'
@@ -1206,6 +1297,10 @@ function updateModelInfo() {
     provider: selectedItem.dataset.provider,
     supportsVision,
     supportsTools,
+    // 模型单独配置：用于 Agent 模式覆盖全局 temperature / 上下文窗口
+    temperature: parseFloat(selectedItem.dataset.temperature) || 0.7,
+    contextWindow: parseInt(selectedItem.dataset.contextWindow, 10) || 8192,
+    maxTokens: parseInt(selectedItem.dataset.maxTokens, 10) || 4096,
   }
   if (pillName) pillName.textContent = selectedItem.dataset.displayName || currentModelInfo.modelId
 
@@ -1296,11 +1391,8 @@ document.addEventListener('click', (e) => {
 
 document.getElementById('saveSettingsBtn').addEventListener('click', async () => {
   try {
-    await callService('configService', 'saveAIConfig', {
-      systemPrompt: document.getElementById('aiSystemPrompt').value.trim(),
-      temperature: parseFloat(document.getElementById('aiTemperature').value) || 0.7,
-      maxTokens: parseInt(document.getElementById('aiMaxTokens').value) || 4096,
-    })
+    // 系统提示词 / temperature / max_tokens / agentMaxRounds 已改为后台或模型单独配置控制
+    // 这里不再保存这些字段，仅保存服务端连接、功能开关、调试模式等本地可控设置
     // 保留 syncInterval（UI 中已移除该字段，从旧配置继承）
     const oldSync = await callService('configService', 'getSyncConfig')
     await callService('configService', 'saveSyncConfig', {
@@ -1313,13 +1405,15 @@ document.getElementById('saveSettingsBtn').addEventListener('click', async () =>
     await callService('configService', 'saveSelectionToolsEnabled',
       document.getElementById('selectionToolsToggle').classList.contains('on'))
     await callService('configService', 'saveAgentConfig', {
-      maxRounds: parseInt(document.getElementById('agentMaxRounds').value) || 30,
+      // maxRounds 不再本地保存（由后台 app_settings.agent_max_rounds 控制）
       debug: document.getElementById('agentDebugToggle').classList.contains('on'),
       conversationViewer: document.getElementById('conversationViewerToggle').classList.contains('on'),
     })
 
     // 保存后刷新模型列表（用户可能刚填好 appKey/appSecret）
     await loadModelSelect(currentSelectedModelId)
+    // 同时刷新应用设置缓存（用户可能刚填好 appKey/appSecret，触发后端拉取）
+    try { await callService('configService', 'getAppSettings') } catch {}
 
     showView('chatView')
   } catch (e) {
@@ -1437,7 +1531,24 @@ fileInput.addEventListener('change', async (e) => {
   const file = e.target.files[0]
   if (!file) return
 
+  // 文件大小校验：从后台 app_settings 读取 pdf_max_size / image_max_size 限制
+  // getAppSettings 内部有 10 分钟缓存 + 兜底默认值（PDF 10MB / 图片 5MB）
+  let appSettings = null
+  try {
+    appSettings = await callService('configService', 'getAppSettings')
+  } catch (err) {
+    console.warn('[upload] 读取应用设置失败，使用默认大小限制:', err.message)
+  }
+  const pdfMaxSize = appSettings?.pdf_max_size || 10485760     // 默认 10MB
+  const imageMaxSize = appSettings?.image_max_size || 5242880  // 默认 5MB
+
   if (file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')) {
+    // PDF 大小校验
+    if (file.size > pdfMaxSize) {
+      showUploadToast(`PDF 文件过大（${formatFileSize(file.size)}），上限为 ${formatFileSize(pdfMaxSize)}，请在后台调整 pdf_max_size 配置`)
+      e.target.value = ''
+      return
+    }
     // PDF：直接用 File 对象上传到服务端解析为纯文本（不经过 chrome.runtime.sendMessage 传 ArrayBuffer，避免内容丢失）
     attachedPdf = { name: file.name, text: '', parsing: true }
     renderAttachmentPreview()
@@ -1475,6 +1586,12 @@ fileInput.addEventListener('change', async (e) => {
     const supportsVision = !!(currentModelInfo && currentModelInfo.supportsVision)
     if (!supportsVision) {
       showUploadToast('当前模型不支持图片，请选择视觉模型后再上传图片')
+      e.target.value = ''
+      return
+    }
+    // 图片大小校验：从后台 app_settings 读取 image_max_size 限制
+    if (file.size > imageMaxSize) {
+      showUploadToast(`图片文件过大（${formatFileSize(file.size)}），上限为 ${formatFileSize(imageMaxSize)}，请在后台调整 image_max_size 配置`)
       e.target.value = ''
       return
     }
@@ -1657,6 +1774,20 @@ function showUploadToast(text) {
   toast.style.cssText = 'position:absolute;bottom:60px;left:50%;transform:translateX(-50%);background:#333;color:#fff;padding:6px 14px;border-radius:4px;font-size:12px;z-index:9999;opacity:0.9;white-space:nowrap;'
   inputArea.appendChild(toast)
   setTimeout(() => toast.remove(), 2000)
+}
+
+// 字节数转人类可读格式（如 10.5MB）
+function formatFileSize(bytes) {
+  if (!Number.isFinite(bytes) || bytes < 0) return '0B'
+  const units = ['B', 'KB', 'MB', 'GB']
+  let val = bytes
+  let i = 0
+  while (val >= 1024 && i < units.length - 1) {
+    val /= 1024
+    i++
+  }
+  const digits = i === 0 ? 0 : (val >= 100 ? 0 : 1)
+  return `${val.toFixed(digits)}${units[i]}`
 }
 
 // ============ 脚本列表 ============

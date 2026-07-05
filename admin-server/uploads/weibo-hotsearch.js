@@ -119,5 +119,27 @@
     this.textContent = panel.classList.contains('mini') ? '+' : '_'
   })
 
-  refresh()
+  // ===== 返回标准化信封（异步等待首次 refresh 完成后返回数据） =====
+  // 旧版仅注入面板，AI 看不到热搜数据 → 改为返回完整数据信封
+  return (async function () {
+    try {
+      await refresh()
+      return {
+        ok: true,
+        data: hotData,
+        count: hotData.length,
+        hint: hotData.length > 0
+          ? '已获取微博热搜数据，可直接使用或通过 finish_task 输出'
+          : '热搜数据为空，可能页面未登录或被反爬。可调用 finish_task 告知用户',
+        panelSelector: '#wb-hot-panel .item',
+        fields: ['rank', 'title', 'heat', 'tag']
+      }
+    } catch (e) {
+      return {
+        ok: false,
+        error: '微博热搜采集失败: ' + e.message,
+        hint: '可改用 navigate_to 打开 weibo.com 后重新调用，或调用 finish_task 告知用户失败'
+      }
+    }
+  })()
 })()

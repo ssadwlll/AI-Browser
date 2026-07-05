@@ -6,8 +6,17 @@
 (function () {
   'use strict'
 
-  // 避免重复注入
-  if (document.getElementById('bili-dl-panel')) return
+  // 避免重复注入：已存在面板时返回提示，让 AI 直接去提取
+  if (document.getElementById('bili-dl-panel')) {
+    return {
+      ok: true,
+      data: [],
+      count: 0,
+      hint: 'B站下载面板已存在（之前已注入）。直接用 extract_content 提取下载链接',
+      panelSelector: '#bili-dl-panel a[href*="bilivideo"]',
+      panelInfo: '面板包含视频信息、画质按钮和下载链接'
+    }
+  }
 
   // ========== BV号解码 ==========
   const BV_TABLE = 'fZodR9XQDSUm21yCkr6zBqiveYah8bt4xsWpHnJE7jL5VG3guMTKNPAwcF'
@@ -510,4 +519,22 @@
 
   // 延迟初始化，等待页面加载
   setTimeout(initPanel, 1000)
+
+  // ===== 返回标准化信封（供 AI 下一轮调用使用） =====
+  // 旧版仅靠副作用注入面板 DOM，AI 不知道面板结构要盲目搜索（err.json 中浪费 9 轮）
+  // 现在返回结构化提示，让 AI 直接知道下一步操作
+  return {
+    ok: true,
+    data: [],
+    count: 0,
+    hint: 'B站下载面板已注入页面。视频信息已在 videoInfo 字段返回（aid/bvid/cid/title），无需再 extract_content。面板中的"下载链接"是 B 站 API 返回的直链，受 Referer 限制 + 时效签名，直接点击无法下载；必须由用户点击面板里的"下载视频"按钮（#bili-dl-download），通过 XHR+Blob 绕过限制触发真实下载。AI 应直接 finish_task 提示用户：在页面右下角面板中点击"下载视频"按钮开始下载',
+    panelSelector: '#bili-dl-panel',
+    panelInfo: '面板位于页面右下角，包含：视频标题、AID/CID、画质选择按钮、下载视频按钮。下载视频按钮（#bili-dl-download）通过 XHR+Blob 触发真实下载，绕过 Referer 和时效签名限制',
+    videoInfo: (function () {
+      try {
+        const info = getVideoInfo()
+        return info ? { aid: info.aid, bvid: info.bvid, cid: info.cid, title: info.title } : null
+      } catch { return null }
+    })()
+  }
 })()

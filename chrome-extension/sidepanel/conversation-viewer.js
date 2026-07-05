@@ -38,15 +38,16 @@ function renderRoundItem(payload) {
   const empty = main.querySelector('.empty-state')
   if (empty) empty.remove()
 
-  const { round, stage, response, toolResults, storedData } = payload
+  const { round, response, toolResults, storedData, isFinishRound } = payload
 
   const item = document.createElement('div')
-  item.className = 'round-item'
+  item.className = 'round-item' + (isFinishRound ? ' finish-round' : '')
   item.onclick = () => showRoundDetail(payload)
+  item.dataset.round = round
 
   const title = document.createElement('div')
-  title.className = 'round-item-title'
-  title.textContent = `第 ${round} 轮 · Stage ${stage}`
+  title.className = 'round-item-title' + (isFinishRound ? ' finish' : '')
+  title.textContent = isFinishRound ? `第 ${round} 轮 (完成 ✓)` : `第 ${round} 轮`
 
   const meta = document.createElement('div')
   meta.className = 'round-item-meta'
@@ -59,6 +60,11 @@ function renderRoundItem(payload) {
   item.appendChild(meta)
   main.appendChild(item)
 
+  // 自动滚动到最新轮次（修复超过 N 轮看不到最新一条的问题）
+  requestAnimationFrame(() => {
+    main.scrollTop = main.scrollHeight
+  })
+
   // 更新存储数据映射
   if (storedData) {
     storedData.forEach(s => storedDataMap[s.id] = s)
@@ -67,9 +73,9 @@ function renderRoundItem(payload) {
 
 // 显示轮次详情弹窗
 function showRoundDetail(payload) {
-  const { round, stage, request, response, toolResults, storedData } = payload
+  const { round, request, response, toolResults, storedData } = payload
 
-  detailTitle.textContent = `第 ${round} 轮详情 · Stage ${stage}`
+  detailTitle.textContent = `第 ${round} 轮详情`
   detailBody.innerHTML = ''
 
   // 请求区块

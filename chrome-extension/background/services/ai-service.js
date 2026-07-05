@@ -103,6 +103,8 @@ export class AIService {
       }
     }
 
+    // reader 提升到外层，便于 finally 中 cancel 释放底层连接
+    let reader = null
     try {
       console.log('[AIService] 请求代理:', url, '模型:', mergedConfig.model)
 
@@ -112,8 +114,11 @@ export class AIService {
         body: JSON.stringify(body),
         signal: controller.signal,
       }, 60000).catch((e) => {
-        // AbortError 由调用方期望的正常中止流程，不应报错
-        if (e.name === 'AbortError' || e.code === ERROR_CODES.NETWORK_ABORTED.code) return null
+        // 外部 signal abort（端口断开/调用方主动中止）：原样 AbortError，视为正常中止
+        if (e.name === 'AbortError') return null
+        // 超时：fetchWithTimeout 抛 NETWORK_TIMEOUT，不在此重抛，让外层 catch 处理为 streamError
+        // 但若端口已断开（被 onDisconnect 触发），同样视为正常中止
+        if (e.code === ERROR_CODES.NETWORK_TIMEOUT.code && !portAlive) return null
         throw e
       })
 
@@ -124,13 +129,18 @@ export class AIService {
 
       if (!res.ok) {
         const text = await res.text().catch(() => '')
+        // 401: 认证失败，清理缓存的 appSettings 避免后续请求继续使用过期配置
+        if (res.status === 401) {
+          console.warn('[AIService] 401 认证失败，清理 appSettingsCache')
+          try { await chrome.storage.local.remove('appSettingsCache') } catch {}
+        }
         safePost({ type: 'streamError', error: `AI API 错误: ${res.status} ${text.slice(0, 100)}` })
         // 错误路径也发送 streamDone，确保调用方状态机收尾
         safePost({ type: 'streamDone' })
         return
       }
 
-      const reader = res.body.getReader()
+      reader = res.body.getReader()
       const decoder = new TextDecoder()
       let buffer = ''
 
@@ -177,6 +187,10 @@ export class AIService {
       try { port.postMessage({ type: 'streamError', error: e.message }) } catch {}
       try { port.postMessage({ type: 'streamDone' }) } catch {}
     } finally {
+      // 释放底层连接：即使流被 abort，也需显式 cancel reader 避免连接悬挂
+      if (reader) {
+        try { await reader.cancel() } catch {}
+      }
       this._cleanupStream(portId, onDisconnect, port)
     }
   }

@@ -18,6 +18,7 @@ const appKeyRoutes = require('./routes/app-keys')
 const aiModelRoutes = require('./routes/ai-models')
 const aiProxyRoutes = require('./routes/ai-proxy')
 const aiCallLogRoutes = require('./routes/ai-call-logs')
+const appSettingRoutes = require('./routes/app-settings')
 
 const app = express()
 const PORT = process.env.PORT || 3001
@@ -31,8 +32,9 @@ if (!fs.existsSync(uploadDir)) {
 // 中间件
 app.use(cors())
 app.use(morgan('dev'))
-app.use(express.json({ limit: '10mb' }))
-app.use(express.urlencoded({ extended: true, limit: '10mb' }))
+// 提高 JSON 体大小限制到 50MB（对话归档 rounds_json 可能较大）
+app.use(express.json({ limit: '50mb' }))
+app.use(express.urlencoded({ extended: true, limit: '50mb' }))
 
 // API 路由
 app.use('/api/auth', authRoutes)
@@ -45,9 +47,14 @@ app.use('/api/app-keys', appKeyRoutes)
 app.use('/api/ai-models', aiModelRoutes)
 app.use('/api/ai-proxy', aiProxyRoutes)
 app.use('/api/ai-call-logs', aiCallLogRoutes)
+app.use('/api/app-settings', appSettingRoutes)
 app.use('/api/attachments', require('./routes/attachments'))
 app.use('/api/forge', require('./routes/forge'))
 app.use('/api/collect-pages', require('./middleware/appAuth'), require('./routes/collect-pages'))
+// 对话归档：上传走 appKey 鉴权，查询走 JWT
+app.use('/api/conversation-archives', require('./routes/conversation-archives'))
+// 选择器反馈：上报走 appKey 鉴权，统计查询走 JWT
+app.use('/api/selector-feedback', require('./routes/selector-feedback'))
 
 // 静态文件 — 管理后台前端资源（CSS/JS）和上传的附件
 app.use(express.static(path.join(__dirname, 'public')))

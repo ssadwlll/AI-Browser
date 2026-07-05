@@ -2,7 +2,7 @@
 // 三层记忆架构的工作记忆层：独立于对话流，AI 可主动读写
 // 职责：
 //   1. 记录关键发现、决策、排除方案（避免 AI 在长任务中重复操作或遗忘先验）
-//   2. 阶段切换时完整继承，不做清空（解决 messages.length=0 导致的上下文失忆）
+//   2. 完整继承，不做清空（解决 messages.length=0 导致的上下文失忆）
 //   3. 自动生成结构化上下文注入，替代分散的 _injections 机制
 //   4. 支持 AI 通过 update_memory / read_memory 工具主动更新
 
@@ -26,7 +26,6 @@ export class WorkingMemory {
       dataRefs: [],           // 数据引用 [{ key: "links", storeId: "p3", count: 15, summary: "15条URL" }]
       pendingActions: [],     // 待执行操作（AI 规划但尚未执行）
       errors: [],             // 错误记录 [{ tool: "extract_content", error: "选择器无匹配", round: 5 }]
-      stageHistory: [],       // 阶段切换历史 [{ from: 1, to: 2, reason: "4轮无进展", round: 8 }]
     }
   }
 
@@ -50,7 +49,12 @@ export class WorkingMemory {
    * 更新页面状态（navigate_to / go_back 等导航操作后调用）
    */
   updatePage(url, title, summary = '') {
-    this.state.currentPage = { url, title, summary: summary.slice(0, 300) }
+    if (!this.state) return
+    this.state.currentPage = {
+      url: String(url || ''),
+      title: String(title || ''),
+      summary: String(summary || '').slice(0, 300),
+    }
   }
 
   /**
@@ -100,15 +104,11 @@ export class WorkingMemory {
    * 记录错误
    */
   addError(tool, error, round) {
-    this.state.errors.push({ tool, error: error.slice(0, 100), round })
+    if (!this.state) return
+    // error 可能是 Error 对象或非字符串，统一转为字符串再截断
+    const errorMsg = String(error?.message || error || '').slice(0, 100)
+    this.state.errors.push({ tool, error: errorMsg, round })
     if (this.state.errors.length > 10) this.state.errors.shift()
-  }
-
-  /**
-   * 记录阶段切换
-   */
-  addStageSwitch(from, to, reason, round) {
-    this.state.stageHistory.push({ from, to, reason, round })
   }
 
   /**
@@ -129,6 +129,7 @@ export class WorkingMemory {
    * 返回可直接作为 system 消息内容的文本
    */
   toContext(options = {}) {
+    if (!this.state) return ''
     const { includeErrors = true, includePage = true, maxLen = 2000 } = options
     const parts = []
 
@@ -170,57 +171,11 @@ export class WorkingMemory {
       parts.push(`近期错误:\n${recentErrors.map(e => `  - 轮次${e.round} ${e.tool}: ${e.error}`).join('\n')}`)
     }
 
-    // 阶段历史
-    if (this.state.stageHistory.length > 0) {
-      const last = this.state.stageHistory[this.state.stageHistory.length - 1]
-      parts.push(`阶段变更: Stage${last.from}→Stage${last.to}（${last.reason}）`)
-    }
-
     let result = parts.join('\n\n')
     if (result.length > maxLen) {
       result = result.slice(0, maxLen) + '\n...(工作记忆已截断)'
     }
     return result
-  }
-
-  /**
-   * 生成阶段交接摘要（用于阶段切换时注入新阶段上下文）
-   * 比完整的 toContext() 更聚焦，只保留对下一阶段有用的信息
-   */
-  toHandoffContext() {
-    const parts = []
-
-    parts.push(`任务目标: ${this.state.taskGoal.slice(0, 200)}`)
-
-    if (this.state.discoveries.length > 0) {
-      parts.push(`关键发现:\n${this.state.discoveries.map(d => `  - ${d}`).join('\n')}`)
-    }
-
-    if (this.state.decisions.length > 0) {
-      parts.push(`已做决策:\n${this.state.decisions.map(d => `  - ${d}`).join('\n')}`)
-    }
-
-    if (this.state.dataRefs.length > 0) {
-      parts.push(`已收集数据:\n${this.state.dataRefs.map(d =>
-        `  - ${d.key}: ${d.count}条, ${d.summary} [ID:${d.storeId}]`
-      ).join('\n')}`)
-    }
-
-    if (this.state.errors.length > 0) {
-      const criticalErrors = this.state.errors.filter(e =>
-        !e.error.includes('标签页不可用') && !e.error.includes('超时')
-      ).slice(-3)
-      if (criticalErrors.length > 0) {
-        parts.push(`需注意的错误:\n${criticalErrors.map(e => `  - ${e.tool}: ${e.error}`).join('\n')}`)
-      }
-    }
-
-    if (this.state.stageHistory.length > 0) {
-      const last = this.state.stageHistory[this.state.stageHistory.length - 1]
-      parts.push(`阶段切换原因: Stage${last.from}→Stage${last.to} — ${last.reason}`)
-    }
-
-    return parts.join('\n\n')
   }
 
   /**

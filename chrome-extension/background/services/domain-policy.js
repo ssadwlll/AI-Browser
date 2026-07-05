@@ -30,6 +30,8 @@ export class DomainPolicy {
 
   // 判断 URL 是否被允许
   isUrlAllowed(url) {
+    // 非字符串 URL 直接放行（避免 new URL 抛错误拦截合法操作）
+    if (typeof url !== 'string' || url.length === 0) return true
     // 未设置任何策略 → 全部放行
     if (!this.allowedDomains && !this.prohibitedDomains && !this.blockIPAddresses) return true
 

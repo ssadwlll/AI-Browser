@@ -38,9 +38,13 @@ export class OutputService {
     return new Promise((resolve, reject) => {
       const request = indexedDB.open(DB_NAME, DB_VERSION)
       
+      request.onblocked = () => reject(new Error('DB 升级被其他标签页阻塞'))
       request.onerror = () => reject(request.error)
       request.onsuccess = () => {
         this._db = request.result
+        // 连接意外关闭时重置引用，下次调用会自动重连
+        this._db.onclose = () => { this._db = null }
+        this._db.onerror = (e) => { console.error('[OutputService] DB 错误:', e.target.error) }
         resolve(this._db)
       }
       
@@ -209,6 +213,8 @@ export class OutputService {
     const json = JSON.stringify(output, null, 2)
     const blob = new Blob([json], { type: 'application/json' })
     const url = URL.createObjectURL(blob)
+    // 30秒后自动释放 Blob URL，避免内存泄漏（足够用户触发下载）
+    setTimeout(() => URL.revokeObjectURL(url), 30000)
     
     return {
       url,
@@ -232,6 +238,8 @@ export class OutputService {
     const json = JSON.stringify(exportData, null, 2)
     const blob = new Blob([json], { type: 'application/json' })
     const url = URL.createObjectURL(blob)
+    // 30秒后自动释放 Blob URL，避免内存泄漏
+    setTimeout(() => URL.revokeObjectURL(url), 30000)
     
     return {
       url,

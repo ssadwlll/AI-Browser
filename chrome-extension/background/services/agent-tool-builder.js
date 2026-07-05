@@ -1,10 +1,9 @@
 // ============ 工具定义构建器 ============
-// 构建各阶段的 LLM 工具定义列表（buildToolDefinitions, buildPhase1Tools, buildPhase2Tools）
+// 构建统一的 LLM 工具定义列表
 // 依赖：scriptService（域名过滤）、filteredScriptsCache、domainMismatchLogged
 
 /**
  * 过滤并缓存域名匹配的脚本
- * @returns {Array} 过滤后的脚本列表
  */
 function filterScripts(searchResults, currentPageUrl, scriptService, filteredScriptsCache, domainMismatchLogged) {
   if (!searchResults || searchResults.length === 0) return []
@@ -27,7 +26,7 @@ function filterScripts(searchResults, currentPageUrl, scriptService, filteredScr
 }
 
 /**
- * 按经验记忆排序并构建工具定义
+ * 按经验记忆排序并构建脚本工具定义
  */
 function buildScriptToolDefs(scripts) {
   const sortedScripts = [...scripts].sort((a, b) => {
@@ -68,12 +67,13 @@ function buildScriptToolDefs(scripts) {
 }
 
 /**
- * 构建完整工具定义（Phase 1 使用，包含所有 DOM 工具）
+ * 构建统一工具定义（单阶段，所有工具可用）
  */
-function buildToolDefinitions(searchResults, currentPageUrl, round, scriptService, filteredScriptsCache, domainMismatchLogged) {
+export function buildTools(searchResults, currentPageUrl, round, scriptService, filteredScriptsCache, domainMismatchLogged) {
   const tools = []
 
-  // 核心工具
+  // === DOM 工具 ===
+
   tools.push({
     type: 'function',
     function: {
@@ -155,8 +155,23 @@ function buildToolDefinitions(searchResults, currentPageUrl, round, scriptServic
       parameters: {
         type: 'object',
         properties: {
-          selectorHint: { type: 'string', description: '可选：限定查询的CSS选择器范围，如"a.news-item"。不传则返回所有可交互元素' },
-          return_mode: { type: 'string', description: '返回模式："summary"(概览，显示样本元素)或"full"(完整列表)。默认summary' },
+          selectorHint: { type: 'string', description: '可选：限定查询的CSS选择器范围。不传则返回所有可交互元素' },
+          return_mode: { type: 'string', description: '返回模式："summary"(概览+schema)或"full"(存储全量数据，返回schema摘要)。默认summary' },
+        },
+        required: [],
+      },
+    },
+  })
+
+  tools.push({
+    type: 'function',
+    function: {
+      name: 'detect_page_template',
+      description: '分析当前页面 DOM 结构，识别页面类型（如列表页/详情页/搜索结果/表格页）并推荐常用数据字段的选择器。任务开始时调用一次可大幅减少后续试错。零LLM成本。',
+      parameters: {
+        type: 'object',
+        properties: {
+          sample_limit: { type: 'number', description: '可选：分析的容器样本数上限，默认5' },
         },
         required: [],
       },
@@ -167,7 +182,7 @@ function buildToolDefinitions(searchResults, currentPageUrl, round, scriptServic
     type: 'function',
     function: {
       name: 'find_text_on_page',
-      description: '在页面文本中搜索关键词，返回匹配数量、位置摘要。零LLM成本，优先使用。适用场景：确认页面是否包含某数据、定位内容位置',
+      description: '在页面文本中搜索关键词，返回匹配数量、位置摘要。零LLM成本，优先使用。',
       parameters: {
         type: 'object',
         properties: {
@@ -183,7 +198,7 @@ function buildToolDefinitions(searchResults, currentPageUrl, round, scriptServic
     type: 'function',
     function: {
       name: 'get_element_info',
-      description: '用CSS选择器查询DOM元素，返回数量、文本摘要和属性。仅在需要统计数量或确认结构时使用。采集数据请用 extract_content，不要用此工具反复查询同一个选择器。零LLM成本。',
+      description: '用CSS选择器查询DOM元素，返回数量、文本摘要和属性。采集数据请用 extract_content。零LLM成本。',
       parameters: {
         type: 'object',
         properties: {
@@ -200,15 +215,15 @@ function buildToolDefinitions(searchResults, currentPageUrl, round, scriptServic
     type: 'function',
     function: {
       name: 'extract_content',
-      description: '用CSS选择器批量提取页面元素的文本内容和属性（如href链接）。采集列表数据的主力工具——一次调用即可获取所有新闻标题+链接。数据可直接信任使用，不需要再用其他工具验证。用attributes参数指定要提取的属性名。零LLM成本。',
+      description: '用CSS选择器批量提取页面元素的文本内容和属性。采集列表数据的主力工具。零LLM成本。',
       parameters: {
         type: 'object',
         properties: {
-          selector: { type: 'string', description: 'CSS选择器，如".news-list a"或"a.news-title"。支持:contains("文本")过滤' },
-          multiple: { type: 'boolean', description: '是否返回多条结果。列表采集设为true，单条提取设为false。默认true' },
+          selector: { type: 'string', description: 'CSS选择器，支持:contains("文本")过滤' },
+          multiple: { type: 'boolean', description: '是否返回多条结果。列表采集设为true。默认true' },
           limit: { type: 'number', description: '最多返回条数，默认10，最大50' },
-          attributes: { type: 'string', description: '逗号分隔的要提取的属性名。提取链接时必传"href"。如"href,title,data-id"' },
-          return_mode: { type: 'string', description: '返回模式："summary"(概览，用于查看数据结构)或"full"(完整数据，用于下一步处理)。默认summary' },
+          attributes: { type: 'string', description: '逗号分隔的要提取的属性名。提取链接时必传"href"' },
+          return_mode: { type: 'string', description: '返回模式："summary"(概览+schema)或"full"(存储全量数据，返回schema摘要)。默认summary' },
         },
         required: ['selector'],
       },
@@ -235,7 +250,7 @@ function buildToolDefinitions(searchResults, currentPageUrl, round, scriptServic
     type: 'function',
     function: {
       name: 'hover_element',
-      description: '悬停页面元素（触发下拉菜单、tooltip等，click无法替代）',
+      description: '悬停页面元素（触发下拉菜单、tooltip等）',
       parameters: {
         type: 'object',
         properties: {
@@ -251,13 +266,13 @@ function buildToolDefinitions(searchResults, currentPageUrl, round, scriptServic
     type: 'function',
     function: {
       name: 'select_dropdown',
-      description: '选择<select>下拉框选项（fill_input对原生下拉框无效，必须用此工具）',
+      description: '选择<select>下拉框选项',
       parameters: {
         type: 'object',
         properties: {
           selector: { type: 'string', description: '下拉框CSS选择器' },
           value: { type: 'string', description: '选项文本或value值' },
-          by: { type: 'string', description: '匹配方式: "text"(选项文本,默认), "value"(option的value属性), "index"(第几个)' },
+          by: { type: 'string', description: '匹配方式: "text"(默认), "value", "index"' },
         },
         required: ['selector', 'value'],
       },
@@ -268,12 +283,12 @@ function buildToolDefinitions(searchResults, currentPageUrl, round, scriptServic
     type: 'function',
     function: {
       name: 'press_key',
-      description: '发送键盘操作（Escape关闭弹窗/遮罩层、PageDown翻页、Enter确认、Tab切换焦点等）',
+      description: '发送键盘操作（Escape关闭弹窗、Enter确认等）',
       parameters: {
         type: 'object',
         properties: {
-          key: { type: 'string', description: '按键，如"Escape", "PageDown", "PageUp", "Enter", "Tab", "ArrowDown", "ArrowUp"' },
-          selector: { type: 'string', description: '可选：聚焦此元素后按键（如搜索框按Enter）' },
+          key: { type: 'string', description: '按键，如"Escape", "Enter", "PageDown"' },
+          selector: { type: 'string', description: '可选：聚焦此元素后按键' },
         },
         required: ['key'],
       },
@@ -284,7 +299,7 @@ function buildToolDefinitions(searchResults, currentPageUrl, round, scriptServic
     type: 'function',
     function: {
       name: 'screenshot_visible',
-      description: '截取当前可视区域截图。用于视觉验证操作结果、确认页面加载状态',
+      description: '截取当前可视区域截图',
       parameters: { type: 'object', properties: {}, required: [] },
     },
   })
@@ -293,11 +308,11 @@ function buildToolDefinitions(searchResults, currentPageUrl, round, scriptServic
     type: 'function',
     function: {
       name: 'navigate_to',
-      description: '直接导航到指定URL。从 extract_content 获取链接后，用此工具打开内页。比 click_element 更可靠——不会因选择器不精确而失败',
+      description: '直接导航到指定URL',
       parameters: {
         type: 'object',
         properties: {
-          url: { type: 'string', description: '目标URL（绝对路径）。从 extract_content 返回的 attrs.href 中获取' },
+          url: { type: 'string', description: '目标URL' },
         },
         required: ['url'],
       },
@@ -322,74 +337,41 @@ function buildToolDefinitions(searchResults, currentPageUrl, round, scriptServic
     },
   })
 
-  // 搜索结果中的脚本工具
+  // === 脚本工具（搜索结果中的匹配脚本）===
   const filteredScripts = filterScripts(searchResults, currentPageUrl, scriptService, filteredScriptsCache, domainMismatchLogged)
   if (filteredScripts.length > 0) {
     tools.push(...buildScriptToolDefs(filteredScripts))
   }
 
-  // recall_data
-  tools.push({
-    type: 'function',
-    function: {
-      name: 'recall_data',
-      description: '查询已存储的工具执行结果。某些工具（extract_content、inject_script、read_page_content等）返回大量数据时只发送摘要，详细内容存于存储中。需要查看完整或部分数据时调用此工具。',
-      parameters: {
-        type: 'object',
-        properties: {
-          entry_id: { type: 'string', description: '存储条目ID（工具结果中标注）。不传则返回所有条目汇总。多条目用逗号分隔如"p1,p2"' },
-          tool_name: { type: 'string', description: '来源工具名。不传entry_id时按工具名查询最新条目' },
-          filter: { type: 'string', description: '过滤条件："前N条"、"第N-M条"、"含关键词xxx"' },
-          fields: { type: 'string', description: '需要的字段，逗号分隔如"title,url"。不传返回全部字段' },
-        },
-        required: [],
-      },
-    },
-  })
-
-  // create_todo
+  // === create_todo（扁平列表）===
   tools.push({
     type: 'function',
     function: {
       name: 'create_todo',
-      description: '创建分阶段待办列表。系统校验合规性和数据依赖合法性，然后按待办顺序驱动执行。建议在第1轮创建。',
+      description: '创建待办列表。系统校验后按顺序驱动执行。简单任务（1-2步可完成）无需创建，直接执行即可。复杂任务建议在第1轮创建。',
       parameters: {
         type: 'object',
         properties: {
-          stages: {
+          items: {
             type: 'array',
-            description: '三阶段待办列表',
+            description: '待办列表',
             items: {
               type: 'object',
               properties: {
-                stage: { type: 'number', enum: [1, 2, 3], description: '阶段编号: 1=本地DOM工具, 2=远程脚本, 3=数据汇总' },
-                name: { type: 'string', description: '阶段名称' },
-                subTodos: {
-                  type: 'array',
-                  description: '该阶段的子待办列表',
-                  items: {
-                    type: 'object',
-                    properties: {
-                      id: { type: 'string', description: '待办ID，如 "s1-1"' },
-                      action: { type: 'string', description: '使用的工具名称，如 read_page_content / extract_content / inject_script_N / finish_task' },
-                      description: { type: 'string', description: '待办描述' },
-                      dataDependKeys: { type: 'array', items: { type: 'string' }, description: '依赖的数据key列表（从之前待办的dataOutputKey获取）' },
-                      dataOutputKey: { type: 'string', description: '输出数据的语义key（供后续待办引用，无输出设为null）' },
-                    },
-                    required: ['id', 'action', 'description'],
-                  },
-                },
+                id: { type: 'string', description: '待办ID，如 "t1"' },
+                action: { type: 'string', description: '工具名称，如 extract_content / inject_script_N / finish_task' },
+                description: { type: 'string', description: '待办描述' },
               },
-              required: ['stage', 'subTodos'],
+              required: ['id', 'action', 'description'],
             },
           },
         },
-        required: ['stages'],
+        required: ['items'],
       },
     },
   })
 
-  // finish_task
+  // === finish_task ===
   tools.push({
     type: 'function',
     function: {
@@ -399,7 +381,7 @@ function buildToolDefinitions(searchResults, currentPageUrl, round, scriptServic
         type: 'object',
         properties: {
           summary: { type: 'string', description: '完成摘要' },
-          data_refs: { type: 'string', description: '引用的数据ID列表（逗号分隔，如"p1,p2"）。系统会自动获取完整数据并注入到输出中' },
+          data_refs: { type: 'string', description: '引用的数据ID列表（逗号分隔，如"p1,p2"）' },
         },
         required: ['summary'],
       },
@@ -409,86 +391,11 @@ function buildToolDefinitions(searchResults, currentPageUrl, round, scriptServic
   return tools
 }
 
-/**
- * Phase 1 工具列表：本地 DOM 工具 + search_tools + finish_task（不含 inject_script_*）
- */
+// 保留旧函数名作为别名（兼容期）
 export function buildPhase1Tools(currentPageUrl, round, scriptService, filteredScriptsCache, domainMismatchLogged) {
-  return buildToolDefinitions([], currentPageUrl, round, scriptService, filteredScriptsCache, domainMismatchLogged)
+  return buildTools([], currentPageUrl, round, scriptService, filteredScriptsCache, domainMismatchLogged)
 }
 
-/**
- * Phase 2 工具列表：search_tools + inject_script_* + read_page_content + recall_data + finish_task
- */
 export function buildPhase2Tools(searchResults, currentPageUrl, round, scriptService, filteredScriptsCache, domainMismatchLogged) {
-  const tools = []
-
-  // search_tools
-  tools.push({
-    type: 'function',
-    function: {
-      name: 'search_tools',
-      description: '搜索服务器远程工具库，传简短中文关键词(2-4字)。',
-      parameters: {
-        type: 'object',
-        properties: {
-          query: { type: 'string', description: '核心关键词，如"新闻"、"采集"、"翻译"' },
-        },
-        required: ['query'],
-      },
-    },
-  })
-
-  // read_page_content
-  tools.push({
-    type: 'function',
-    function: {
-      name: 'read_page_content',
-      description: '读取当前页面标题、URL和正文。用于向脚本提供页面上下文。',
-      parameters: { type: 'object', properties: {}, required: [] },
-    },
-  })
-
-  // recall_data
-  tools.push({
-    type: 'function',
-    function: {
-      name: 'recall_data',
-      description: '查询已存储的工具执行结果。需要详细数据时调用。',
-      parameters: {
-        type: 'object',
-        properties: {
-          entry_id: { type: 'string', description: '存储条目ID' },
-          tool_name: { type: 'string', description: '来源工具名' },
-          filter: { type: 'string', description: '过滤条件' },
-          fields: { type: 'string', description: '需要的字段' },
-        },
-        required: [],
-      },
-    },
-  })
-
-  // 远程脚本工具
-  const filteredScripts = filterScripts(searchResults, currentPageUrl, scriptService, filteredScriptsCache, domainMismatchLogged)
-  if (filteredScripts.length > 0) {
-    tools.push(...buildScriptToolDefs(filteredScripts))
-  }
-
-  // finish_task
-  tools.push({
-    type: 'function',
-    function: {
-      name: 'finish_task',
-      description: '任务完成，汇报结果。阶段2失败时也调用此工具总结失败原因和建议。系统会自动从存储获取引用数据并格式化输出。',
-      parameters: {
-        type: 'object',
-        properties: {
-          summary: { type: 'string', description: '完成摘要或失败原因分析' },
-          data_refs: { type: 'string', description: '引用的数据ID列表（逗号分隔，如"p1,p2"）。系统会自动获取完整数据并注入到输出中' },
-        },
-        required: ['summary'],
-      },
-    },
-  })
-
-  return tools
+  return buildTools(searchResults, currentPageUrl, round, scriptService, filteredScriptsCache, domainMismatchLogged)
 }

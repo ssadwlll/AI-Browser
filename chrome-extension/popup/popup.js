@@ -132,10 +132,17 @@ document.getElementById('syncBtn').addEventListener('click', async () => {
   const btn = document.getElementById('syncBtn')
   btn.innerHTML = '<span class="sync-spin">↻</span> 同步中'
   btn.disabled = true
-  await callService('scriptService', 'syncScripts')
-  btn.textContent = '↻ 同步'
-  btn.disabled = false
-  loadScripts()
+  // try-finally：确保 await 抛错时按钮状态一定重置，避免永久卡死在"同步中"
+  try {
+    await callService('scriptService', 'syncScripts')
+    loadScripts()
+  } catch (e) {
+    console.error('[popup] syncScripts failed:', e)
+    alert('同步失败: ' + (e?.message || e))
+  } finally {
+    btn.textContent = '↻ 同步'
+    btn.disabled = false
+  }
 })
 
 // 打开侧边栏

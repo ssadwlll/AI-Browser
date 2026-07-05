@@ -23,8 +23,16 @@
       if (data.length >= 50) break
     }
 
-    return { ok: true, data, total: items.length }
+    return {
+      ok: true,
+      data: data,
+      count: data.length,
+      hint: data.length > 0
+        ? '已采集到 ' + data.length + ' 条百度新闻数据，可直接使用或通过 finish_task 输出'
+        : '未采集到新闻数据，可能选择器 menu-list 已失效。可用 detect_page_template 重新检测页面结构',
+      fields: ['title', 'url', 'image', 'text']
+    }
   } catch (e) {
-    return { ok: false, error: e.message }
+    return { ok: false, error: e.message, hint: '可用 detect_page_template 检测页面结构' }
   }
 })()

@@ -1,9 +1,10 @@
 // ============ GlobalDataStore ============
-// 跨阶段持久存储：Stage1/2/3 全程共享，自动生成数据摘要
-// 每个 entry 由 dataOutputKey 索引，供后续待办通过 dataDependKeys 引用
+// 任务级持久存储：任务全程共享，自动生成数据摘要
+// 每个 entry 由 dataOutputKey 索引，供 inject_script_N 通过 window.__store 访问全量数据
 export class GlobalDataStore {
   constructor() {
     this.entries = new Map()  // key → { value, summary, sourceTodo, timestamp }
+    this.maxEntries = 20     // 防止内存无限增长
   }
 
   /**
@@ -13,6 +14,8 @@ export class GlobalDataStore {
    * @param {string} sourceTodo - 来源待办ID
    */
   set(key, value, sourceTodo = '') {
+    // 已存在的 key 直接覆盖（不算新条目）
+    const isUpdate = this.entries.has(key)
     const summary = this._generateSummary(value)
     this.entries.set(key, {
       value,
@@ -20,6 +23,21 @@ export class GlobalDataStore {
       sourceTodo,
       timestamp: Date.now(),
     })
+    // 超过上限时淘汰最旧条目（FIFO，基于 timestamp）
+    if (!isUpdate && this.entries.size > this.maxEntries) {
+      let oldestKey = null
+      let oldestTs = Infinity
+      for (const [k, e] of this.entries) {
+        if (e.timestamp < oldestTs) {
+          oldestTs = e.timestamp
+          oldestKey = k
+        }
+      }
+      if (oldestKey) {
+        this.entries.delete(oldestKey)
+        console.warn(`[GlobalDataStore] 超过上限 ${this.maxEntries}，淘汰旧条目: ${oldestKey}`)
+      }
+    }
     console.log(`[GlobalDataStore] set "${key}": ${summary.slice(0, 60)}`)
   }
 
@@ -38,21 +56,14 @@ export class GlobalDataStore {
   }
 
   /**
-   * 检查 key 是否存在（用于数据依赖校验）
+   * 检查 key 是否存在
    */
   has(key) {
     return this.entries.has(key)
   }
 
   /**
-   * 批量检查依赖是否满足
-   */
-  areDependenciesSatisfied(dataDependKeys = []) {
-    return dataDependKeys.every(k => this.entries.has(k))
-  }
-
-  /**
-   * 获取所有数据摘要（用于阶段切换时注入上下文）
+   * 获取所有数据摘要
    */
   getAllSummaries() {
     const result = []
@@ -63,87 +74,52 @@ export class GlobalDataStore {
   }
 
   /**
-   * 获取指定 key 中的 URL 列表（用于脚本参数注入）
-   */
-  getUrls(key) {
-    const value = this.get(key)
-    if (value === null || value === undefined) return []
-    try {
-      let obj = value
-      if (typeof value === 'string') {
-        try { obj = JSON.parse(value) } catch { obj = value }
-      }
-      if (Array.isArray(obj)) {
-        return obj.filter(item => item?.attrs?.href).map(item => item.attrs.href)
-      }
-      if (obj?.data && Array.isArray(obj.data)) {
-        return obj.data.filter(item => item?.attrs?.href).map(item => item.attrs.href)
-      }
-    } catch {}
-    return []
-  }
-
-  /**
-   * 获取所有 URL（跨所有 key）
-   */
-  getAllUrls() {
-    const urls = []
-    for (const key of this.entries.keys()) {
-      urls.push(...this.getUrls(key))
-    }
-    return urls
-  }
-
-  /**
-   * 查询数据（支持 recall_data 调用）
-   * @param {object} options - { entry_id, fields, filter }
+   * 查询数据
+   * @param {object} options - { entry_id, tool_name }
    */
   query(options = {}) {
     const entryId = options.entry_id?.trim() || ''
-    let results = []
 
-    // "all" 表示查询所有条目
-    if (entryId === 'all') {
+    // 按 entry_id 查询
+    if (entryId) {
+      const ids = entryId.split(',').map(s => s.trim())
+      if (ids.includes('all')) {
+        return this._formatAll()
+      }
+      const matched = []
+      for (const id of ids) {
+        if (this.entries.has(id)) {
+          const entry = this.entries.get(id)
+          matched.push({ id, key: id, value: entry.value, summary: entry.summary, source: entry.sourceTodo })
+        }
+      }
+      if (matched.length === 0) return { error: '未找到匹配数据', queriedKeys: ids }
+      return { entries: matched, count: matched.length, source: 'GlobalDataStore' }
+    }
+
+    // 按 tool_name 查询（匹配 key 前缀或 sourceTodo）
+    if (options.tool_name) {
+      const matched = []
       for (const [key, entry] of this.entries) {
-        results.push({ id: key, toolName: entry.sourceTodo || key, data: entry.value, summary: entry.summary })
-      }
-    }
-    // 指定 key 列表
-    else if (entryId) {
-      const keys = entryId.split(',').map(s => s.trim())
-      for (const k of keys) {
-        const entry = this.entries.get(k)
-        if (entry) {
-          results.push({ id: k, toolName: entry.sourceTodo || k, data: entry.value, summary: entry.summary })
+        if (key.startsWith(options.tool_name) || entry.sourceTodo === options.tool_name) {
+          matched.push({ id: key, key, value: entry.value, summary: entry.summary, source: entry.sourceTodo })
         }
       }
+      if (matched.length === 0) return { error: '未找到匹配数据', toolName: options.tool_name }
+      return { entries: matched, count: matched.length, source: 'GlobalDataStore' }
     }
+
     // 无参数返回汇总
-    else {
-      return {
-        summary: this.getAllSummaries().join('\n') || '无存储数据',
-        hint: '调用 recall_data(entry_id="xxx") 查询具体条目'
-      }
-    }
+    return this._formatAll()
+  }
 
-    if (results.length === 0) {
-      return { error: '未找到匹配数据', entries: [], queriedKeys: entryId ? entryId.split(',') : [] }
+  _formatAll() {
+    const entries = []
+    for (const [key, entry] of this.entries) {
+      entries.push({ id: key, key, summary: entry.summary, source: entry.sourceTodo, timestamp: entry.timestamp })
     }
-
-    // 格式化返回（与 PayloadStore 保持一致的结构）
-    const formatted = {
-      count: results.length,
-      entries: results.map(r => ({ id: r.id, toolName: r.toolName, count: Array.isArray(r.data) ? r.data.length : 1 })),
-      data: results.map(r => {
-        // 对 data 进行摘要截断
-        const dataStr = typeof r.data === 'string' ? r.data : JSON.stringify(r.data)
-        if (dataStr.length > 500) {
-          return r.summary || dataStr.slice(0, 500)
-        }
-        return r.data
-      }),
-    }
-    return formatted
+    if (entries.length === 0) return { error: '全局存储为空', count: 0 }
+    return { entries, count: entries.length, source: 'GlobalDataStore' }
   }
 
   /**
@@ -198,50 +174,6 @@ export class GlobalDataStore {
     } catch {
       return '已存储'
     }
-  }
-
-  /**
-   * 兼容 PayloadStore.query 接口，供 recall_data 回退查询
-   */
-  query(options = {}) {
-    // 按 entry_id 查询（映射为 key）
-    if (options.entry_id) {
-      const ids = options.entry_id.split(',').map(s => s.trim())
-      if (ids.includes('all')) {
-        return this._formatAll()
-      }
-      const matched = []
-      for (const id of ids) {
-        if (this.entries.has(id)) {
-          const entry = this.entries.get(id)
-          matched.push({ id, key: id, value: entry.value, summary: entry.summary, source: entry.sourceTodo })
-        }
-      }
-      if (matched.length === 0) return { error: '未找到匹配数据', queriedKeys: ids }
-      return { entries: matched, count: matched.length, source: 'GlobalDataStore' }
-    }
-    // 按 tool_name 查询（匹配 key 前缀或 sourceTodo）
-    if (options.tool_name) {
-      const matched = []
-      for (const [key, entry] of this.entries) {
-        if (key.startsWith(options.tool_name) || entry.sourceTodo === options.tool_name) {
-          matched.push({ id: key, key, value: entry.value, summary: entry.summary, source: entry.sourceTodo })
-        }
-      }
-      if (matched.length === 0) return { error: '未找到匹配数据', toolName: options.tool_name }
-      return { entries: matched, count: matched.length, source: 'GlobalDataStore' }
-    }
-    // 查全部
-    return this._formatAll()
-  }
-
-  _formatAll() {
-    const entries = []
-    for (const [key, entry] of this.entries) {
-      entries.push({ id: key, key, summary: entry.summary, source: entry.sourceTodo, timestamp: entry.timestamp })
-    }
-    if (entries.length === 0) return { error: '全局存储为空', count: 0 }
-    return { entries, count: entries.length, source: 'GlobalDataStore' }
   }
 
   /**

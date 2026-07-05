@@ -96,8 +96,25 @@ const services = {
 }
 
 // ============ 消息路由 ============
+// CALL_SERVICE 安全校验：该通道暴露所有 service 方法（含 dbService.getAll、
+// configService.saveAIConfig 等敏感操作），仅允许扩展自身页面（sidepanel/popup/options）调用。
+// 判定依据：sender.tab 存在表示来自 content script（运行在页面上下文，可能被页面注入脚本利用）；
+// sender.url 以 'chrome-extension://' 开头表示扩展页面。content script 一律拒绝。
+function _isExtensionSender(sender) {
+  // 扩展页面（sidepanel/popup/options）：无 tab，url 以 chrome-extension:// 开头
+  if (sender.tab) return false
+  const url = sender.url || ''
+  return url.startsWith('chrome-extension://')
+}
+
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.type === MSG_TYPES.CALL_SERVICE) {
+    // 安全校验：拒绝来自 content script / 页面上下文的 CALL_SERVICE 调用
+    if (!_isExtensionSender(sender)) {
+      console.warn('[Background] 拒绝非扩展来源的 CALL_SERVICE 调用:', sender.url || sender.origin)
+      sendResponse({ error: '权限不足：CALL_SERVICE 仅允许扩展页面调用', data: null })
+      return true
+    }
     const { service, method, args } = msg
     const svc = services[service]
     if (!svc) {
@@ -229,7 +246,7 @@ chrome.runtime.onConnect.addListener((port) => {
     port.onMessage.addListener(async (msg) => {
       if (msg.type === 'agentStart') {
         attached = true
-        await agentService.startAgent(port, msg.userMessage, msg.chatHistory)
+        await agentService.startAgent(port, msg.userMessage, msg.chatHistory, msg.modelInfo)
       }
       if (msg.type === 'agentAttach') {
         attached = true
@@ -262,8 +279,7 @@ chrome.runtime.onInstalled.addListener(() => {
     chrome.contextMenus.create({ id: 'ai-browser-explain', title: 'AI 解释选中文字', contexts: ['selection'] })
   })
 
-  // Feature 23: 启动定时任务闹钟监听
-  scheduledTaskService.setupAlarmListener()
+  // Feature 23: 定时任务检查（闹钟监听器已在文件顶层注册，此处不再调用 setupAlarmListener，避免重复执行）
   // Feature 6: 清理过期的 Agent 快照
   agentResumeService.cleanupExpired().catch(() => {})
 })
@@ -274,7 +290,12 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
   }
   // Feature 23: 定时任务检查
   if (alarm.name === 'scheduled-task-check') {
-    await scheduledTaskService.checkAndRunDueTasks()
+    try {
+      await scheduledTaskService.checkAndRunDueTasks()
+    } catch (e) {
+      // 捕获异常避免 unhandled rejection 导致 SW 终止，下个周期仍会被闹钟调度
+      console.error('[background] scheduled-task-check 执行失败:', e)
+    }
   }
 })
 

@@ -8,8 +8,13 @@
   
   // 防止重复注入
   if (document.getElementById('xhs-scraper-panel')) {
-    console.log('⚠️ 采集面板已存在，跳过注入');
-    return;
+    return {
+      ok: true,
+      data: [],
+      count: 0,
+      hint: '小红书采集面板已存在。可用 extract_content 提取已采集笔记数据',
+      panelSelector: '#xhs-scraper-panel .xhs-preview-list .xhs-preview-item'
+    };
   }
   
   // ==================== 1. 注入样式 ====================
@@ -789,4 +794,13 @@
   window.__xhsScraper = XHSScraper;
   console.log('✅ 小红书采集器 Pro 已就绪 | 笔记数:', initialCount);
 
+  // ===== 返回标准化信封（供 AI 下一轮调用使用） =====
+  return {
+    ok: true,
+    data: [],
+    count: initialCount,
+    hint: '小红书采集面板已注入页面，检测到 ' + initialCount + ' 条笔记。下一步：滚动加载更多（scroll_page）或用 extract_content 提取笔记数据',
+    panelSelector: 'section.note-item',
+    panelInfo: '面板支持：自动滚动采集、Ctrl+E 导出 JSON。数据通过 XHSScraper 全局对象管理'
+  };
 })();

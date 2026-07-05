@@ -312,27 +312,6 @@ export class ScheduledTaskService {
     }
   }
 
-  /**
-   * 注册闹钟监听器
-   * 当 'scheduled-task-check' 闹钟触发时调用 checkAndRunDueTasks
-   */
-  setupAlarmListener() {
-    // 避免重复注册：先移除旧监听器
-    if (this.alarmListener) {
-      chrome.alarms.onAlarm.removeListener(this.alarmListener)
-    }
-    this.alarmListener = (alarm) => {
-      if (alarm && alarm.name === ALARM_NAME) {
-        // 异步执行，不阻塞闹钟回调
-        this.checkAndRunDueTasks().catch(e => {
-          console.error('[ScheduledTaskService] 闹钟回调执行失败:', e)
-        })
-      }
-    }
-    chrome.alarms.onAlarm.addListener(this.alarmListener)
-    console.log('[ScheduledTaskService] 闹钟监听器已注册')
-  }
-
   // ============ 内部辅助 ============
 
   /**

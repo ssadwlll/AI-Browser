@@ -697,6 +697,28 @@ exports.injectList = async (req, res) => {
   }
 }
 
+// 扩展端拉取完整脚本索引（id + name + description + url_pattern）
+// 用于在 Agent 首轮注入"全脚本索引"，避免 AI 在脚本库没有匹配时盲目 generate_script
+// 与 injectList 区别：本接口需要 appAuth 鉴权，且返回 description
+exports.indexForAgent = async (req, res) => {
+  try {
+    const [rows] = await pool.query(
+      "SELECT id, name, description, url_pattern, tool_type FROM scripts WHERE status = 'published' ORDER BY id DESC"
+    )
+    // 精简描述（避免注入过长）
+    const list = rows.map(r => ({
+      id: r.id,
+      name: r.name,
+      description: (r.description || '').slice(0, 120),
+      urlPattern: r.url_pattern || '',
+      toolType: r.tool_type || 'js',
+    }))
+    res.json(success(list))
+  } catch (err) {
+    res.status(500).json(error(err.message))
+  }
+}
+
 /**
  * 解析脚本文件中的元数据注释
  * 格式: // @name: 脚本名称

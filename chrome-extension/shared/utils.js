@@ -76,9 +76,19 @@ export class AppError extends Error {
  * @returns {Promise<Response>}
  */
 export async function fetchWithTimeout(url, options = {}, timeoutMs = 30000, retries = 0, retryOnStatus = [429, 500, 502, 503, 504]) {
+  // 兼容外部传入的 signal：将外部 signal 状态同步到内部 controller
+  // 之前版本直接用内部 controller 覆盖 options.signal，导致调用方的 abort 失效
+  const externalSignal = options.signal
   let lastError
   for (let attempt = 0; attempt <= retries; attempt++) {
     const controller = new AbortController()
+    // 若外部 signal 已 abort，立即中止
+    if (externalSignal && externalSignal.aborted) {
+      controller.abort()
+    } else if (externalSignal) {
+      // 监听外部 signal，触发时同步 abort 内部 controller（once 避免重复）
+      externalSignal.addEventListener('abort', () => controller.abort(), { once: true })
+    }
     const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
     try {
       const res = await fetch(url, { ...options, signal: controller.signal })
@@ -94,7 +104,16 @@ export async function fetchWithTimeout(url, options = {}, timeoutMs = 30000, ret
       clearTimeout(timeoutId)
       lastError = e
       const isAbort = e.name === 'AbortError'
+      // 区分超时 abort 与外部 signal abort
+      const isExternalAbort = externalSignal && externalSignal.aborted
       if (isAbort) {
+        if (isExternalAbort) {
+          // 外部主动 abort（如端口断开）：原样抛 AbortError，调用方可识别为正常中止
+          const err = new Error('Aborted by caller')
+          err.name = 'AbortError'
+          throw err
+        }
+        // 否则视为超时
         lastError = new AppError(ERROR_CODES.NETWORK_TIMEOUT, `请求超时 (${timeoutMs}ms): ${url}`, { url, timeoutMs })
       }
       if (attempt < retries) {

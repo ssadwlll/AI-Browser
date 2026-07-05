@@ -1,6 +1,95 @@
 // ============ ToolService ============
 import { fetchWithTimeout, AppError, ERROR_CODES, LRUCache } from '../../shared/utils.js'
 
+/**
+ * 规范化脚本返回值为统一信封格式
+ * 标准信封：{ ok, data, count, hint?, panelSelector?, panelInfo?, fields?, error? }
+ *
+ * 兼容三种历史格式：
+ *  1) 裸数组：[{...}, {...}]                 → {ok:true, data:arr, count:arr.length}
+ *  2) 旧包装：{ok, data, total}              → {ok, data, count:total}
+ *  3) 无返回（DOM 注入型返回 undefined/'执行成功'）→ {ok:true, data:[], count:0}
+ *
+ * 已是新格式（含 ok + data 字段）则原样返回。
+ * @param {*} raw - 脚本 return 的原始值
+ * @param {string} toolName - 工具名（用于错误提示）
+ * @returns {object} 标准信封
+ */
+function normalizeScriptResult(raw, toolName) {
+  // 已是标准信封：含 ok 字段 + (data 字段 或 panelSelector 字段)
+  if (raw && typeof raw === 'object' && !Array.isArray(raw) &&
+      typeof raw.ok === 'boolean' &&
+      (Array.isArray(raw.data) || raw.panelSelector || raw.error)) {
+    return raw
+  }
+
+  // 裸数组 → 包装
+  if (Array.isArray(raw)) {
+    return {
+      ok: true,
+      data: raw,
+      count: raw.length,
+      hint: raw.length > 0
+        ? `已获取 ${raw.length} 条数据（来自 ${toolName}），可直接使用或通过 finish_task 输出`
+        : '数据为空，可能页面结构不匹配。可用 detect_page_template 重新检测',
+    }
+  }
+
+  // 旧包装：{ok, data, total}
+  if (raw && typeof raw === 'object' && raw.data !== undefined && raw.total !== undefined) {
+    return {
+      ok: raw.ok !== false,
+      data: Array.isArray(raw.data) ? raw.data : [raw.data],
+      count: raw.total || (Array.isArray(raw.data) ? raw.data.length : 1),
+      hint: raw.ok === false
+        ? `执行失败: ${raw.error || '未知错误'}`
+        : `已获取 ${raw.total} 条数据（来自 ${toolName}）`,
+      error: raw.ok === false ? raw.error : undefined,
+    }
+  }
+
+  // 旧包装：{ok, data}（无 total）
+  if (raw && typeof raw === 'object' && raw.data !== undefined && raw.ok !== undefined) {
+    return {
+      ok: raw.ok !== false,
+      data: Array.isArray(raw.data) ? raw.data : [raw.data],
+      count: Array.isArray(raw.data) ? raw.data.length : 1,
+      hint: raw.ok === false
+        ? `执行失败: ${raw.error || '未知错误'}`
+        : `已获取数据（来自 ${toolName}）`,
+      error: raw.ok === false ? raw.error : undefined,
+    }
+  }
+
+  // 无返回值（DOM 注入型，靠副作用）
+  if (raw === undefined || raw === null || raw === '执行成功') {
+    return {
+      ok: true,
+      data: [],
+      count: 0,
+      hint: `${toolName} 已执行（DOM 注入型，无数据返回）。若面板已注入页面，可用 extract_content 提取面板内容`,
+    }
+  }
+
+  // 单对象 → 包装为单元素数组
+  if (raw && typeof raw === 'object') {
+    return {
+      ok: true,
+      data: [raw],
+      count: 1,
+      hint: `已获取 1 条数据（来自 ${toolName}）`,
+    }
+  }
+
+  // 原始类型（string/number/boolean）
+  return {
+    ok: true,
+    data: [{ value: raw }],
+    count: 1,
+    hint: `已获取原始值（来自 ${toolName}）`,
+  }
+}
+
 export class ToolService {
   constructor(configService) {
     this.configService = configService
@@ -11,16 +100,23 @@ export class ToolService {
   async searchScripts(query) {
     console.log('[ToolService] searchScripts query:', query)
     const config = await this.configService.getSyncConfig()
-    console.log('[ToolService] serverUrl:', config.serverUrl, 'hasToken:', !!config.token)
-    if (!config.serverUrl) return []
+    if (!config.serverUrl) {
+      console.warn('[ToolService] serverUrl 未配置，searchScripts 返回空')
+      return []
+    }
     try {
       const auth = await this.configService.getAppAuth()
       const authHeaders = await this.configService.generateAuthHeaders(auth.appKey, auth.appSecret)
+      const baseUrl = config.serverUrl.replace(/\/+$/, '')
       const res = await fetchWithTimeout(
-        `${config.serverUrl}/api/scripts/search?q=${encodeURIComponent(query)}&limit=5`,
+        `${baseUrl}/api/scripts/search?q=${encodeURIComponent(query)}&limit=5`,
         { headers: authHeaders },
         15000, 0
       )
+      if (!res.ok) {
+        console.warn('[ToolService] searchScripts HTTP', res.status)
+        return []
+      }
       const data = await res.json()
       if (data.success && Array.isArray(data.data)) {
         return data.data.map(t => ({
@@ -42,15 +138,53 @@ export class ToolService {
     return []
   }
 
+  // 拉取完整脚本索引（id + name + description + urlPattern）
+  // 用于 Agent 首轮注入"全脚本索引"，让 AI 全局可见所有可用脚本
+  // 缓存 5 分钟，避免每次任务都请求后端
+  async fetchAgentIndex() {
+    const CACHE_KEY = '_agentIndexCache'
+    const CACHE_TTL = 5 * 60 * 1000
+    if (this[CACHE_KEY] && Date.now() - this[CACHE_KEY]._ts < CACHE_TTL) {
+      return this[CACHE_KEY].data
+    }
+    const config = await this.configService.getSyncConfig()
+    if (!config.serverUrl) return []
+    try {
+      const auth = await this.configService.getAppAuth()
+      const authHeaders = await this.configService.generateAuthHeaders(auth.appKey, auth.appSecret)
+      const baseUrl = config.serverUrl.replace(/\/+$/, '')
+      const res = await fetchWithTimeout(`${baseUrl}/api/scripts/agent-index`, {
+        headers: authHeaders,
+      }, 10000, 0)
+      if (!res.ok) {
+        console.warn('[ToolService] fetchAgentIndex HTTP', res.status)
+        return []
+      }
+      const data = await res.json()
+      if (data.success && Array.isArray(data.data)) {
+        this[CACHE_KEY] = { data: data.data, _ts: Date.now() }
+        return data.data
+      }
+    } catch (e) {
+      console.warn('[ToolService] fetchAgentIndex error:', e.message)
+    }
+    return []
+  }
+
   async fetchInjectData(scriptId) {
     const config = await this.configService.getSyncConfig()
     if (!config.serverUrl) return null
     try {
       const auth = await this.configService.getAppAuth()
       const authHeaders = await this.configService.generateAuthHeaders(auth.appKey, auth.appSecret)
-      const res = await fetchWithTimeout(`${config.serverUrl}/api/scripts/${scriptId}/inject`, {
+      const baseUrl = config.serverUrl.replace(/\/+$/, '')
+      const res = await fetchWithTimeout(`${baseUrl}/api/scripts/${scriptId}/inject`, {
         headers: authHeaders,
       }, 15000, 0)
+      if (!res.ok) {
+        console.warn('[ToolService] fetchInjectData HTTP', res.status)
+        return null
+      }
       const data = await res.json()
       if (data.success && data.data) return data.data
     } catch (e) {
@@ -62,32 +196,42 @@ export class ToolService {
   async executeTool(tool, tabId, funcArgs) {
     console.log('[ToolService] executeTool:', tool.id, tool.name, 'type:', tool.toolType)
     const injectData = await this.fetchInjectData(tool.id)
-    if (!injectData?.code) {
-      console.warn('[ToolService] 无法获取脚本代码:', tool.id)
-      return { ok: false, error: `无法获取脚本代码 (ID: ${tool.id})` }
+    // 区分 JS 类型 / API 类型分别校验：
+    // - JS 类型：必须有 code（注入页面执行的脚本代码）
+    // - API 类型：必须有 tool_config.apiEndpoint（无需 code，由后端代理 HTTP 调用）
+    const toolConfig = injectData?.tool_config || tool.toolConfig || {}
+    const toolType = injectData?.tool_type || tool.toolType || 'js'
+    const hasApiEndpoint = !!(toolConfig.apiEndpoint && typeof toolConfig.apiEndpoint === 'string')
+    if (toolType === 'api') {
+      if (!hasApiEndpoint) {
+        console.warn('[ToolService] API 类型脚本缺少 apiEndpoint:', tool.id)
+        return { ok: false, error: `脚本配置错误: API 类型脚本未配置 apiEndpoint (ID: ${tool.id})` }
+      }
+      // API 类型无需 code 字段，继续走 executeAPITool 路径
+    } else {
+      // JS 类型必须有可执行代码
+      if (!injectData?.code) {
+        console.warn('[ToolService] JS 类型脚本缺少 code:', tool.id)
+        return { ok: false, error: `无法获取脚本代码 (ID: ${tool.id})` }
+      }
     }
-    console.log('[ToolService] 获取到代码，tool_type:', injectData.tool_type, 'hasApiEndpoint:', !!injectData.tool_config?.apiEndpoint)
-
-    const toolConfig = injectData.tool_config || tool.toolConfig || {}
-    const toolType = injectData.tool_type || tool.toolType || 'js'
+    console.log('[ToolService] 获取到代码，tool_type:', toolType, 'hasApiEndpoint:', hasApiEndpoint)
 
     // Feature 3: 结果缓存 — toolConfig.cacheable 为 true 时缓存结果
     // 缓存键：toolId + 参数摘要，避免相同参数重复执行
+    // 改用局部变量，避免实例级 _pendingCacheKey 在并发调用时竞态（A 的结果被写到 B 的缓存键）
+    let cacheKey = null
     if (toolConfig.cacheable === true) {
-      const cacheKey = `${tool.id}|${JSON.stringify(funcArgs || {})}`
+      cacheKey = `${tool.id}|${JSON.stringify(funcArgs || {})}`
       const cached = this._resultCache.get(cacheKey)
       if (cached) {
         console.log('[ToolService] 命中结果缓存:', tool.id)
         return cached
       }
-      // 暂存 cacheKey 供执行后写入
-      this._pendingCacheKey = cacheKey
-    } else {
-      this._pendingCacheKey = null
     }
 
     let result
-    if (toolType === 'api' && toolConfig.apiEndpoint) {
+    if (toolType === 'api' && hasApiEndpoint) {
       console.log('[ToolService] API调用:', toolConfig.apiEndpoint, toolConfig.apiMethod || 'GET')
       result = await this.executeAPITool(toolConfig, tool.name, funcArgs)
     } else {
@@ -95,9 +239,8 @@ export class ToolService {
     }
 
     // 执行成功后写入缓存
-    if (this._pendingCacheKey && result?.ok) {
-      this._resultCache.set(this._pendingCacheKey, result)
-      this._pendingCacheKey = null
+    if (cacheKey && result?.ok) {
+      this._resultCache.set(cacheKey, result)
     }
 
     return result
@@ -118,7 +261,18 @@ export class ToolService {
           // 使用 finally 确保 __TOOL_CONFIG__ 总是被清理，避免异常时残留污染下一工具
           try {
             window.__TOOL_CONFIG__ = config || {}
-            const fn = new Function('config', scriptCode)
+            // 检测脚本是否为 IIFE 包装形式：剥离头部注释行后以 (function 开头
+            // 若是，则在前面加 return，让 IIFE 表达式语句的值成为 fn 的返回值
+            // 否则 new Function 的函数体是表达式语句，IIFE 的 return 值会被丢弃，fn() 返回 undefined
+            const lines = scriptCode.split('\n')
+            let firstNonComment = 0
+            while (firstNonComment < lines.length && /^\s*\/\//.test(lines[firstNonComment])) firstNonComment++
+            const body = lines.slice(firstNonComment).join('\n').trim()
+            const isIIFE = /^\(?\s*function\s*\(/.test(body)
+            const wrappedCode = isIIFE
+              ? lines.slice(0, firstNonComment).join('\n') + '\nreturn ' + body
+              : scriptCode
+            const fn = new Function('config', wrappedCode)
             const result = fn(config || {})
             return { ok: true, result: result !== undefined ? result : '执行成功' }
           } catch (e) {
@@ -139,7 +293,11 @@ export class ToolService {
       if (result.ok === false) {
         return { ok: false, error: result.error || '脚本执行失败' }
       }
-      return { ok: true, result: result.result }
+      // ===== 返回值规范化：统一为标准信封 {ok, data, count, hint, ...} =====
+      // 兼容三种旧格式：1) 裸数组 [{...}] 2) {ok, data, total} 3) 无返回值（DOM 注入型）
+      const raw = result.result
+      const normalized = normalizeScriptResult(raw, toolName)
+      return { ok: true, result: normalized }
     } catch (e) {
       if (e.message?.includes('Cannot access a chrome:// URL') || e.message?.includes('Cannot access contents of url')) {
         return { ok: false, error: '当前页面为系统页面，无法注入脚本。请用finish_task告知用户：请在普通网页上执行此操作。' }

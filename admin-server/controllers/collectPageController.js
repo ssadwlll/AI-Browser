@@ -82,13 +82,13 @@ function fetchPage(targetUrl) {
 }
 
 async function collect(req, res) {
-  const { urls, maxPages } = req.body
+  const { urls, maxPages, maxUrls } = req.body
 
   if (!Array.isArray(urls) || urls.length === 0) {
     return res.status(400).json(error('urls 必须是非空数组', 400))
   }
 
-  const limit = Math.min(Math.max(1, maxPages || 10), 20)
+  const limit = Math.min(Math.max(1, maxUrls || maxPages || 20), 20)
   const targetUrls = urls.slice(0, limit)
 
   const results = await Promise.allSettled(
@@ -112,4 +112,140 @@ async function collect(req, res) {
   res.json(success({ pages, total: pages.length, successCount }))
 }
 
-module.exports = { collect }
+/**
+ * 按 id 提取元素内容（栈匹配算法处理嵌套同名标签）
+ * @param {string} html 页面 HTML
+ * @param {string} id 元素 id
+ * @returns {string} 元素内部 HTML 文本（已清理标签）
+ */
+function extractById(html, id) {
+  const startRegex = new RegExp(`<([a-zA-Z][a-zA-Z0-9]*)\\b[^>]*\\bid=["']${id}["'][^>]*>`, 'i')
+  const startMatch = html.match(startRegex)
+  if (!startMatch) return ''
+
+  const tagName = startMatch[1].toLowerCase()
+  const contentStart = startMatch.index + startMatch[0].length
+
+  // 自闭合标签无内容
+  if (/\/\s*>\s*$/.test(startMatch[0])) return ''
+
+  // 栈匹配嵌套同名标签（每次从 pos 统一起点搜索，避免 lastIndex 错位）
+  const openTag = new RegExp(`<${tagName}\\b[^>]*>`, 'gi')
+  const closeTag = new RegExp(`</${tagName}\\s*>`, 'gi')
+  let depth = 1
+  let pos = contentStart
+
+  while (depth > 0) {
+    openTag.lastIndex = pos
+    closeTag.lastIndex = pos
+    const openM = openTag.exec(html)
+    const closeM = closeTag.exec(html)
+    if (!closeM) break
+
+    if (openM && openM.index < closeM.index) {
+      depth++
+      pos = openM.index + openM[0].length
+    } else {
+      depth--
+      if (depth === 0) {
+        return cleanHtmlText(html.slice(contentStart, closeM.index))
+      }
+      pos = closeM.index + closeM[0].length
+    }
+  }
+  return ''
+}
+
+/**
+ * 清理 HTML 为纯文本（保留换行结构，便于阅读正文）
+ */
+function cleanHtmlText(html) {
+  return html
+    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
+    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+    .replace(/<p[^>]*>/gi, '\n')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/(p|div|h[1-6]|li)>/gi, '\n')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/\n\s*\n\s*\n+/g, '\n\n')
+    .replace(/[ \t]+/g, ' ')
+    .split('\n')
+    .map(line => line.trim())
+    .filter(Boolean)
+    .join('\n')
+    .trim()
+}
+
+/**
+ * 采集温州新闻网新闻详情页
+ * 标题：#artibodytitle (h1)
+ * 摘要：#abs (div)
+ * 正文：#artibody (div)
+ *
+ * 返回格式符合 chrome-extension inject_script_N 工具规范：
+ * {success: true, data: {pages: [{title, summary, content, url}], total, successCount}}
+ * 配合 tool_config.resultExtractor='data'，客户端 normalizePayload 会剥离为 pages 数组
+ */
+async function wenzhouDetail(req, res) {
+  const { url } = req.body || {}
+  if (!url) {
+    return res.status(400).json(error('缺少 url 参数', 400))
+  }
+
+  let parsedUrl
+  try {
+    parsedUrl = new URL(url)
+  } catch {
+    return res.status(400).json(error('url 格式错误', 400))
+  }
+
+  if (!parsedUrl.hostname.includes('66wz.com')) {
+    return res.status(400).json(error('仅支持温州新闻网(66wz.com)页面', 400))
+  }
+
+  try {
+    const html = await fetchPage(url)
+
+    // 按 id 精准提取三段内容
+    const title = extractById(html, 'artibodytitle')
+    const summary = extractById(html, 'abs')
+    const content = extractById(html, 'artibody')
+
+    // 任一关键字段缺失视为采集失败
+    if (!title && !content) {
+      return res.json(success({
+        pages: [{ url, title: '', summary: '', content: '', error: '未找到正文内容，页面结构可能已变化' }],
+        total: 1,
+        successCount: 0,
+      }))
+    }
+
+    const page = {
+      url,
+      title: title || '(无标题)',
+      summary: summary || '',
+      content: content || '',
+      contentLength: content.length,
+    }
+
+    res.json(success({
+      pages: [page],
+      total: 1,
+      successCount: 1,
+    }))
+  } catch (e) {
+    res.json(success({
+      pages: [{ url, title: '', summary: '', content: '', error: e.message || '采集失败' }],
+      total: 1,
+      successCount: 0,
+    }))
+  }
+}
+
+module.exports = { collect, wenzhouDetail }

@@ -27,7 +27,7 @@ export class AgentService {
   }
 
   // Plan B: 入口方法，管理 Port 绑定
-  async startAgent(port, userMessage, chatHistory) {
+  async startAgent(port, userMessage, chatHistory, modelInfo) {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
     const tabId = tab?.id
     if (!tabId) {
@@ -62,7 +62,7 @@ export class AgentService {
       bc.close()
     } catch {}
     try {
-      chrome.tabs.sendMessage(tabId, { type: 'todoUpdate', data: { stages: [], progress: { total: 0, completed: 0 }, currentStage: 1 } }).catch(() => {})
+      chrome.tabs.sendMessage(tabId, { type: 'todoUpdate', data: { stages: [], progress: { total: 0, completed: 0 } } }).catch(() => {})
     } catch {}
 
     // 对话全景：清空旧数据并根据设置自动打开窗口
@@ -105,7 +105,7 @@ export class AgentService {
           tabUrl,
           isFinished: false,
           todoState: {
-            currentStage: this.todoScheduler.currentStage || 1,
+            currentTodoIndex: this.todoScheduler.currentTodoIndex || 0,
             totalCompleted: this.todoScheduler.getProgress()?.completed || 0,
             totalTodos: this.todoScheduler.getProgress()?.total || 0,
           },
@@ -114,11 +114,11 @@ export class AgentService {
     }
 
     try {
-      await this.run(tabId, userMessage, chatHistory)
+      await this.run(tabId, userMessage, chatHistory, modelInfo)
     } finally {
       const state = this.agentStates.get(tabId)
       if (state) state.running = false
-      // 注意：不清除 payloadStore，保留上轮结果供后续 recall_data 查询
+      // 注意：不清除 payloadStore，保留上轮结果供后续 inject_script_N 复用
       // （避免用户说"导出结果"时 agent 无法访问上轮数据而重新执行）
       // 清理本次运行缓存的页面内容，防止跨任务累积内存占用
       this._pageReadCache.clear()
@@ -157,10 +157,12 @@ export class AgentService {
     state.port = port
     if (state.messages.length > 0) {
       console.log('[Agent] Port 重连，回放', state.messages.length, '条消息')
+      // 只清除已成功发送的消息，未发送的保留以便下次重连重试
+      let sentCount = 0
       for (const msg of state.messages) {
-        try { port.postMessage(msg) } catch { break }
+        try { port.postMessage(msg); sentCount++ } catch { break }
       }
-      state.messages = []
+      state.messages = state.messages.slice(sentCount)
     }
   }
 
@@ -213,7 +215,7 @@ export class AgentService {
   }
 
   // 主运行循环 — 委托给 agent-runner.js
-  async run(tabId, userMessage, chatHistory) {
+  async run(tabId, userMessage, chatHistory, modelInfo) {
     await runAgent({
       configService: this.configService,
       toolService: this.toolService,
@@ -234,6 +236,9 @@ export class AgentService {
       tabId,
       userMessage,
       chatHistory,
+      // 模型单独配置（temperature / context_window / max_tokens），覆盖全局 aiConfig
+      // 用于 Agent 模式按模型读取后端配置
+      modelInfo: modelInfo || null,
       toolRecordingService: this.toolRecordingService, // Feature 4
     })
   }

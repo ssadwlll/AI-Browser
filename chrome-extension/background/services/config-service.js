@@ -169,6 +169,88 @@ export class ConfigService {
   }
 
   /**
+   * 获取应用全局设置（从后端读取，本地缓存兜底）
+   * 包含：agent_max_rounds、agent_system_prompt、pdf_max_size、image_max_size
+   * 缓存策略：成功请求后写入 chrome.storage.local（10分钟TTL），失败时回退缓存
+   * 并发去重：同一时刻多次调用共享同一个 in-flight Promise，避免重复请求
+   * @returns {Promise<object>}
+   */
+  async getAppSettings() {
+    const CACHE_KEY = 'appSettingsCache'
+    const CACHE_TTL_MS = 10 * 60 * 1000  // 10 分钟
+
+    // 1. 读本地缓存（含时间戳）
+    const cached = await chrome.storage.local.get(CACHE_KEY)
+    const cachedData = cached[CACHE_KEY]
+    const now = Date.now()
+    if (cachedData && cachedData._ts && (now - cachedData._ts) < CACHE_TTL_MS) {
+      return this._normalizeAppSettings(cachedData)
+    }
+
+    // 2. 并发去重：如果已有 in-flight 请求，复用之（避免短时间内重复拉取）
+    if (this._appSettingsInFlight) {
+      return this._appSettingsInFlight
+    }
+
+    // 3. 缓存过期或不存在，尝试从后端拉取
+    this._appSettingsInFlight = (async () => {
+      try {
+        const syncConfig = await this.getSyncConfig()
+        if (!syncConfig.serverUrl) {
+          // 未配置服务器地址，返回缓存或默认值
+          return this._normalizeAppSettings(cachedData || {})
+        }
+        if (!syncConfig.appKey || !syncConfig.appSecret) {
+          // 未配置认证信息，返回缓存或默认值
+          return this._normalizeAppSettings(cachedData || {})
+        }
+        // URL 规范化：去掉末尾斜杠后拼接路径
+        const baseUrl = String(syncConfig.serverUrl).replace(/\/+$/, '')
+        const url = `${baseUrl}/api/app-settings/client`
+        const headers = await this.generateAuthHeaders(syncConfig.appKey, syncConfig.appSecret)
+        const res = await fetchWithTimeout(url, { method: 'GET', headers }, 15000, 1)
+        if (!res.ok) {
+          const text = await res.text().catch(() => '')
+          throw new AppError(ERROR_CODES.NETWORK_ERROR, `获取应用设置失败: ${res.status} ${text.slice(0, 200)}`)
+        }
+        const json = await res.json()
+        if (!json.success) {
+          throw new AppError(ERROR_CODES.UNKNOWN, json.error || '获取应用设置失败')
+        }
+        const fresh = { ...(json.data || {}), _ts: Date.now() }
+        await chrome.storage.local.set({ [CACHE_KEY]: fresh })
+        return this._normalizeAppSettings(fresh)
+      } catch (e) {
+        // 4. 后端请求失败：回退到缓存（即使过期）或内置默认值
+        console.warn('[ConfigService] getAppSettings 后端请求失败，使用缓存/默认值:', e.message)
+        if (cachedData) return this._normalizeAppSettings(cachedData)
+        return this._normalizeAppSettings({})
+      }
+    })()
+
+    try {
+      return await this._appSettingsInFlight
+    } finally {
+      // 无论成功失败，清除 in-flight 标记，下次调用可重新发起请求
+      this._appSettingsInFlight = null
+    }
+  }
+
+  /**
+   * 规范化应用设置（确保字段类型正确，提供默认值）
+   */
+  _normalizeAppSettings(raw) {
+    return {
+      agent_max_rounds: parseInt(raw.agent_max_rounds, 10) || 30,
+      agent_system_prompt: typeof raw.agent_system_prompt === 'string' && raw.agent_system_prompt.length > 0
+        ? raw.agent_system_prompt
+        : '',
+      pdf_max_size: parseInt(raw.pdf_max_size, 10) || 10485760,      // 默认 10MB
+      image_max_size: parseInt(raw.image_max_size, 10) || 5242880,    // 默认 5MB
+    }
+  }
+
+  /**
    * 获取 AppKey/AppSecret 认证信息
    */
   async getAppAuth() {

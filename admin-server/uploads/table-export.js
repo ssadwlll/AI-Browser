@@ -5,7 +5,15 @@
 
 (function () {
   'use strict'
-  if (document.getElementById('table-export-panel')) return
+  if (document.getElementById('table-export-panel')) {
+    return {
+      ok: true,
+      data: [],
+      count: 0,
+      hint: '表格导出面板已存在。用 extract_content 提取表格数据',
+      panelSelector: '#table-export-panel .tbl-item'
+    }
+  }
 
   var style = document.createElement('style')
   style.textContent = '#table-export-panel{position:fixed;bottom:20px;left:20px;width:380px;max-height:70vh;background:#fff;border-radius:12px;box-shadow:0 8px 32px rgba(0,0,0,.18);z-index:99998;font:12px/1.5 -apple-system,"PingFang SC","Microsoft YaHei",sans-serif;overflow:hidden;display:flex;flex-direction:column;transition:transform .3s}' +
@@ -189,4 +197,14 @@
 
   var observer = new MutationObserver(function() { var nt = detectTables(); if (nt.length !== tables.length) renderTableList() })
   observer.observe(document.body, { childList: true, subtree: true })
+
+  // ===== 返回标准化信封（供 AI 下一轮调用使用） =====
+  return {
+    ok: true,
+    data: [],
+    count: tables.length,
+    hint: '表格导出面板已注入页面，扫描到 ' + tables.length + ' 个表格。可用 extract_content 提取表格数据',
+    panelSelector: '#table-export-panel .tbl-item',
+    panelInfo: '面板支持：单表导出 CSV、全部导出、表格预览。每个 tbl-item 对应一个表格'
+  }
 })()

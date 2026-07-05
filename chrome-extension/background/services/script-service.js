@@ -26,11 +26,12 @@ export class ScriptService {
     try {
       const auth = await this.configService.getAppAuth()
       const authHeaders = await this.configService.generateAuthHeaders(auth.appKey, auth.appSecret)
-      const res = await fetchWithTimeout(`${config.serverUrl}/api/scripts?pageSize=100`, {
+      const baseUrl = config.serverUrl.replace(/\/+$/, '')
+      const res = await fetchWithTimeout(`${baseUrl}/api/scripts?pageSize=100`, {
         headers: authHeaders,
       }, 15000, 1)
       if (!res.ok) {
-        const text = await res.text()
+        const text = await res.text().catch(() => '')
         await chrome.storage.local.set({ syncError: `HTTP ${res.status}` })
         return { ok: false, error: `HTTP ${res.status}` }
       }
@@ -73,9 +74,14 @@ export class ScriptService {
     try {
       const auth = await this.configService.getAppAuth()
       const authHeaders = await this.configService.generateAuthHeaders(auth.appKey, auth.appSecret)
-      const res = await fetchWithTimeout(`${config.serverUrl}/api/scripts/${scriptId}/inject`, {
+      const baseUrl = config.serverUrl.replace(/\/+$/, '')
+      const res = await fetchWithTimeout(`${baseUrl}/api/scripts/${scriptId}/inject`, {
         headers: authHeaders,
       }, 15000, 0)
+      if (!res.ok) {
+        console.warn('[ScriptService] fetchInjectData HTTP', res.status, 'scriptId=', scriptId)
+        return null
+      }
       const data = await res.json()
       if (data.success && data.data) return data.data
     } catch (e) {

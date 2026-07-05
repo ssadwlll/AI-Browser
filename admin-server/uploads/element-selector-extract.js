@@ -678,4 +678,14 @@
   document.addEventListener('mouseover', onMouseOver, true);
   document.addEventListener('mouseout', onMouseOut, true);
   document.addEventListener('click', onClick, true);
+
+  // ===== 返回标准化信封（供 AI 下一轮调用使用） =====
+  return {
+    ok: true,
+    data: [],
+    count: 0,
+    hint: '元素选择器已激活，进入交互模式。鼠标悬停高亮、点击选中后自动生成选择器',
+    panelSelector: '#elem-select-bar',
+    panelInfo: '控制栏支持：选择元素、取消、退出。点击页面元素后自动生成 CSS 选择器和数据预览面板'
+  };
 })();

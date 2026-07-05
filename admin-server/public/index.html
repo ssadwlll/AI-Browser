@@ -64,6 +64,9 @@
         <div class="nav-item" data-page="aicalllogs" onclick="switchPage('aicalllogs')">
           <span class="icon">📋</span> 调用记录
         </div>
+        <div class="nav-item" data-page="convarchives" onclick="switchPage('convarchives')">
+          <span class="icon">💬</span> 对话归档
+        </div>
       </div>
       <div class="nav-group">
         <div class="nav-group-title">账户安全</div>
@@ -75,6 +78,12 @@
         </div>
         <div class="nav-item" data-page="appkeys" onclick="switchPage('appkeys')">
           <span class="icon">🔐</span> AppKey
+        </div>
+      </div>
+      <div class="nav-group">
+        <div class="nav-group-title">系统设置</div>
+        <div class="nav-item" data-page="appsettings" onclick="switchPage('appsettings')">
+          <span class="icon">⚙️</span> 应用设置
         </div>
       </div>
     </div>
@@ -282,6 +291,51 @@
       </div>
     </div>
 
+    <!-- ===== 对话归档 ===== -->
+    <div id="page-convarchives" class="page">
+      <div class="page-header"><h2>对话归档</h2></div>
+      <div class="stats-row" id="convOverview">
+        <div class="stat-card"><div class="stat-label">总任务数</div><div class="stat-value">-</div></div>
+        <div class="stat-card"><div class="stat-label">成功</div><div class="stat-value">-</div></div>
+        <div class="stat-card"><div class="stat-label">失败/未知</div><div class="stat-value">-</div></div>
+        <div class="stat-card"><div class="stat-label">平均轮次</div><div class="stat-value">-</div></div>
+        <div class="stat-card"><div class="stat-label">平均耗时(s)</div><div class="stat-value">-</div></div>
+      </div>
+      <div class="card">
+        <div class="filter-bar">
+          <div class="form-item"><label>关键词</label><input type="text" id="convKeyword" placeholder="任务内容关键词" onkeydown="if(event.key==='Enter')loadConvArchives(1)"></div>
+          <div class="form-item"><label>状态</label><select id="convStatusFilter"><option value="">全部</option><option value="success">成功</option><option value="partial">部分达成</option><option value="failure">失败</option><option value="unknown">未知</option></select></div>
+          <div class="form-item"><label>模型</label><input type="text" id="convModelFilter" placeholder="模型名"></div>
+          <div class="form-item"><label>开始</label><input type="date" id="convStartDate"></div>
+          <div class="form-item"><label>结束</label><input type="date" id="convEndDate"></div>
+          <button class="btn btn-primary btn-sm" onclick="loadConvArchives(1)">查询</button>
+          <button class="btn btn-sm" onclick="convResetFilter()">重置</button>
+        </div>
+        <div class="table-wrap">
+          <table><thead><tr><th>时间</th><th>Task ID</th><th>用户消息</th><th>模型</th><th>轮次</th><th>工具调用</th><th>状态</th><th>耗时</th><th>摘要</th><th>操作</th></tr></thead>
+          <tbody id="convList"><tr><td colspan="10" class="empty-state">加载中...</td></tr></tbody></table>
+        </div>
+        <div class="pager">
+          <span id="convPageInfo">-</span>
+          <div class="pager-btns">
+            <button class="btn btn-sm" onclick="convGoPage(convPage-1)">上一页</button>
+            <button class="btn btn-sm" onclick="convGoPage(convPage+1)">下一页</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 对话归档详情弹窗 -->
+    <div id="convDetailModal" class="modal-mask" style="display:none">
+      <div class="modal" style="width:96%;max-width:1200px;height:90%;overflow:auto">
+        <div class="modal-header">
+          <h3 id="convDetailTitle">对话详情</h3>
+          <button class="btn btn-sm" onclick="closeConvDetail()">关闭</button>
+        </div>
+        <div id="convDetailBody" style="padding:16px"></div>
+      </div>
+    </div>
+
     <!-- ===== 附件管理 ===== -->
     <div id="page-attachments" class="page">
       <div class="page-header"><h2>附件管理</h2></div>
@@ -362,10 +416,45 @@
       </div>
     </div>
 
+    <!-- ===== 应用设置（客户端全局配置） ===== -->
+    <div id="page-appsettings" class="page">
+      <div class="page-header"><h2>⚙️ 应用设置</h2></div>
+      <div class="card">
+        <div class="card-header">
+          <h3>客户端配置项</h3>
+          <button class="btn btn-primary btn-sm" onclick="saveAppSettings()">保存</button>
+        </div>
+        <div style="font-size:13px;color:var(--text2);line-height:1.8;margin-bottom:16px">
+          这些设置由插件客户端通过 <code>/api/app-settings/client</code>（appKey 认证）读取。<br>
+          客户端有 10 分钟本地缓存，保存后最长 10 分钟生效。
+        </div>
+        <div style="display:grid;grid-template-columns:1fr;gap:16px">
+          <div class="form-group">
+            <label>Agent 最大执行轮次 <span style="font-weight:400;font-size:11px;color:var(--text2)">agent_max_rounds</span></label>
+            <input type="number" id="setting_agent_max_rounds" min="5" max="100" step="1" value="30">
+            <div style="font-size:11px;color:var(--text2);margin-top:4px">控制 Agent 模式最大执行轮数，超出后强制结束并 finish_task</div>
+          </div>
+          <div class="form-group">
+            <label>PDF 上传大小上限（字节） <span style="font-weight:400;font-size:11px;color:var(--text2)">pdf_max_size</span></label>
+            <input type="number" id="setting_pdf_max_size" min="0" step="1024" value="10485760">
+            <div style="font-size:11px;color:var(--text2);margin-top:4px">默认 10MB（10485760）；插件客户端会校验上传文件大小并提示</div>
+          </div>
+          <div class="form-group">
+            <label>图片上传大小上限（字节） <span style="font-weight:400;font-size:11px;color:var(--text2)">image_max_size</span></label>
+            <input type="number" id="setting_image_max_size" min="0" step="1024" value="5242880">
+            <div style="font-size:11px;color:var(--text2);margin-top:4px">默认 5MB（5242880）；插件客户端会校验上传文件大小并提示</div>
+          </div>
+          <div class="form-group">
+            <label>Agent 系统提示词 <span style="font-weight:400;font-size:11px;color:var(--text2)">agent_system_prompt</span></label>
+            <textarea id="setting_agent_system_prompt" rows="12" style="font-family:Menlo,Monaco,monospace;font-size:12px" placeholder="控制 Agent 行为规范，留空时客户端使用内置默认提示词"></textarea>
+            <div style="font-size:11px;color:var(--text2);margin-top:4px">控制所有客户端 Agent 模式的系统提示词，留空时使用客户端内置默认</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
   </div>
 </div>
-
-<!-- ===== 弹窗 ===== -->
 
 <!-- 上传脚本弹窗 -->
 <div id="uploadModal" class="modal-overlay hidden" onclick="if(event.target===this)closeUploadModal()">
@@ -601,6 +690,8 @@ function switchPage(page) {
   if (page === 'aicalllogs') initAICallLogs();
   if (page === 'attachments') loadAttachments(1);
   if (page === 'forge') loadForgePage();
+  if (page === 'appsettings') loadAppSettings();
+  if (page === 'convarchives') loadConvArchives(1);
 }
 
 async function loadDashboard() {
@@ -622,6 +713,278 @@ async function loadDashboard() {
       }
     }
   } catch(e) { console.error(e); }
+}
+
+// ============ 应用设置（客户端全局配置） ============
+async function loadAppSettings() {
+  try {
+    const res = await api('GET', '/api/app-settings');
+    if (!res.success) { toast('加载失败: ' + (res.error || '未知错误'), 'error'); return; }
+    const rows = res.data || [];
+    const map = {};
+    for (const r of rows) map[r.setting_key] = r.setting_value;
+    document.getElementById('setting_agent_max_rounds').value = parseInt(map.agent_max_rounds, 10) || 30;
+    document.getElementById('setting_pdf_max_size').value = parseInt(map.pdf_max_size, 10) || 10485760;
+    document.getElementById('setting_image_max_size').value = parseInt(map.image_max_size, 10) || 5242880;
+    document.getElementById('setting_agent_system_prompt').value = map.agent_system_prompt || '';
+  } catch (e) { toast('加载失败: ' + e.message, 'error'); }
+}
+
+async function saveAppSettings() {
+  const items = [
+    { key: 'agent_max_rounds', value: parseInt(document.getElementById('setting_agent_max_rounds').value, 10) || 30 },
+    { key: 'pdf_max_size', value: parseInt(document.getElementById('setting_pdf_max_size').value, 10) || 0 },
+    { key: 'image_max_size', value: parseInt(document.getElementById('setting_image_max_size').value, 10) || 0 },
+    { key: 'agent_system_prompt', value: document.getElementById('setting_agent_system_prompt').value },
+  ];
+  try {
+    for (const it of items) {
+      const r = await api('PUT', '/api/app-settings/' + encodeURIComponent(it.key), { value: String(it.value) });
+      if (!r.success) { toast('保存 ' + it.key + ' 失败: ' + (r.error || ''), 'error'); return; }
+    }
+    toast('保存成功（客户端最长 10 分钟后生效）');
+  } catch (e) { toast('保存失败: ' + e.message, 'error'); }
+}
+
+// ============ 对话归档 ============
+let convPage = 1;
+const CONV_PAGE_SIZE = 20;
+
+function convResetFilter() {
+  document.getElementById('convKeyword').value = '';
+  document.getElementById('convStatusFilter').value = '';
+  document.getElementById('convModelFilter').value = '';
+  document.getElementById('convStartDate').value = '';
+  document.getElementById('convEndDate').value = '';
+  loadConvArchives(1);
+}
+
+async function loadConvArchives(page) {
+  convPage = page || 1;
+  const params = new URLSearchParams();
+  params.set('page', convPage);
+  params.set('pageSize', CONV_PAGE_SIZE);
+  const kw = document.getElementById('convKeyword').value.trim();
+  const status = document.getElementById('convStatusFilter').value;
+  const model = document.getElementById('convModelFilter').value.trim();
+  const start = document.getElementById('convStartDate').value;
+  const end = document.getElementById('convEndDate').value;
+  if (kw) params.set('keyword', kw);
+  if (status) params.set('status', status);
+  if (model) params.set('model', model);
+  if (start) params.set('start_date', start);
+  if (end) params.set('end_date', end);
+
+  try {
+    const [listRes, statsRes] = await Promise.all([
+      api('GET', '/api/conversation-archives?' + params.toString()),
+      api('GET', '/api/conversation-archives/stats/summary'),
+    ]);
+
+    // 概览统计
+    if (statsRes.success && statsRes.data) {
+      const s = statsRes.data;
+      const ov = document.getElementById('convOverview');
+      ov.innerHTML =
+        '<div class="stat-card"><div class="stat-label">总任务数</div><div class="stat-value">' + (s.total || 0) + '</div></div>' +
+        '<div class="stat-card"><div class="stat-label">成功</div><div class="stat-value">' + (s.success || 0) + '</div></div>' +
+        '<div class="stat-card"><div class="stat-label">失败/未知</div><div class="stat-value">' + (s.failed || 0) + '</div></div>' +
+        '<div class="stat-card"><div class="stat-label">平均轮次</div><div class="stat-value">' + (s.avgRounds || 0) + '</div></div>' +
+        '<div class="stat-card"><div class="stat-label">平均耗时(s)</div><div class="stat-value">' + ((s.avgDurationMs / 1000) || 0).toFixed(1) + '</div></div>';
+    }
+
+    // 列表
+    const tbody = document.getElementById('convList');
+    if (listRes.success && listRes.data && listRes.data.list && listRes.data.list.length > 0) {
+      tbody.innerHTML = listRes.data.list.map(r => {
+        const time = r.created_at ? new Date(r.created_at.replace(' ', 'T') + 'Z').toLocaleString('zh-CN', { hour12: false }) : '-';
+        const dur = r.duration_ms > 0 ? (r.duration_ms / 1000).toFixed(1) + 's' : '-';
+        const summary = r.summary ? esc(r.summary.length > 80 ? r.summary.slice(0, 80) + '...' : r.summary) : '<span style="color:var(--text2)">-</span>';
+        const userMsg = r.user_message ? esc(r.user_message.length > 60 ? r.user_message.slice(0, 60) + '...' : r.user_message) : '-';
+        const statusTag = r.status === 'success' ? '<span class="badge badge-success">成功</span>'
+          : r.status === 'partial' ? '<span class="badge" style="background:#fef3c7;color:#92400e">部分</span>'
+          : r.status === 'failure' ? '<span class="badge badge-error">失败</span>'
+          : '<span class="badge">未知</span>';
+        return '<tr>' +
+          '<td>' + time + '</td>' +
+          '<td><code style="font-size:11px">' + esc(r.task_id || '') + '</code></td>' +
+          '<td style="max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + esc(r.user_message || '') + '">' + userMsg + '</td>' +
+          '<td>' + esc(r.model || '-') + '</td>' +
+          '<td>' + (r.total_rounds || 0) + '</td>' +
+          '<td>' + (r.total_tool_calls || 0) + '</td>' +
+          '<td>' + statusTag + '</td>' +
+          '<td>' + dur + '</td>' +
+          '<td style="max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + esc(r.summary || '') + '">' + summary + '</td>' +
+          '<td><button class="btn btn-sm btn-primary" onclick="viewConvDetail(\'' + esc(r.task_id) + '\')">查看</button>' +
+          '<button class="btn btn-sm" style="margin-left:4px" onclick="deleteConvArchive(\'' + esc(r.task_id) + '\')">删除</button></td>' +
+          '</tr>';
+      }).join('');
+      const total = listRes.data.total || 0;
+      const totalPages = Math.ceil(total / CONV_PAGE_SIZE) || 1;
+      document.getElementById('convPageInfo').textContent = '第 ' + convPage + '/' + totalPages + ' 页 / 共 ' + total + ' 条';
+    } else {
+      tbody.innerHTML = '<tr><td colspan="10" class="empty-state">暂无数据</td></tr>';
+      document.getElementById('convPageInfo').textContent = '-';
+    }
+  } catch (e) {
+    document.getElementById('convList').innerHTML = '<tr><td colspan="10" class="empty-state">加载失败: ' + esc(e.message) + '</td></tr>';
+  }
+}
+
+function convGoPage(p) {
+  if (p < 1) return;
+  loadConvArchives(p);
+}
+
+async function viewConvDetail(taskId) {
+  try {
+    const res = await api('GET', '/api/conversation-archives/' + encodeURIComponent(taskId));
+    if (!res.success || !res.data) {
+      toast('加载失败: ' + (res.error || '记录不存在'), 'error');
+      return;
+    }
+    const r = res.data;
+    document.getElementById('convDetailTitle').textContent = '对话详情 - ' + r.task_id;
+    const body = document.getElementById('convDetailBody');
+    const time = r.created_at ? new Date(r.created_at.replace(' ', 'T') + 'Z').toLocaleString('zh-CN', { hour12: false }) : '-';
+    const dur = r.duration_ms > 0 ? (r.duration_ms / 1000).toFixed(1) + 's' : '-';
+    const statusTag = r.status === 'success' ? '<span class="badge badge-success">成功</span>'
+      : r.status === 'partial' ? '<span class="badge" style="background:#fef3c7;color:#92400e">部分</span>'
+      : r.status === 'failure' ? '<span class="badge badge-error">失败</span>'
+      : '<span class="badge">未知</span>';
+
+    let html = '<div style="background:var(--bg);padding:12px;border-radius:8px;margin-bottom:16px;font-size:13px;line-height:1.8">';
+    html += '<div><b>用户消息:</b> ' + esc(r.user_message || '-') + '</div>';
+    html += '<div><b>模型:</b> ' + esc(r.model || '-') + ' | <b>状态:</b> ' + statusTag + ' | <b>耗时:</b> ' + dur + '</div>';
+    html += '<div><b>总轮次:</b> ' + (r.total_rounds || 0) + ' | <b>工具调用:</b> ' + (r.total_tool_calls || 0) + ' | <b>时间:</b> ' + time + '</div>';
+    if (r.summary) {
+      html += '<div style="margin-top:8px;padding:8px;background:#fff;border-left:3px solid #4f8cff;border-radius:4px"><b>任务总结:</b><br>' + esc(r.summary).replace(/\n/g, '<br>') + '</div>';
+    }
+    html += '</div>';
+
+    const rounds = Array.isArray(r.rounds) ? r.rounds : [];
+    if (rounds.length === 0) {
+      html += '<div class="empty-state">无对话轮次数据</div>';
+    } else {
+      html += '<h3 style="margin:16px 0 8px">对话轮次（共 ' + rounds.length + ' 轮）</h3>';
+      // 轮次导航
+      html += '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px">';
+      rounds.forEach((rd, i) => {
+        const idx = i + 1;
+        const isFinish = rd.isFinishRound ? '✓' : '';
+        const isTextOnly = rd.isTextOnlyRound ? '💬' : '';
+        html += '<a href="#conv-round-' + idx + '" style="padding:4px 10px;background:var(--bg);border-radius:14px;font-size:12px;text-decoration:none;color:var(--text2)">第' + idx + '轮' + isFinish + isTextOnly + '</a>';
+      });
+      html += '</div>';
+
+      // 每轮详情
+      rounds.forEach((rd, i) => {
+        const idx = i + 1;
+        const roundNum = rd.round || idx;
+        const isFinish = rd.isFinishRound;
+        const isTextOnly = rd.isTextOnlyRound;
+        let tag = isFinish ? ' (完成 ✓)' : (isTextOnly ? ' (纯文本)' : '');
+        let borderColor = isFinish ? '#f0a040' : '#4f8cff';
+        html += '<div id="conv-round-' + idx + '" style="border:1px solid var(--border);border-left:4px solid ' + borderColor + ';border-radius:8px;padding:12px;margin-bottom:12px">';
+
+        // 轮次标题
+        html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">';
+        html += '<h4 style="margin:0;color:' + borderColor + '">第 ' + roundNum + ' 轮' + tag + '</h4>';
+        html += '<span style="font-size:11px;color:var(--text2)">' + (rd.timestamp ? new Date(rd.timestamp).toLocaleTimeString('zh-CN', { hour12: false }) : '') + '</span>';
+        html += '</div>';
+
+        // AI 思考（请求消息）
+        if (rd.response) {
+          const resp = rd.response;
+          // AI 输出文本
+          if (resp.content) {
+            html += '<div style="margin-bottom:10px">';
+            html += '<div style="font-weight:600;color:#4f8cff;margin-bottom:4px">💭 AI 思考过程</div>';
+            html += '<div style="background:#f8f9ff;padding:10px;border-radius:6px;font-size:13px;line-height:1.7;white-space:pre-wrap;max-height:400px;overflow:auto">' + esc(resp.content) + '</div>';
+            html += '</div>';
+          }
+          // 工具调用
+          const toolCalls = resp.tool_calls || resp.toolCalls || [];
+          if (Array.isArray(toolCalls) && toolCalls.length > 0) {
+            html += '<div style="margin-bottom:10px">';
+            html += '<div style="font-weight:600;color:#9333c8;margin-bottom:4px">🛠️ 调用工具 (' + toolCalls.length + ' 个)</div>';
+            toolCalls.forEach((tc, ti) => {
+              const fnName = tc.function?.name || tc.name || 'unknown';
+              let args = tc.function?.arguments || tc.arguments || tc.args || '';
+              if (typeof args === 'object') args = JSON.stringify(args, null, 2);
+              html += '<div style="background:#faf5ff;border:1px solid #e9d5ff;padding:8px;border-radius:6px;margin-bottom:6px;font-size:12px">';
+              html += '<div style="font-weight:600;color:#9333c8">[' + (ti + 1) + '] ' + esc(fnName) + '</div>';
+              html += '<details style="margin-top:4px"><summary style="cursor:pointer;color:var(--text2)">参数</summary>';
+              html += '<pre style="background:#f9f5ff;padding:8px;border-radius:4px;overflow:auto;margin-top:4px;font-size:11px">' + esc(typeof args === 'string' ? args : JSON.stringify(args, null, 2)) + '</pre>';
+              html += '</details>';
+              html += '</div>';
+            });
+            html += '</div>';
+          }
+        }
+
+        // 工具结果
+        const toolResults = rd.toolResults || rd.tool_results || [];
+        if (Array.isArray(toolResults) && toolResults.length > 0) {
+          html += '<div style="margin-bottom:10px">';
+          html += '<div style="font-weight:600;color:#16a34a;margin-bottom:4px">✅ 工具结果 (' + toolResults.length + ' 个)</div>';
+          toolResults.forEach((tr, ti) => {
+            const trName = tr.tool_name || tr.name || tr.functionName || ('tool_' + (ti + 1));
+            let trContent = tr.result || tr.content || tr.output || tr;
+            if (typeof trContent === 'object') trContent = JSON.stringify(trContent, null, 2);
+            const isError = tr.ok === false || tr.error;
+            html += '<div style="background:' + (isError ? '#fef2f2' : '#f0fdf4') + ';border:1px solid ' + (isError ? '#fecaca' : '#bbf7d0') + ';padding:8px;border-radius:6px;margin-bottom:6px;font-size:12px">';
+            html += '<div style="font-weight:600;color:' + (isError ? '#dc2626' : '#16a34a') + '">[' + (ti + 1) + '] ' + esc(trName) + (isError ? ' ❌' : ' ✓') + '</div>';
+            if (tr.error) {
+              html += '<div style="color:#dc2626;margin-top:4px">' + esc(tr.error) + '</div>';
+            }
+            html += '<details style="margin-top:4px"><summary style="cursor:pointer;color:var(--text2)">结果详情</summary>';
+            html += '<pre style="background:' + (isError ? '#fff5f5' : '#f7fff9') + ';padding:8px;border-radius:4px;overflow:auto;margin-top:4px;font-size:11px;max-height:300px">' + esc(typeof trContent === 'string' ? trContent : JSON.stringify(trContent, null, 2)) + '</pre>';
+            html += '</details>';
+            html += '</div>';
+          });
+          html += '</div>';
+        }
+
+        // 已存储数据摘要
+        const storedData = rd.storedData || rd.stored_data;
+        if (storedData && (Array.isArray(storedData) ? storedData.length > 0 : Object.keys(storedData).length > 0)) {
+          html += '<div style="margin-bottom:6px">';
+          html += '<div style="font-weight:600;color:#f59e0b;margin-bottom:4px">💾 已存储数据</div>';
+          html += '<details><summary style="cursor:pointer;color:var(--text2);font-size:12px">展开查看</summary>';
+          html += '<pre style="background:#fffbeb;padding:8px;border-radius:4px;overflow:auto;font-size:11px;max-height:200px">' + esc(JSON.stringify(storedData, null, 2)) + '</pre>';
+          html += '</details>';
+          html += '</div>';
+        }
+
+        html += '</div>';
+      });
+    }
+
+    body.innerHTML = html;
+    document.getElementById('convDetailModal').style.display = 'flex';
+  } catch (e) {
+    toast('加载详情失败: ' + e.message, 'error');
+  }
+}
+
+function closeConvDetail() {
+  document.getElementById('convDetailModal').style.display = 'none';
+}
+
+async function deleteConvArchive(taskId) {
+  if (!confirm('确认删除任务 ' + taskId + ' 的对话记录？此操作不可恢复。')) return;
+  try {
+    const res = await api('DELETE', '/api/conversation-archives/' + encodeURIComponent(taskId));
+    if (res.success) {
+      toast('删除成功');
+      loadConvArchives(convPage);
+    } else {
+      toast('删除失败: ' + (res.error || ''), 'error');
+    }
+  } catch (e) {
+    toast('删除失败: ' + e.message, 'error');
+  }
 }
 </script>
 

@@ -40,10 +40,15 @@ function openDB() {
 
     req.onsuccess = (event) => {
       _dbInstance = event.target.result
-      // 连接意外关闭时重置单例
+      // 连接意外关闭时重置单例，下次调用会自动重连
       _dbInstance.onclose = () => { _dbInstance = null }
       _dbInstance.onerror = (e) => { console.error('[DB] 数据库错误:', e.target.error) }
       resolve(_dbInstance)
+    }
+
+    // DB 版本升级被其他标签页阻塞时，必须 reject 否则调用方永久挂起
+    req.onblocked = () => {
+      reject(new Error('DB 升级被其他标签页阻塞，请关闭其他标签页后重试'))
     }
 
     req.onerror = (event) => {
@@ -55,6 +60,7 @@ function openDB() {
 
 /**
  * 事务辅助：在指定 store 上执行操作
+ * 同步抛错保护：fn(store) 同步抛出时主动 abort 事务并 reject，避免事务悬挂
  */
 async function withTx(storeName, mode, fn) {
   const db = await openDB()
@@ -64,10 +70,16 @@ async function withTx(storeName, mode, fn) {
     let result
     tx.oncomplete = () => resolve(result)
     tx.onerror = () => reject(tx.error)
-    tx.onabort = () => reject(tx.error)
-    const req = fn(store)
-    if (req) {
-      req.onsuccess = () => { result = req.result }
+    tx.onabort = () => reject(tx.error || new Error('Transaction aborted'))
+    try {
+      const req = fn(store)
+      if (req) {
+        req.onsuccess = () => { result = req.result }
+      }
+    } catch (e) {
+      // fn 同步抛错：主动中止事务，避免悬挂；Promise 已被 reject 不会重复 settle
+      try { tx.abort() } catch {}
+      reject(e)
     }
   })
 }
@@ -84,6 +96,8 @@ async function put(storeName, record) {
     tx.objectStore(storeName).put(record)
     tx.oncomplete = () => resolve(record)
     tx.onerror = () => reject(tx.error)
+    // 补充 onabort：事务被 abort 时（如配额超出）不会触发 onerror，必须显式 reject 否则调用方永久挂起
+    tx.onabort = () => reject(tx.error || new Error('Transaction aborted'))
   })
 }
 
@@ -98,6 +112,7 @@ async function putBatch(storeName, records) {
     for (const r of records) store.put(r)
     tx.oncomplete = () => resolve(records.length)
     tx.onerror = () => reject(tx.error)
+    tx.onabort = () => reject(tx.error || new Error('Transaction aborted'))
   })
 }
 
@@ -125,6 +140,7 @@ async function del(storeName, key) {
     tx.objectStore(storeName).delete(key)
     tx.oncomplete = () => resolve(true)
     tx.onerror = () => reject(tx.error)
+    tx.onabort = () => reject(tx.error || new Error('Transaction aborted'))
   })
 }
 
@@ -138,6 +154,7 @@ async function clear(storeName) {
     tx.objectStore(storeName).clear()
     tx.oncomplete = () => resolve(true)
     tx.onerror = () => reject(tx.error)
+    tx.onabort = () => reject(tx.error || new Error('Transaction aborted'))
   })
 }
 

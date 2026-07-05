@@ -36,10 +36,14 @@
   // 待办追踪面板变量声明（必须在 initTodoTracker 调用之前）
   let _todoHost = null
   let _todoShadow = null
+  // 拖动状态（模块作用域单例，避免 initTodoTracker 重复调用时累加监听器导致内存泄漏与拖动跳跃）
+  let _todoDragState = { isDragging: false, startX: 0, startY: 0, initialLeft: 0, initialTop: 0, host: null }
+  // 已注册的拖动监听器引用（用于 removeEventListener）
+  let _todoMouseHandler = null
+  let _todoMouseUpHandler = null
   let _todoVisible = false
   let _todoLastData = null
-  let _todoSwitchLogs = []
-  const STAGE_NAMES = { 1: 'Stage 1 DOM工具', 2: 'Stage 2 远程脚本', 3: 'Stage 3 数据汇总' }
+  // _todoSwitchLogs removed - flat list structure no longer uses stage switching
 
   // 初始化待办追踪面板
   initTodoTracker()
@@ -79,18 +83,16 @@
 
   // 监听注入脚本的回调（inject_js 通过 window.postMessage 反馈）
   // 为防止页面脚本伪造回调消息，使用 nonce 验证机制：
-  // 1. 内容脚本生成随机 nonce 并暴露到 window（非枚举，MAIN world 可读）
-  // 2. 注入脚本回调时携带 nonce: window.__AI_BROWSER_CB_NONCE__
+  // 1. 内容脚本生成随机 nonce 并写入 <html data-ai-cb-nonce>（DOM 属性，MAIN world 可读，isolated world 也能读）
+  // 2. 注入脚本回调时携带 nonce: document.documentElement.dataset.aiCbNonce
   // 3. 内容脚本校验 nonce 匹配
   // 注意：旧版注入脚本不携带 nonce，会被拒绝（建议更新脚本以包含 nonce）
+  // 实现：MV3 中 MAIN world 与 isolated world 的 window 对象分离，
+  //       通过 window.__AI_BROWSER_CB_NONCE__ 设置在 isolated world 的属性对 MAIN world 不可见，
+  //       因此改用 DOM 数据属性作为跨 world 的通信通道
   const _callbackNonce = Math.random().toString(36).slice(2) + Date.now().toString(36)
   try {
-    Object.defineProperty(window, '__AI_BROWSER_CB_NONCE__', {
-      value: _callbackNonce,
-      writable: false,
-      configurable: false,
-      enumerable: false,  // 隐藏，防止页面枚举
-    })
+    document.documentElement.dataset.aiCbNonce = _callbackNonce
   } catch (e) {
     console.warn('[AI Browser] 无法设置回调 nonce，回调验证将降级')
   }
@@ -102,7 +104,7 @@
       const msgNonce = event.data.nonce
       if (!msgNonce) {
         // 旧版脚本不携带 nonce，记录警告但拒绝（防止伪造）
-        console.warn('[AI Browser] 收到无 nonce 的回调消息，已拒绝。请更新注入脚本以包含 nonce: window.__AI_BROWSER_CB_NONCE__')
+        console.warn('[AI Browser] 收到无 nonce 的回调消息，已拒绝。请更新注入脚本以包含 nonce: document.documentElement.dataset.aiCbNonce')
         return
       }
       if (_callbackNonce && msgNonce !== _callbackNonce) {
@@ -360,20 +362,10 @@
         .todo-overview{display:flex;gap:10px;padding:8px 16px;background:#fafafa;border-bottom:1px solid rgba(79,89,102,0.06);flex-shrink:0;flex-wrap:wrap;align-items:center;font-size:12px}
         .todo-overview-item{display:flex;align-items:center;gap:4px;color:#8c8c8c}
         .todo-overview-item .val{font-weight:700;font-size:12px}
-        .todo-overview-item .val.stage1{color:#3bbfff}
-        .todo-overview-item .val.stage2{color:#ffab00}
-        .todo-overview-item .val.stage3{color:#00aa5b}
         .todo-progress-bar{width:80px;height:6px;background:#ececee;border-radius:3px;overflow:hidden;display:inline-block;vertical-align:middle}
         .todo-progress-fill{height:100%;background:#00aa5b;border-radius:3px;transition:width 0.4s ease;width:0%}
         .todo-last-tool{font-size:11px;color:#8c8c8c;margin-left:auto;font-style:italic}
         .todo-body{flex:1;overflow-y:auto;padding:10px 14px;max-height:400px}
-        .stage-group{margin-bottom:12px}
-        .stage-header{display:flex;align-items:center;gap:6px;padding:6px 10px;background:#fafafa;border-radius:8px 8px 0 0;border-left:3px solid #bdbdbd;font-size:12px;font-weight:700;color:#8c8c8c}
-        .stage-header.active{border-left-color:#00aa5b;color:#00aa5b;background:rgba(0,170,91,0.04)}
-        .stage-header.done{border-left-color:#3bbfff;color:#3bbfff}
-        .stage-header .badge{font-size:10px;padding:1px 6px;border-radius:8px;background:#ececee;color:#8c8c8c;margin-left:auto}
-        .stage-header.active .badge{background:rgba(0,170,91,0.1);color:#00aa5b}
-        .stage-header.done .badge{background:rgba(59,191,255,0.1);color:#3bbfff}
         .todo-list{list-style:none;margin:0;padding:0}
         .todo-item{display:flex;align-items:flex-start;gap:6px;padding:8px 10px;border-bottom:1px solid rgba(79,89,102,0.06);font-size:12px;line-height:1.4;transition:background 0.2s}
         .todo-item:last-child{border-bottom:none}
@@ -388,7 +380,6 @@
         .todo-desc{color:#404040;font-size:12px}
         .todo-keys{margin-top:3px;font-size:10px;color:#8c8c8c}
         .todo-keys .key{display:inline-block;background:#ececee;padding:1px 4px;border-radius:3px;margin-right:3px;color:#595959;font-family:Consolas,monospace}
-        .stage-switch-log{padding:6px 10px;background:rgba(255,171,0,0.06);border-left:2px solid #ffab00;border-radius:4px;margin:6px 0;font-size:11px;color:#ffab00}
         .empty-state{text-align:center;color:#8c8c8c;padding:40px 20px;font-size:12px;line-height:1.6}
         .toast{position:absolute;top:12px;right:12px;background:#00aa5b;color:#fff;padding:6px 12px;border-radius:6px;font-size:12px;opacity:0;transition:opacity 0.3s;pointer-events:none;z-index:10}
         .toast.show{opacity:1}
@@ -405,7 +396,7 @@
           </div>
         </div>
         <div class="todo-overview" id="overview" style="display:none">
-          <div class="todo-overview-item">阶段: <span class="val" id="ovStage">-</span></div>
+          <div class="todo-overview-item">当前: <span class="val" id="ovStage">-</span></div>
           <div class="todo-overview-item">进度:
             <div class="todo-progress-bar"><div class="todo-progress-fill" id="ovProgressFill"></div></div>
             <span class="val" id="ovProgress">0%</span>
@@ -432,7 +423,6 @@
     })
     _todoShadow.getElementById('clearBtn').addEventListener('click', () => {
       _todoLastData = null
-      _todoSwitchLogs = []
       _todoShadow.getElementById('overview').style.display = 'none'
       _todoShadow.getElementById('todoBody').innerHTML = '<div class="empty-state">已清空，等待新任务…</div>'
       showTodoToast('已清空')
@@ -441,43 +431,57 @@
     // 拖动功能
     const header = _todoShadow.getElementById('todoPanel').querySelector('.todo-header')
     const panel = _todoShadow.getElementById('todoPanel')
-    let isDragging = false
-    let startX, startY, initialLeft, initialTop
+
+    // 移除旧监听器（initTodoTracker 重复调用时避免泄漏）
+    if (_todoMouseHandler) {
+      document.removeEventListener('mousemove', _todoMouseHandler)
+      document.removeEventListener('mouseup', _todoMouseUpHandler)
+    }
 
     header.addEventListener('mousedown', (e) => {
       // 忽略按钮点击
       if (e.target.closest('button')) return
-      
-      isDragging = true
+
+      _todoDragState.isDragging = true
       const rect = panel.getBoundingClientRect()
-      startX = e.clientX
-      startY = e.clientY
-      initialLeft = rect.left
-      initialTop = rect.top
-      
+      _todoDragState.startX = e.clientX
+      _todoDragState.startY = e.clientY
+      _todoDragState.initialLeft = rect.left
+      _todoDragState.initialTop = rect.top
+      _todoDragState.host = _todoHost
+
       // 切换到绝对定位以便拖动
       _todoHost.style.position = 'fixed'
-      _todoHost.style.top = initialTop + 'px'
-      _todoHost.style.left = initialLeft + 'px'
+      _todoHost.style.top = _todoDragState.initialTop + 'px'
+      _todoHost.style.left = _todoDragState.initialLeft + 'px'
       _todoHost.style.right = 'auto'
-      
+
       e.preventDefault()
     })
 
-    document.addEventListener('mousemove', (e) => {
-      if (!isDragging) return
-      
-      const dx = e.clientX - startX
-      const dy = e.clientY - startY
-      _todoHost.style.left = (initialLeft + dx) + 'px'
-      _todoHost.style.top = (initialTop + dy) + 'px'
-    })
+    // 模块作用域单例：所有 initTodoTracker 调用共享同一对监听器
+    _todoMouseHandler = (e) => {
+      if (!_todoDragState.isDragging) return
 
-    document.addEventListener('mouseup', () => {
-      if (isDragging) {
-        isDragging = false
+      const dx = e.clientX - _todoDragState.startX
+      const dy = e.clientY - _todoDragState.startY
+      const host = _todoDragState.host
+      if (!host) return
+      // 限制在视口内（避免拖出窗口无法拖回）
+      const newLeft = Math.max(0, Math.min(window.innerWidth - 100, _todoDragState.initialLeft + dx))
+      const newTop = Math.max(0, Math.min(window.innerHeight - 40, _todoDragState.initialTop + dy))
+      host.style.left = newLeft + 'px'
+      host.style.top = newTop + 'px'
+    }
+
+    _todoMouseUpHandler = () => {
+      if (_todoDragState.isDragging) {
+        _todoDragState.isDragging = false
       }
-    })
+    }
+
+    document.addEventListener('mousemove', _todoMouseHandler)
+    document.addEventListener('mouseup', _todoMouseUpHandler)
 
     // DOM 守护
     const guardian = new MutationObserver(() => {
@@ -503,21 +507,16 @@
   }
 
   function copyAllTodos() {
-    if (!_todoLastData || !_todoLastData.stages) {
+    if (!_todoLastData || !_todoLastData.items) {
       showTodoToast('没有待办列表')
       return
     }
     let text = ''
-    for (const stage of _todoLastData.stages) {
-      text += `[${STAGE_NAMES[stage.stage] || 'Stage ' + stage.stage}] ${stage.name || ''}\n`
-      for (const todo of stage.subTodos || []) {
-        const status = todo._status || 'pending'
-        const icon = status === 'done' ? '✅' : status === 'failed' ? '❌' : status === 'running' ? '⏳' : '⬜'
-        text += `  ${icon} [${todo.id}] ${todo.action}: ${todo.description || ''}\n`
-        if (todo.dataOutputKey) text += `       out: ${todo.dataOutputKey}\n`
-        if (todo.dataDependKeys?.length) text += `       dep: ${todo.dataDependKeys.join(', ')}\n`
-      }
-      text += '\n'
+    const statusIcons = { done: '✅', failed: '❌', running: '⏳', pending: '⬜' }
+    for (const todo of _todoLastData.items) {
+      const status = todo._status || (todo.id === _todoLastData.progress?.currentTodo?.id ? 'running' : 'pending')
+      const icon = statusIcons[status] || '⬜'
+      text += `${icon} [${todo.id}] ${todo.action}: ${todo.description || ''}\n`
     }
     navigator.clipboard.writeText(text)
       .then(() => showTodoToast('已复制到剪贴板'))
@@ -525,11 +524,10 @@
   }
 
   function updateTodoPanel(data) {
-    if (!data || !data.stages || data.stages.length === 0) {
+    if (!data || !data.items || data.items.length === 0) {
       // 任务完成时自动隐藏待办面板
       if (data && data._taskDone && _todoVisible) {
         _todoLastData = null
-        _todoSwitchLogs = []
         _todoShadow.getElementById('overview').style.display = 'none'
         _todoShadow.getElementById('todoBody').innerHTML = '<div class="empty-state">任务已完成，等待新任务…</div>'
         setTimeout(() => {
@@ -541,14 +539,6 @@
     }
 
     _todoLastData = data
-
-    // 记录阶段切换日志（限制最大数量，防止长任务累积导致内存膨胀）
-    if (data.stageSwitch) {
-      _todoSwitchLogs.push(`${data.stageSwitch.reason} → ${STAGE_NAMES[data.stageSwitch.to] || 'Stage ' + data.stageSwitch.to}`)
-      if (_todoSwitchLogs.length > 50) {
-        _todoSwitchLogs.splice(0, _todoSwitchLogs.length - 50)
-      }
-    }
 
     // 自动显示
     if (!_todoVisible) {
@@ -564,11 +554,10 @@
 
     // Update overview
     const progress = data.progress || {}
-    const currentStage = data.currentStage || 1
-    const stageName = STAGE_NAMES[currentStage] || `Stage ${currentStage}`
-    const stageCls = currentStage === 1 ? 'stage1' : currentStage === 2 ? 'stage2' : 'stage3'
-    _todoShadow.getElementById('ovStage').textContent = stageName
-    _todoShadow.getElementById('ovStage').className = 'val ' + stageCls
+    const currentTodo = progress.currentTodo
+    const currentLabel = currentTodo ? `${currentTodo.id}: ${currentTodo.description || currentTodo.action}` : '无'
+    _todoShadow.getElementById('ovStage').textContent = currentLabel
+    _todoShadow.getElementById('ovStage').className = 'val'
     const pct = progress.percentage || 0
     _todoShadow.getElementById('ovProgressFill').style.width = pct + '%'
     _todoShadow.getElementById('ovProgress').textContent = pct + '%'
@@ -580,99 +569,50 @@
     }
 
     // Find current todo id to mark as running
-    const currentTodoId = progress.currentTodo?.id || null
-    const currentAction = progress.currentTodo?.action || null
+    const currentTodoId = currentTodo?.id || null
+    const currentAction = currentTodo?.action || null
     const isExecutingCurrentTodo = data.lastTool && currentAction && (
       data.lastTool === currentAction ||
       (currentAction.startsWith('inject_script_') && data.lastTool.startsWith('inject_script_'))
     )
 
-    // Render stages
-    for (const stage of data.stages) {
-      const stageNum = stage.stage
-      const isActive = stageNum === currentStage
-      const isDone = stageNum < currentStage || (stageNum === currentStage && !currentTodoId && progress.completed > 0)
+    // Render flat list
+    const list = document.createElement('ul')
+    list.className = 'todo-list'
 
-      const group = document.createElement('div')
-      group.className = 'stage-group'
+    const statusIcons = { done: '✅', failed: '❌', running: '⏳', pending: '⬜' }
 
-      const header = document.createElement('div')
-      header.className = 'stage-header' + (isActive ? ' active' : '') + (isDone ? ' done' : '')
-      const headerText = STAGE_NAMES[stageNum] || `Stage ${stageNum}`
-      const subTodos = stage.subTodos || []
-      const completedCount = subTodos.filter(t => t._status === 'done').length
-      // 用 DOM API 构建，避免 innerHTML（headerText 来自常量，但保持一致性）
-      const headerLabel = document.createElement('span')
-      headerLabel.textContent = headerText
-      const headerBadge = document.createElement('span')
-      headerBadge.className = 'badge'
-      headerBadge.textContent = `${completedCount}/${subTodos.length}`
-      header.appendChild(headerLabel)
-      header.appendChild(headerBadge)
-      group.appendChild(header)
+    for (const todo of data.items) {
+      const li = document.createElement('li')
+      let status = todo._status || 'pending'
+      if (todo.id === currentTodoId && !todo._status && isExecutingCurrentTodo) status = 'running'
+      li.className = 'todo-item ' + status
 
-      const list = document.createElement('ul')
-      list.className = 'todo-list'
+      const icon = document.createElement('span')
+      icon.className = 'todo-icon'
+      icon.textContent = statusIcons[status] || '⬜'
+      li.appendChild(icon)
 
-      for (const todo of subTodos) {
-        const li = document.createElement('li')
-        let status = todo._status || 'pending'
-        if (todo.id === currentTodoId && !todo._status && isExecutingCurrentTodo) status = 'running'
-        li.className = 'todo-item ' + status
+      const content = document.createElement('div')
+      content.className = 'todo-content'
+      const todoId = document.createElement('span')
+      todoId.className = 'todo-id'
+      todoId.textContent = todo.id == null ? '' : String(todo.id)
+      const todoAction = document.createElement('span')
+      todoAction.className = 'todo-action'
+      todoAction.textContent = todo.action == null ? '' : String(todo.action)
+      const todoDesc = document.createElement('span')
+      todoDesc.className = 'todo-desc'
+      todoDesc.textContent = todo.description == null ? '' : String(todo.description)
+      content.appendChild(todoId)
+      content.appendChild(todoAction)
+      content.appendChild(todoDesc)
 
-        const icon = document.createElement('span')
-        icon.className = 'todo-icon'
-        const statusIcons = { done: '✅', failed: '❌', running: '⏳', pending: '⬜' }
-        icon.textContent = statusIcons[status] || '⬜'
-        li.appendChild(icon)
-
-        const content = document.createElement('div')
-        content.className = 'todo-content'
-        // 使用 DOM API + textContent 避免 LLM 输出注入 HTML（XSS 防护）
-        const todoId = document.createElement('span')
-        todoId.className = 'todo-id'
-        todoId.textContent = todo.id == null ? '' : String(todo.id)
-        const todoAction = document.createElement('span')
-        todoAction.className = 'todo-action'
-        todoAction.textContent = todo.action == null ? '' : String(todo.action)
-        const todoDesc = document.createElement('span')
-        todoDesc.className = 'todo-desc'
-        todoDesc.textContent = todo.description == null ? '' : String(todo.description)
-        content.appendChild(todoId)
-        content.appendChild(todoAction)
-        content.appendChild(todoDesc)
-
-        const keysDiv = document.createElement('div')
-        keysDiv.className = 'todo-keys'
-        if (todo.dataOutputKey) {
-          const outKey = document.createElement('span')
-          outKey.className = 'key'
-          outKey.textContent = `out: ${todo.dataOutputKey}`
-          keysDiv.appendChild(outKey)
-        }
-        if (Array.isArray(todo.dataDependKeys) && todo.dataDependKeys.length > 0) {
-          const depKey = document.createElement('span')
-          depKey.className = 'key'
-          depKey.textContent = `dep: ${todo.dataDependKeys.join(', ')}`
-          keysDiv.appendChild(depKey)
-        }
-        if (keysDiv.children.length > 0) content.appendChild(keysDiv)
-
-        li.appendChild(content)
-        list.appendChild(li)
-      }
-
-      group.appendChild(list)
-      todoBody.appendChild(group)
+      li.appendChild(content)
+      list.appendChild(li)
     }
 
-    // Append stage switch logs
-    for (const log of _todoSwitchLogs) {
-      const div = document.createElement('div')
-      div.className = 'stage-switch-log'
-      div.textContent = `🔄 ${log}`
-      todoBody.appendChild(div)
-    }
+    todoBody.appendChild(list)
   }
 
   function toggleTodoPanel() {
@@ -718,6 +658,30 @@
   }
 
   // ---- 页面内容提取 ----
+  // 深查询函数：穿透 Shadow DOM
+  function _dqsa(selector, root, depth) {
+    root = root || document
+    depth = depth || 0
+    if (depth > 10) return []
+    let results = [...root.querySelectorAll(selector)]
+    // 只对自定义元素（标签名含-）检查shadowRoot，避免遍历所有元素
+    const allEls = root.querySelectorAll('*')
+    for (const el of allEls) {
+      if (el.shadowRoot && el.tagName.includes('-')) {
+        try {
+          results = results.concat(_dqsa(selector, el.shadowRoot, depth + 1))
+        } catch (e) {
+          // shadowRoot查询可能失败，忽略
+        }
+      }
+    }
+    return results
+  }
+
+  function _dqsaOne(selector) {
+    return _dqsa(selector)[0] || null
+  }
+
   function extractPageContent() {
     const result = {
       url: location.href,
@@ -727,8 +691,12 @@
       wordCount: 0,
     }
 
-    const metaDesc = document.querySelector('meta[name="description"]')
-    if (metaDesc) result.description = metaDesc.content || ''
+    try {
+      const metaDesc = _dqsaOne('meta[name="description"]')
+      if (metaDesc) result.description = metaDesc.content || ''
+    } catch (e) {
+      console.warn('[extractPageContent] meta描述提取失败:', e.message)
+    }
 
     const selectors = [
       'article', 'main', '[role="main"]',
@@ -739,14 +707,24 @@
     ]
 
     let mainEl = null
-    for (const sel of selectors) {
-      mainEl = document.querySelector(sel)
-      if (mainEl) break
+    try {
+      for (const sel of selectors) {
+        mainEl = _dqsaOne(sel)
+        if (mainEl) break
+      }
+    } catch (e) {
+      console.warn('[extractPageContent] 选择器查询失败:', e.message)
+      mainEl = null
     }
 
     if (!mainEl) mainEl = document.body
 
-    result.content = cleanTextContent(mainEl)
+    try {
+      result.content = cleanTextContent(mainEl)
+    } catch (e) {
+      console.warn('[extractPageContent] 文本提取失败，回退到textContent:', e.message)
+      result.content = (mainEl.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 12000)
+    }
     result.wordCount = result.content.length
 
     const MAX_LENGTH = 12000
@@ -758,20 +736,15 @@
   }
 
   function cleanTextContent(el) {
-    const clone = el.cloneNode(true)
-
     const removeSelectors = [
       'script', 'style', 'noscript', 'iframe', 'svg',
       'nav', 'header', 'footer',
       '.ad', '.ads', '.advertisement',
-      '.sidebar', '.comment', '.comments',
+      '.sidebar',
       '.social-share', '.share-btn',
       '.related', '.recommend',
       '[role="navigation"]', '[role="banner"]', '[role="contentinfo"]',
     ]
-    removeSelectors.forEach(sel => {
-      clone.querySelectorAll(sel).forEach(e => e.remove())
-    })
 
     const blocks = []
     const walk = (node) => {
@@ -782,11 +755,15 @@
       }
       if (node.nodeType !== Node.ELEMENT_NODE) return
       if (node.tagName === 'BR') { blocks.push('\n'); return }
+      // 跳过应移除的元素（注释除外，评论内容需保留）
+      if (node !== el && removeSelectors.some(sel => node.matches?.(sel))) return
+      // 穿透 Shadow DOM：将 shadowRoot 子节点也纳入文本提取
+      const children = node.shadowRoot ? [...node.shadowRoot.childNodes, ...node.childNodes] : node.childNodes
       const isBlock = ['P', 'DIV', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'LI', 'TR', 'BLOCKQUOTE', 'PRE'].includes(node.tagName)
-      for (const child of node.childNodes) walk(child)
+      for (const child of children) walk(child)
       if (isBlock) blocks.push('\n')
     }
-    walk(clone)
+    walk(el)
 
     return blocks.join(' ')
       .replace(/\n{3,}/g, '\n\n')
@@ -917,7 +894,9 @@
       }
       if (el.type === 'radio' || el.type === 'checkbox') {
         if (el.name) {
-          const groupValues = [...form.querySelectorAll(`input[name="${el.name}"], input[name="$${el.name}"]`)].map(r => r.value).filter(v => v)
+          // 注意：模板字符串中 $$ 会被替换为字面 $，导致第二个选择器查找 name 以 $ 开头的输入框（永远查不到）。
+          // 这里只需要匹配同 name 的所有 radio/checkbox，去掉错误的前缀
+          const groupValues = [...form.querySelectorAll(`input[name="${el.name}"]`)].map(r => r.value).filter(v => v)
           if (groupValues.length) field.options = groupValues
         }
       }
@@ -955,8 +934,8 @@
                            (el.value === '' ? optionEls[Math.min(idx, optionEls.length - 1)] : null)
           if (matchOpt) el.value = matchOpt.value
         } else if (el.type === 'radio') {
-          const radio = form.querySelector(`input[name="${el.name}"][value="${value}"]`) ||
-                        form.querySelector(`input[name="$${el.name}"][value="${value}"]`)
+          // 同样移除错误的 $$ 前缀选择器
+          const radio = form.querySelector(`input[name="${el.name}"][value="${value}"]`)
           if (radio) radio.checked = true
         } else if (el.type === 'checkbox') {
           el.checked = ['true', 'yes', '是', '1'].includes(String(value).toLowerCase())
