@@ -82,12 +82,17 @@ export class TodoScheduler {
     }
 
     const usedIds = new Set()
+    // 辅助工具不能作为待办 action（它们不推进待办进度，会导致任务卡住）
+    const AUXILIARY_ACTIONS = ['search_tools', 'generate_script', 'read_page_content', 'detect_page_template', 'get_interactive_elements', 'find_text_on_page']
     for (const item of items) {
       if (!item.id) errors.push('有待办缺少 id')
       if (!item.action) errors.push('有待办缺少 action')
       if (!item.description) errors.push('有待办缺少 description')
       if (item.id && usedIds.has(item.id)) errors.push(`id "${item.id}" 重复`)
       if (item.id) usedIds.add(item.id)
+      if (item.action && AUXILIARY_ACTIONS.includes(item.action)) {
+        errors.push(`待办 "${item.id}" 的 action "${item.action}" 是辅助工具，不能作为主待办。请用 extract_content / inject_script_N / click_element / navigate_to / finish_task 等`)
+      }
     }
 
     if (errors.length > 0) {

@@ -1319,9 +1319,11 @@ ${allData.length > 0 ? '全局存储:\n' + allData.join('\n') : ''}${payloadItem
                 }
               }
               // 在页面中注入 window.__store 并执行 code
-              // 采用 new Function(code) 执行，支持 return 语法；注入 storeData 作为 window.__store
+              // 关键：必须用 world: 'MAIN'，否则 isolated world 受页面 CSP 限制，new Function 会被拦截
+              // 参见 inject_script_N 的实现（tool-service.js executeJSTool）
               const [execResult] = await chrome.scripting.executeScript({
                 target: { tabId: targetTab.id },
+                world: 'MAIN',
                 func: (storeObj, userCode) => {
                   try {
                     window.__store = window.__store || {}
@@ -1341,7 +1343,12 @@ ${allData.length > 0 ? '全局存储:\n' + allData.join('\n') : ''}${payloadItem
               if (r && r.ok) {
                 toolResult = JSON.stringify({ ok: true, result: r.result })
               } else {
-                toolResult = JSON.stringify({ ok: false, error: r?.error || '代码执行失败' })
+                // CSP 失败时给替代方案提示，避免 AI 困惑循环
+                const errMsg = r?.error || '代码执行失败'
+                const hint = errMsg.includes('Content Security Policy') || errMsg.includes('unsafe-eval')
+                  ? ' [建议：改用 inject_script_N（search_tools 查找）或 DOM 工具组合完成]'
+                  : ''
+                toolResult = JSON.stringify({ ok: false, error: errMsg + hint })
               }
             } catch (e) {
               if (e.message?.includes('Cannot access a chrome:// URL') || e.message?.includes('Cannot access contents of url')) {
