@@ -696,6 +696,11 @@ async function loadAgentMode() {
             if (btn) btn.classList.remove('active')
             chrome.storage.local.remove('agentMode')
           }
+        } else if (msg.type === 'agentDataReport') {
+          // 方案A：finish_task 带 data_refs 时，渲染结构化数据报告
+          if (msg.items && msg.items.length > 0) {
+            renderDataReport(msg.items)
+          }
         } else if (msg.type === 'agentError') {
           card.querySelector('.agent-step-title').textContent = '错误'
           card.querySelector('.agent-step-body').textContent = msg.error
@@ -1963,6 +1968,213 @@ document.getElementById('openBuiltInToolsBtn')?.addEventListener('click', () => 
 document.getElementById('builtInToolsClose')?.addEventListener('click', () => {
   if (_toolsPanel) _toolsPanel.classList.remove('show')
 })
+
+// ============================================================
+// 数据报告渲染（方案A：finish_task 带 data_refs 时自动渲染结构化数据）
+// ============================================================
+
+function renderDataReport(items) {
+  const welcome = chatMessages.querySelector('.welcome')
+  if (welcome) welcome.remove()
+
+  const reportDiv = document.createElement('div')
+  reportDiv.className = 'data-report'
+
+  const header = document.createElement('div')
+  header.className = 'data-report-header'
+  header.innerHTML = `
+    <span class="data-report-icon">&#128202;</span>
+    <span class="data-report-title">采集数据报告</span>
+    <span class="data-report-count">${items.length} 份数据</span>
+  `
+  reportDiv.appendChild(header)
+
+  for (const item of items) {
+    const section = document.createElement('div')
+    section.className = 'data-report-section'
+    renderDataSection(item, section)
+    reportDiv.appendChild(section)
+  }
+
+  chatMessages.appendChild(reportDiv)
+  chatMessages.scrollTop = chatMessages.scrollHeight
+}
+
+function renderDataSection(item, container) {
+  const { id, toolName, schema, count, data } = item
+
+  const sectionHeader = document.createElement('div')
+  sectionHeader.className = 'data-section-header'
+  sectionHeader.innerHTML = `
+    <span class="data-section-toggle">&#9654;</span>
+    <span class="data-section-id">${escapeHtml(id)}</span>
+    <span class="data-section-meta">${escapeHtml(toolName)} · ${count} 条</span>
+  `
+
+  const sectionBody = document.createElement('div')
+  sectionBody.className = 'data-section-body'
+  sectionBody.style.display = 'none'
+
+  // 默认展开第一份
+  if (container === container.parentElement?.firstElementChild) {
+    sectionBody.style.display = 'block'
+    sectionHeader.querySelector('.data-section-toggle').textContent = '▼'
+  }
+
+  let isExpanded = false
+  sectionHeader.addEventListener('click', () => {
+    isExpanded = !isExpanded
+    sectionBody.style.display = isExpanded ? 'block' : 'none'
+    sectionHeader.querySelector('.data-section-toggle').textContent = isExpanded ? '▼' : '▶'
+  })
+
+  container.appendChild(sectionHeader)
+  container.appendChild(sectionBody)
+
+  // 根据 schema 和数据类型选择渲染方式
+  const effectiveSchema = schema || (Array.isArray(data) && data.length > 0 && typeof data[0] === 'object'
+    ? Object.keys(data[0]).reduce((acc, k) => { acc[k] = typeof data[0][k]; return acc }, {})
+    : null)
+
+  if (data && data._truncated) {
+    const warn = document.createElement('div')
+    warn.className = 'data-truncated-warn'
+    warn.textContent = '⚠ 数据量过大，已截断显示前部分'
+    sectionBody.appendChild(warn)
+  }
+
+  if (Array.isArray(data)) {
+    renderArrayAsTable(data, effectiveSchema, sectionBody)
+  } else if (data && typeof data === 'object') {
+    renderObjectAsFields(data, sectionBody)
+  } else {
+    const valDiv = document.createElement('div')
+    valDiv.className = 'data-primitive'
+    valDiv.textContent = String(data)
+    sectionBody.appendChild(valDiv)
+  }
+
+  // 操作按钮：复制 JSON
+  const actions = document.createElement('div')
+  actions.className = 'data-section-actions'
+  const copyBtn = document.createElement('button')
+  copyBtn.className = 'data-copy-btn'
+  copyBtn.textContent = '复制 JSON'
+  copyBtn.addEventListener('click', () => {
+    navigator.clipboard.writeText(JSON.stringify(data, null, 2)).then(() => {
+      copyBtn.textContent = '已复制'
+      setTimeout(() => { copyBtn.textContent = '复制 JSON' }, 1500)
+    })
+  })
+  actions.appendChild(copyBtn)
+  sectionBody.appendChild(actions)
+}
+
+function renderArrayAsTable(arr, schema, container) {
+  if (arr.length === 0) {
+    const empty = document.createElement('div')
+    empty.className = 'data-empty'
+    empty.textContent = '(空数组)'
+    container.appendChild(empty)
+    return
+  }
+
+  const isArrayOfPrimitives = arr.every(x => typeof x !== 'object' || x === null)
+  if (isArrayOfPrimitives) {
+    const list = document.createElement('div')
+    list.className = 'data-list'
+    list.innerHTML = arr.map((v, i) => `<div class="data-list-item"><span class="data-list-idx">${i}</span><span class="data-list-val">${escapeHtml(String(v))}</span></div>`).join('')
+    container.appendChild(list)
+    return
+  }
+
+  const keys = schema ? Object.keys(schema) : Object.keys(arr[0] || {})
+  if (keys.length === 0) {
+    const empty = document.createElement('div')
+    empty.className = 'data-empty'
+    empty.textContent = '(无字段)'
+    container.appendChild(empty)
+    return
+  }
+
+  const tableWrap = document.createElement('div')
+  tableWrap.className = 'data-table-wrap'
+  const table = document.createElement('table')
+  table.className = 'data-table'
+
+  const thead = document.createElement('thead')
+  thead.innerHTML = `<tr><th>#</th>${keys.map(k => `<th title="${escapeHtml(schema?.[k] || '')}">${escapeHtml(k)}<span class="data-col-type">${escapeHtml(schema?.[k] || '')}</span></th>`).join('')}</tr>`
+  table.appendChild(thead)
+
+  const tbody = document.createElement('tbody')
+  const MAX_ROWS = 200
+  const displayRows = arr.length > MAX_ROWS ? arr.slice(0, MAX_ROWS) : arr
+  for (let i = 0; i < displayRows.length; i++) {
+    const row = displayRows[i] || {}
+    const tr = document.createElement('tr')
+    let html = `<td class="data-row-idx">${i}</td>`
+    for (const k of keys) {
+      const v = row[k]
+      let cellHtml = ''
+      if (v === null || v === undefined) {
+        cellHtml = '<span class="data-null">null</span>'
+      } else if (typeof v === 'object') {
+        cellHtml = `<span class="data-obj-preview" title="${escapeHtml(JSON.stringify(v).slice(0, 200))}">${escapeHtml(JSON.stringify(v).slice(0, 50))}</span>`
+      } else if (typeof v === 'string' && v.length > 80) {
+        cellHtml = `<span title="${escapeHtml(v)}">${escapeHtml(v.slice(0, 80))}...</span>`
+      } else {
+        cellHtml = escapeHtml(String(v))
+      }
+      html += `<td>${cellHtml}</td>`
+    }
+    tr.innerHTML = html
+    tbody.appendChild(tr)
+  }
+  table.appendChild(tbody)
+  tableWrap.appendChild(table)
+  container.appendChild(tableWrap)
+
+  if (arr.length > MAX_ROWS) {
+    const more = document.createElement('div')
+    more.className = 'data-more-rows'
+    more.textContent = `仅显示前 ${MAX_ROWS} 行，共 ${arr.length} 行`
+    container.appendChild(more)
+  }
+}
+
+function renderObjectAsFields(obj, container) {
+  const keys = Object.keys(obj)
+  if (keys.length === 0) {
+    const empty = document.createElement('div')
+    empty.className = 'data-empty'
+    empty.textContent = '(空对象)'
+    container.appendChild(empty)
+    return
+  }
+
+  const grid = document.createElement('div')
+  grid.className = 'data-fields-grid'
+  for (const k of keys) {
+    const v = obj[k]
+    const field = document.createElement('div')
+    field.className = 'data-field'
+    let valHtml = ''
+    if (v === null || v === undefined) {
+      valHtml = '<span class="data-null">null</span>'
+    } else if (Array.isArray(v)) {
+      valHtml = `<span class="data-type-badge">Array(${v.length})</span> <span class="data-obj-preview">${escapeHtml(JSON.stringify(v).slice(0, 80))}</span>`
+    } else if (typeof v === 'object') {
+      valHtml = `<span class="data-type-badge">Object</span> <span class="data-obj-preview">${escapeHtml(JSON.stringify(v).slice(0, 80))}</span>`
+    } else if (typeof v === 'string' && v.length > 100) {
+      valHtml = `<span title="${escapeHtml(v)}">${escapeHtml(v.slice(0, 100))}...</span>`
+    } else {
+      valHtml = escapeHtml(String(v))
+    }
+    field.innerHTML = `<div class="data-field-key">${escapeHtml(k)}</div><div class="data-field-val">${valHtml}</div>`
+    grid.appendChild(field)
+  }
+  container.appendChild(grid)
+}
 document.getElementById('builtInToolsMinimize')?.addEventListener('click', () => {
   if (_toolsPanel) _toolsPanel.classList.toggle('minimized')
 })

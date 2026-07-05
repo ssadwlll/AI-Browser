@@ -977,9 +977,10 @@ ${allData.length > 0 ? '全局存储:\n' + allData.join('\n') : ''}${payloadItem
               postToUI(tabId, { type: 'agentTodoUpdate', data: { items: todoScheduler.parentTodo.items || [], progress: todoScheduler.getProgress(), currentTodoIndex: todoScheduler.currentTodoIndex, lastTool: 'finish_task', lastProgress: true } })
             }
 
-            // ===== 处理 data_refs 参数：自动注入引用数据（异步从 storage 读取） =====
+            // ===== 处理 data_refs 参数：结构化数据通过 agentDataReport 单独发送到 UI 渲染 =====
             let referencedDataContent = ''
             const dataRefIds = normalizeDataRefs(funcArgs.data_refs)
+            const reportDataItems = []  // 收集结构化数据，用于发送 agentDataReport
             if (dataRefIds.length > 0) {
               _debugLog('📦 finish_task 数据引用', { refs: dataRefIds })
               const storeData = await payloadStore.getDataByIds(dataRefIds)
@@ -987,17 +988,25 @@ ${allData.length > 0 ? '全局存储:\n' + allData.join('\n') : ''}${payloadItem
                 const data = storeData[refId]
                 const entry = payloadStore.entries.find(e => e.id === refId)
                 if (data !== undefined) {
+                  // 收集到报告数据（结构化，供 sidepanel 渲染表格）
+                  reportDataItems.push({
+                    id: refId,
+                    toolName: entry?.toolName || 'unknown',
+                    data: data,
+                    schema: entry?.metadata?.schema || null,
+                    count: entry?.metadata?.count || (Array.isArray(data) ? data.length : 1),
+                  })
+                  // 同时保留文本摘要作为兜底（流式输出里显示简短摘要，而非完整 JSON）
                   const dataPreview = typeof data === 'string' ? data : JSON.stringify(data, null, 2)
-                  // 单条引用数据超过 50KB 截断，避免最终输出过长
-                  const MAX_REF_CHARS = 50000
+                  const MAX_REF_CHARS = 2000  // 文本摘要里只保留前 2000 字符，完整数据走 agentDataReport
                   const truncated = dataPreview.length > MAX_REF_CHARS
-                    ? dataPreview.slice(0, MAX_REF_CHARS) + `\n...(已截断，原始 ${dataPreview.length} 字符)`
+                    ? dataPreview.slice(0, MAX_REF_CHARS) + `\n...(完整数据见下方报告)`
                     : dataPreview
                   referencedDataContent += `\n\n=== 数据 ${refId} (${entry?.toolName || 'unknown'}) ===\n${truncated}`
                 }
               }
               if (referencedDataContent) {
-                referencedDataContent = '\n\n【引用的完整数据】' + referencedDataContent
+                referencedDataContent = '\n\n【引用数据摘要】' + referencedDataContent
               }
             }
 
@@ -1053,9 +1062,31 @@ ${allData.length > 0 ? '全局存储:\n' + allData.join('\n') : ''}${payloadItem
             }
             _sendToConversationViewer('conversationRound', finishRoundData)
 
-            // 流式输出完整内容（summary + referencedData + judgeMsg）
+            // 流式输出完整内容（summary + referencedData 摘要 + judgeMsg）
             // 使用 streamToUI 避免逐字符 setTimeout 在大数据时累计超时
             await streamToUI(postToUI, tabId, finalOutput)
+
+            // ===== 发送结构化数据报告到 sidepanel（方案A：自动渲染为可交互表格） =====
+            if (reportDataItems.length > 0) {
+              postToUI(tabId, {
+                type: 'agentDataReport',
+                items: reportDataItems.map(item => ({
+                  id: item.id,
+                  toolName: item.toolName,
+                  schema: item.schema,
+                  count: item.count,
+                  // 数据量过大时截断，避免 chrome.runtime.sendMessage 超限（64MB 限制，保守取 500KB）
+                  data: (() => {
+                    const dataStr = JSON.stringify(item.data)
+                    if (dataStr.length > 500000) {
+                      const truncated = JSON.parse(dataStr.slice(0, 500000))
+                      return { _truncated: true, ...truncated }
+                    }
+                    return item.data
+                  })(),
+                })),
+              })
+            }
             
             // 只调用一次 saveToChatHistoryStorage（保存完整输出）
             await saveToChatHistoryStorage(finalOutput, executedTools.map(t => ({ name: t.name, result: typeof t.result === 'string' ? t.result : JSON.stringify(t.result || '') })))
