@@ -1521,6 +1521,48 @@ ${allData.length > 0 ? '全局存储:\n' + allData.join('\n') : ''}${payloadItem
               const count = overview._overview?.content_count || overview._overview?.total || 1
               workingMemory.addDataRef(funcName, storeId, count, summaryText)
             }
+          } else if (funcName === 'generate_script' && toolResult.includes('"ok":true')) {
+            // generate_script 专用存储：直接存 result（AI return 的原始值），不包数组
+            // 这样 window.__store.pX 就是 AI return 的东西，符合 AI 心智模型
+            // 避免之前 normalizePayload 把对象包成 [obj] 导致 AI 写 p2.items 报 undefined
+            try {
+              const parsed = JSON.parse(toolResult)
+              const actualData = parsed.result  // AI 实际 return 的值
+              const dataStr = JSON.stringify(actualData)
+              if (dataStr.length > 1500) {
+                const storeId = await payloadStore.add('generate_script', actualData,
+                  `generate_script: ${funcArgs.description || ''}`.slice(0, 100),
+                  { count: Array.isArray(actualData) ? actualData.length : 1 })
+                if (storeId === null) {
+                  finalResult = JSON.stringify({ ok: false, error: '数据存储失败（可能超过配额），请尝试缩小数据量后重试' })
+                  console.warn('[Agent] generate_script 存储失败')
+                } else {
+                  // 根据实际数据类型生成准确的 typeHint（关键：描述与存储结构一致）
+                  let typeHint
+                  if (Array.isArray(actualData)) {
+                    typeHint = actualData.length > 0
+                      ? `window.__store.${storeId} 是数组（长度${actualData.length}），可直接 .filter()/.map()/.forEach() 遍历`
+                      : `window.__store.${storeId} 是空数组`
+                  } else if (actualData && typeof actualData === 'object') {
+                    const keys = Object.keys(actualData).slice(0, 8)
+                    typeHint = `window.__store.${storeId} 是对象，字段: ${keys.join(', ')}（访问用 window.__store.${storeId}.字段名）`
+                  } else {
+                    typeHint = `window.__store.${storeId} 是 ${typeof actualData}: ${String(actualData).slice(0, 50)}`
+                  }
+                  const preview = dataStr.slice(0, 200)
+                  finalResult = `generate_script 已执行。返回值预览: ${preview}${dataStr.length > 200 ? '...' : ''}\n完整数据已存储(ID:${storeId})，使用 generate_script(data_refs=["${storeId}"]) 操作。${typeHint}。`
+                  workingMemory.addDataRef('generate_script', storeId,
+                    Array.isArray(actualData) ? actualData.length : 1, finalResult)
+                  console.log(`[Agent] generate_script 存储原始返回值（ID:${storeId}），数据类型: ${Array.isArray(actualData) ? `数组(${actualData.length}条)` : typeof actualData}`)
+                }
+              } else {
+                // 数据量小，不需要存储，直接返回原始结果
+                finalResult = toolResult
+              }
+            } catch (e) {
+              console.warn('[Agent] generate_script 存储异常:', e.message)
+              finalResult = toolResult
+            }
           } else if (shouldStoreToPayload(toolResult, funcName)) {
             // 其他工具：标准化 + 存储纯数组
             const envelope = normalizePayload(toolResult, funcName)
