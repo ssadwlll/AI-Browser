@@ -376,3 +376,15 @@ body{font-family:var(--font-sans);background:var(--bg-white);color:var(--text-pr
 .data-section-actions{display:flex;justify-content:flex-end;gap:6px;margin-top:8px;padding-top:8px;border-top:1px solid var(--border-light)}
 .data-copy-btn{padding:4px 10px;background:var(--bg-white);border:1px solid var(--border-primary);border-radius:var(--radius-sm);font-size:var(--fs-xs);color:var(--text-secondary);cursor:pointer;transition:all .15s}
 .data-copy-btn:hover{background:var(--bg-gray2);border-color:var(--brand)}
+
+/* HTML 报告 iframe（方案 D） */
+.data-html-report-wrap{margin:8px 0;border:1px solid var(--border-light);border-radius:var(--radius);overflow:hidden;background:var(--bg-white)}
+.data-html-report-iframe{width:100%;min-height:200px;height:auto;border:none;display:block;background:var(--bg-white)}
+
+/* 模板化报告（render_report） */
+.data-template-title{font-size:16px;font-weight:600;color:var(--text-primary);margin:8px 0 6px;padding:0 4px}
+.data-template-switch{display:flex;gap:4px;margin-bottom:8px;flex-wrap:wrap;padding:0 4px}
+.template-switch-btn{padding:4px 10px;font-size:12px;border:1px solid var(--border-primary);border-radius:var(--radius-pill);background:var(--bg-white);color:var(--text-tertiary);cursor:pointer;transition:all .2s}
+.template-switch-btn:hover{border-color:var(--brand-light2);color:var(--brand)}
+.template-switch-btn.active{background:var(--brand);color:#fff;border-color:var(--brand)}
+.data-template-render-area{min-height:100px}

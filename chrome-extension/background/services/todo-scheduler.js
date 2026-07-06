@@ -100,30 +100,38 @@ export class TodoScheduler {
 每个 item 必须包含:
 - id: 唯一标识（如 "t1", "t2"）
 - action: 工具名称，可用值：
-  · extract_content / click_element / navigate_to（DOM工具）
+  · extract_content / click_element / navigate_to / read_page_content（DOM工具）
   · inject_script_N（脚本库脚本，N为ID）
-  · generate_script（动态代码，用于数据整合/转换/分析/过滤等）
+  · generate_script（动态代码执行，可 fetch/DOM 操作/数据处理等。返回 HTML 字符串可渲染为可视化报告）
+  · render_report（用预设模板渲染数据报告，比 generate_script 写 HTML 更稳定。模板：news_card_list/data_table/timeline/product_grid）
   · finish_task（完成并输出结果，必须是最后一步）
 - description: 简要描述此步骤做什么
 
 === 工作流程 ===
-1. 先了解页面结构（get_interactive_elements / read_page_content）
-2. 根据需要提取数据（extract_content）或调用脚本（inject_script_N）
-3. 如需整合多份数据，用 generate_script 作为独立待办步骤
+1. 了解页面结构（detect_page_template / get_interactive_elements）
+2. 根据需要选择工具执行：extract_content 提取元素 / inject_script_N 调用脚本 / navigate_to 导航 / click_element 点击 / read_page_content 读取页面内容
+3. 如需批量处理或代码执行（fetch/DOM操作/数据处理等），用 generate_script 作为独立待办步骤
 4. 汇总结果（finish_task）
 
 === 正确示例 ===
 [
-  { id: "t1", action: "extract_content", description: "提取新闻列表标题和链接" },
-  { id: "t2", action: "inject_script_9", description: "批量获取新闻详情" },
-  { id: "t3", action: "generate_script", description: "整合列表+详情数据，去重排序" },
+  { id: "t1", action: "extract_content", description: "提取目标元素数据" },
+  { id: "t2", action: "inject_script_9", description: "调用脚本处理数据" },
+  { id: "t3", action: "generate_script", description: "整合多份数据并加工" },
   { id: "t4", action: "finish_task", description: "汇总输出结果" }
+]
+
+=== generate_script 代码执行示例 ===
+[
+  { id: "t1", action: "extract_content", description: "提取数据" },
+  { id: "t2", action: "generate_script", description: "批量处理或代码执行（fetch/DOM操作等）" },
+  { id: "t3", action: "finish_task", description: "输出结果" }
 ]${scriptHint}
 
 === 常见错误 ===
 ❌ action 写成中文名 → 应写为工具名称（如 extract_content, inject_script_N）
 ❌ 缺少 finish_task → 最后一步必须是 finish_task
-❌ search_tools / read_page_content 作为待办action → 这些是辅助工具，不推进进度
+❌ search_tools / get_interactive_elements 作为待办action → 这些是辅助工具，不推进进度
 
 用户需求: ${userMessage}`
   }
@@ -156,7 +164,8 @@ export class TodoScheduler {
     const usedIds = new Set()
     // 辅助工具不能作为待办 action（它们不推进待办进度，会导致任务卡住）
     // 注意：generate_script 可作为数据整合类待办的 action（如"合并多份数据"），不应拦截
-    const AUXILIARY_ACTIONS = ['search_tools', 'read_page_content', 'detect_page_template', 'get_interactive_elements', 'find_text_on_page']
+    // 注意：read_page_content 会产出并存储数据（title/url/content），在采集内页场景下是必要步骤，允许作为待办
+    const AUXILIARY_ACTIONS = ['search_tools', 'detect_page_template', 'get_interactive_elements', 'find_text_on_page']
     for (const item of items) {
       if (!item.id) errors.push('有待办缺少 id')
       if (!item.action) errors.push('有待办缺少 action')

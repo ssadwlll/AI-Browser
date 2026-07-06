@@ -1,6 +1,7 @@
 // ============ 工具定义构建器 ============
 // 构建统一的 LLM 工具定义列表
 // 依赖：scriptService（域名过滤）、filteredScriptsCache、domainMismatchLogged
+import { getTemplateList } from '../../shared/report-templates.js'
 
 /**
  * 过滤并缓存域名匹配的脚本
@@ -343,16 +344,16 @@ export function buildTools(searchResults, currentPageUrl, round, scriptService, 
     tools.push(...buildScriptToolDefs(filteredScripts))
   }
 
-  // === generate_script（动态代码执行，操作全量数据）===
+  // === generate_script（动态代码执行）===
   tools.push({
     type: 'function',
     function: {
       name: 'generate_script',
-      description: '动态生成并执行JS代码，用于操作全量数据（过滤/去重/转换/统计）。当DOM工具无法完成且脚本库无合适脚本时使用。代码通过 window.__store.pX 访问存储的全量数据，用 return 返回结果。',
+      description: '动态生成并执行JS代码，运行在当前页面上下文。可执行任意JS逻辑：发起网络请求(fetch)、操作DOM、处理已存储数据(window.__store.pX)等。用 return 返回结果。返回 HTML 字符串（以 < 开头）时，框架会自动用 iframe 渲染为可视化报告。',
       parameters: {
         type: 'object',
         properties: {
-          code: { type: 'string', description: '要执行的JS代码。通过 window.__store.p1 访问存储数据，用 return 返回结果。例: return window.__store.p1.filter(x => x.text.length > 5)' },
+          code: { type: 'string', description: '要执行的JS代码。可通过 window.__store.p1 访问已存储数据，也可直接 fetch 网络请求或操作当前页面 DOM。用 return 返回结果。返回 HTML 字符串时会自动渲染为报告（支持 table/card/grid 等标签，框架已内置基础样式）。例1: return await fetch(url).then(r=>r.text())  例2: return window.__store.p1.filter(x => x.text.length > 5)  例3: return `<div class="card"><h3>${item.title}</h3><p>${item.body}</p></div>`' },
           data_refs: { type: 'array', items: { type: 'string' }, description: '引用的数据ID列表，如 ["p1","p2"]。系统会把全量数据注入到 window.__store 供 code 访问' },
           description: { type: 'string', description: '代码功能简述（便于追踪）' },
         },
@@ -377,7 +378,7 @@ export function buildTools(searchResults, currentPageUrl, round, scriptService, 
               type: 'object',
               properties: {
                 id: { type: 'string', description: '待办ID，如 "t1"' },
-                action: { type: 'string', description: '工具名称。可用：extract_content / inject_script_N / click_element / navigate_to / generate_script / finish_task。其中 generate_script 用于数据整合/转换/分析类步骤（如合并多份数据）' },
+                action: { type: 'string', description: '工具名称。可用：extract_content / inject_script_N / click_element / navigate_to / read_page_content / generate_script / render_report / finish_task。其中 generate_script 用于代码执行类步骤（fetch/DOM操作/数据处理等），render_report 用预设模板渲染数据报告' },
                 description: { type: 'string', description: '待办描述' },
               },
               required: ['id', 'action', 'description'],
@@ -385,6 +386,29 @@ export function buildTools(searchResults, currentPageUrl, round, scriptService, 
           },
         },
         required: ['items'],
+      },
+    },
+  })
+
+  // === render_report（模板化报告渲染）===
+  // AI 选模板 + 框架套模板渲染，比 generate_script 写 HTML 更稳定
+  // 模板可从后端脚本库加载（tool_type: 'report_template'），加载失败降级用内置模板
+  const _templateList = getTemplateList()
+  const _templateDesc = _templateList.map(t => `· ${t.id}（${t.name}）: ${t.description}`).join('\n')
+  tools.push({
+    type: 'function',
+    function: {
+      name: 'render_report',
+      description: `用预设模板渲染数据报告，比 generate_script 写 HTML 更稳定。模板渲染后用户可在 UI 切换其他模板。可选模板：\n${_templateDesc}`,
+      parameters: {
+        type: 'object',
+        properties: {
+          template_id: { type: 'string', description: '模板ID，如 news_card_list / data_table / timeline / product_grid' },
+          data_refs: { type: 'array', items: { type: 'string' }, description: '数据引用ID列表，如 ["p1"]。数据应为数组形式' },
+          field_mapping: { type: 'object', description: '可选，字段映射。key=模板字段名，value=数据字段名。如数据字段名为 link，模板字段为 url，传 {url: "link"}。不传则按模板字段名自动匹配' },
+          title: { type: 'string', description: '可选，报告标题' },
+        },
+        required: ['template_id', 'data_refs'],
       },
     },
   })

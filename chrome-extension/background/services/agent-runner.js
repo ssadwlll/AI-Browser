@@ -387,7 +387,7 @@ export async function runAgent(ctx) {
 === 工具使用策略 ===
 - DOM工具（extract_content、click_element等）：用于页面探索、简单数据提取、交互操作
 - inject_script_N：用于批量处理、深度数据采集（N是search_tools查到的脚本ID）
-- generate_script：当脚本库没有合适脚本且DOM工具无法完成时，动态生成代码执行（过滤/去重/转换/统计等）
+- generate_script：动态生成代码执行任意JS逻辑（fetch网络请求/DOM操作/数据处理等），运行在页面上下文。返回 HTML 字符串时可自动渲染为可视化报告
 - search_tools：搜索脚本库，查找可用的远程脚本
 - finish_task：完成所有任务后输出最终结果
 
@@ -995,6 +995,11 @@ ${allData.length > 0 ? '全局存储:\n' + allData.join('\n') : ''}${payloadItem
                     data: data,
                     schema: entry?.metadata?.schema || null,
                     count: entry?.metadata?.count || (Array.isArray(data) ? data.length : 1),
+                    renderType: entry?.metadata?.renderType || null,
+                    // 模板渲染相关（renderType === 'template' 时使用）
+                    templateId: entry?.metadata?.template_id || null,
+                    fieldMapping: entry?.metadata?.field_mapping || null,
+                    reportTitle: entry?.metadata?.title || null,
                   })
                   // 同时保留文本摘要作为兜底（流式输出里显示简短摘要，而非完整 JSON）
                   const dataPreview = typeof data === 'string' ? data : JSON.stringify(data, null, 2)
@@ -1075,6 +1080,13 @@ ${allData.length > 0 ? '全局存储:\n' + allData.join('\n') : ''}${payloadItem
                   toolName: item.toolName,
                   schema: item.schema,
                   count: item.count,
+                  // renderType: 'html' → iframe 渲染 AI 生成的 HTML
+                  // renderType: 'template' → 用预设模板引擎渲染
+                  // 否则 → 默认表格/卡片渲染
+                  renderType: item.renderType,
+                  templateId: item.templateId,
+                  fieldMapping: item.fieldMapping,
+                  reportTitle: item.reportTitle,
                   // 数据量过大时截断，避免 chrome.runtime.sendMessage 超限（64MB 限制，保守取 500KB）
                   data: (() => {
                     const dataStr = JSON.stringify(item.data)
@@ -1561,16 +1573,26 @@ ${allData.length > 0 ? '全局存储:\n' + allData.join('\n') : ''}${payloadItem
               const actualData = parsed.result  // AI 实际 return 的值
               const dataStr = JSON.stringify(actualData)
               if (dataStr.length > 1500) {
+                // 检测 HTML 报告：AI 用 generate_script 生成 HTML 字符串时，标记为 html 渲染类型
+                // 框架在 sidepanel 用 sandboxed iframe 渲染，避免 AI 写的 CSS/JS 污染 sidepanel
+                // 匹配常见 HTML 根标签开头（含 <style>、<script>、<header> 等），不区分大小写
+                const isHtmlReport = typeof actualData === 'string'
+                  && /^\s*<(?:!doctype\s+html|html|head|body|style|script|div|section|article|main|table|ul|ol|h[1-6]|p|header|footer|nav|figure|form)\b/i.test(actualData)
+                const metadata = isHtmlReport
+                  ? { renderType: 'html', count: 1 }
+                  : { count: Array.isArray(actualData) ? actualData.length : 1 }
                 const storeId = await payloadStore.add('generate_script', actualData,
                   `generate_script: ${funcArgs.description || ''}`.slice(0, 100),
-                  { count: Array.isArray(actualData) ? actualData.length : 1 })
+                  metadata)
                 if (storeId === null) {
                   finalResult = JSON.stringify({ ok: false, error: '数据存储失败（可能超过配额），请尝试缩小数据量后重试' })
                   console.warn('[Agent] generate_script 存储失败')
                 } else {
                   // 根据实际数据类型生成准确的 typeHint（关键：描述与存储结构一致）
                   let typeHint
-                  if (Array.isArray(actualData)) {
+                  if (isHtmlReport) {
+                    typeHint = `HTML 报告字符串（长度 ${actualData.length}），sidepanel 将用 iframe 渲染`
+                  } else if (Array.isArray(actualData)) {
                     typeHint = actualData.length > 0
                       ? `window.__store.${storeId} 是数组（长度${actualData.length}），可直接 .filter()/.map()/.forEach() 遍历`
                       : `window.__store.${storeId} 是空数组`
@@ -1584,7 +1606,7 @@ ${allData.length > 0 ? '全局存储:\n' + allData.join('\n') : ''}${payloadItem
                   finalResult = `generate_script 已执行。返回值预览: ${preview}${dataStr.length > 200 ? '...' : ''}\n完整数据已存储(ID:${storeId})，使用 generate_script(data_refs=["${storeId}"]) 操作。${typeHint}。`
                   workingMemory.addDataRef('generate_script', storeId,
                     Array.isArray(actualData) ? actualData.length : 1, finalResult)
-                  console.log(`[Agent] generate_script 存储原始返回值（ID:${storeId}），数据类型: ${Array.isArray(actualData) ? `数组(${actualData.length}条)` : typeof actualData}`)
+                  console.log(`[Agent] generate_script 存储原始返回值（ID:${storeId}），数据类型: ${isHtmlReport ? 'HTML报告' : (Array.isArray(actualData) ? `数组(${actualData.length}条)` : typeof actualData)}`)
                 }
               } else {
                 // 数据量小，不需要存储，直接返回原始结果
@@ -1593,6 +1615,56 @@ ${allData.length > 0 ? '全局存储:\n' + allData.join('\n') : ''}${payloadItem
             } catch (e) {
               console.warn('[Agent] generate_script 存储异常:', e.message)
               finalResult = toolResult
+            }
+          } else if (funcName === 'render_report') {
+            // render_report：用预设模板渲染数据报告
+            // 从 data_refs 获取数据，存储到 payloadStore，metadata 带 renderType: 'template'
+            // finish_task 时 AI 引用此存储ID，sidepanel 用模板引擎渲染
+            try {
+              const refIds = normalizeDataRefs(funcArgs.data_refs)
+              if (refIds.length === 0) {
+                finalResult = JSON.stringify({ ok: false, error: 'data_refs 不能为空' })
+              } else {
+                const storeData = await payloadStore.getDataByIds(refIds)
+                // 合并多个数据引用的数据
+                let combinedData = []
+                for (const refId of refIds) {
+                  const d = storeData[refId]
+                  if (Array.isArray(d)) {
+                    combinedData = combinedData.concat(d)
+                  } else if (d !== undefined && d !== null) {
+                    combinedData.push(d)
+                  }
+                }
+                const templateId = funcArgs.template_id
+                const fieldMapping = funcArgs.field_mapping || null
+                const reportTitle = funcArgs.title || ''
+                const storeId = await payloadStore.add('render_report', combinedData,
+                  `render_report: ${templateId}`.slice(0, 100),
+                  {
+                    renderType: 'template',
+                    template_id: templateId,
+                    field_mapping: fieldMapping,
+                    title: reportTitle,
+                    count: combinedData.length,
+                  })
+                if (storeId === null) {
+                  finalResult = JSON.stringify({ ok: false, error: '数据存储失败（可能超过配额）' })
+                } else {
+                  finalResult = JSON.stringify({
+                    ok: true,
+                    storeId,
+                    template: templateId,
+                    count: combinedData.length,
+                    message: `报告已准备（模板:${templateId}，数据:${combinedData.length}条）。finish_task 时通过 data_refs=["${storeId}"] 引用即可显示`,
+                  })
+                  workingMemory.addDataRef('render_report', storeId, combinedData.length, `模板报告: ${templateId}`)
+                  console.log(`[Agent] render_report 存储渲染请求（ID:${storeId}，模板:${templateId}，数据:${combinedData.length}条）`)
+                }
+              }
+            } catch (e) {
+              console.warn('[Agent] render_report 处理异常:', e.message)
+              finalResult = JSON.stringify({ ok: false, error: e.message })
             }
           } else if (shouldStoreToPayload(toolResult, funcName)) {
             // 其他工具：标准化 + 存储纯数组

@@ -3,6 +3,8 @@
 import { fetchWithTimeout, callServiceWithTimeout } from '../shared/utils.js'
 import { initFeaturePanels, appendDebugLogToPanel } from './feature-panels.js'
 import { ExportService } from '../shared/export-service.js'
+import { renderTemplate } from '../shared/template-engine.js'
+import { BUILTIN_TEMPLATES, getTemplateById } from '../shared/report-templates.js'
 
 const MSG_TYPES = {
   CALL_SERVICE: 'callService',
@@ -940,6 +942,11 @@ async function runAgent(userText, pageContext) {
         isStreaming = false
         sendBtn.disabled = false
         currentPort = null
+      } else if (msg.type === 'agentDataReport') {
+        // 方案A：finish_task 带 data_refs 时，渲染结构化数据报告
+        if (msg.items && msg.items.length > 0) {
+          renderDataReport(msg.items)
+        }
       } else if (msg.type === 'agentError') {
         updateStreamingMessage(streamDiv, '\u274C ' + msg.error)
         card.querySelector('.agent-step-icon').textContent = '\u274C'
@@ -2001,7 +2008,7 @@ function renderDataReport(items) {
 }
 
 function renderDataSection(item, container) {
-  const { id, toolName, schema, count, data } = item
+  const { id, toolName, schema, count, data, renderType } = item
 
   const sectionHeader = document.createElement('div')
   sectionHeader.className = 'data-section-header'
@@ -2031,11 +2038,6 @@ function renderDataSection(item, container) {
   container.appendChild(sectionHeader)
   container.appendChild(sectionBody)
 
-  // 根据 schema 和数据类型选择渲染方式
-  const effectiveSchema = schema || (Array.isArray(data) && data.length > 0 && typeof data[0] === 'object'
-    ? Object.keys(data[0]).reduce((acc, k) => { acc[k] = typeof data[0][k]; return acc }, {})
-    : null)
-
   if (data && data._truncated) {
     const warn = document.createElement('div')
     warn.className = 'data-truncated-warn'
@@ -2043,7 +2045,18 @@ function renderDataSection(item, container) {
     sectionBody.appendChild(warn)
   }
 
-  if (Array.isArray(data)) {
+  // renderType='html': AI 生成的 HTML 报告，用 sandboxed iframe 渲染
+  // 隔离样式和脚本，防止 AI 写的 CSS/JS 污染 sidepanel
+  if (renderType === 'html' && typeof data === 'string') {
+    renderHtmlReport(data, sectionBody)
+  } else if (renderType === 'template') {
+    // renderType='template': 用预设模板引擎渲染（AI 选模板 + 用户可切换）
+    renderTemplateReport(item, sectionBody)
+  } else if (Array.isArray(data)) {
+    // 根据 schema 和数据类型选择渲染方式
+    const effectiveSchema = schema || (data.length > 0 && typeof data[0] === 'object'
+      ? Object.keys(data[0]).reduce((acc, k) => { acc[k] = typeof data[0][k]; return acc }, {})
+      : null)
     renderArrayAsTable(data, effectiveSchema, sectionBody)
   } else if (data && typeof data === 'object') {
     renderObjectAsFields(data, sectionBody)
@@ -2061,13 +2074,252 @@ function renderDataSection(item, container) {
   copyBtn.className = 'data-copy-btn'
   copyBtn.textContent = '复制 JSON'
   copyBtn.addEventListener('click', () => {
-    navigator.clipboard.writeText(JSON.stringify(data, null, 2)).then(() => {
+    navigator.clipboard.writeText(typeof data === 'string' ? data : JSON.stringify(data, null, 2)).then(() => {
       copyBtn.textContent = '已复制'
       setTimeout(() => { copyBtn.textContent = '复制 JSON' }, 1500)
     })
   })
   actions.appendChild(copyBtn)
   sectionBody.appendChild(actions)
+}
+
+// 渲染 AI 生成的 HTML 报告（方案 D）
+// 用 sandboxed iframe 隔离，防止 AI 写的 CSS/JS 污染 sidepanel
+// 高度自适应：用外部 ResizeObserver 观察 iframe 内部 body 高度变化
+function renderHtmlReport(htmlContent, container) {
+  const iframeWrap = document.createElement('div')
+  iframeWrap.className = 'data-html-report-wrap'
+
+  const iframe = document.createElement('iframe')
+  iframe.className = 'data-html-report-iframe'
+  // 只加 allow-same-origin：让父窗口能访问 iframe.contentDocument 来观察高度
+  // 不加 allow-scripts：禁用 AI 写的 <script>，防止恶意代码
+  iframe.sandbox = 'allow-same-origin'
+
+  // 包裹完整 HTML 文档：仅注入基础样式重置（不注入脚本，因为 allow-scripts 被禁用）
+  // AI 生成的 HTML 内容直接嵌入 body，CSS 会作用于 iframe 内部，不影响父窗口
+  const wrappedHtml = `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; padding: 12px; color: #262626; line-height: 1.6; }
+  img { max-width: 100%; }
+  table { width: 100%; border-collapse: collapse; margin: 8px 0; }
+  th, td { border: 1px solid #e5e5e5; padding: 8px; text-align: left; }
+  th { background: #f5f5f5; font-weight: 600; }
+  a { color: #6841ea; }
+  h1, h2, h3 { margin: 12px 0 8px; }
+  h1 { font-size: 20px; } h2 { font-size: 16px; } h3 { font-size: 14px; }
+  p { margin: 6px 0; }
+  ul, ol { margin: 6px 0; padding-left: 20px; }
+  .card { border: 1px solid #e5e5e5; border-radius: 8px; padding: 12px; margin: 8px 0; }
+  .card-title { font-weight: 600; font-size: 15px; margin-bottom: 6px; }
+  .card-meta { font-size: 12px; color: #8c8c8c; margin-bottom: 8px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
+</style>
+</head>
+<body>
+${htmlContent}
+</body>
+</html>`
+
+  iframe.srcdoc = wrappedHtml
+
+  // 用外部 ResizeObserver 观察 iframe 内部 body 高度变化（比 postMessage 可靠）
+  // iframe 加载完成后，观察其 contentDocument.body 的高度变化
+  const adjustHeight = () => {
+    try {
+      const doc = iframe.contentDocument
+      if (doc && doc.body) {
+        const newHeight = doc.body.scrollHeight
+        // 只增高不减低，避免内容加载过程中高度抖动
+        const currentHeight = parseInt(iframe.style.height) || 0
+        if (newHeight > currentHeight) {
+          iframe.style.height = `${newHeight + 20}px`
+        }
+      }
+    } catch (e) {
+      // 跨域访问失败时忽略，保持默认高度
+    }
+  }
+
+  // iframe load 后立即调整一次 + 设置 ResizeObserver 持续观察
+  iframe.addEventListener('load', () => {
+    adjustHeight()
+    // 兜底：多次调整，防止字体/图片延迟加载导致高度变化
+    setTimeout(adjustHeight, 100)
+    setTimeout(adjustHeight, 500)
+    setTimeout(adjustHeight, 1500)
+
+    // 用 MutationObserver 观察 iframe 内部 DOM 变化（如图片加载完成）
+    try {
+      const doc = iframe.contentDocument
+      if (doc && doc.body) {
+        const mo = new MutationObserver(adjustHeight)
+        mo.observe(doc.body, { childList: true, subtree: true, attributes: true })
+      }
+    } catch (e) { /* ignore */ }
+  })
+
+  iframeWrap.appendChild(iframe)
+  container.appendChild(iframeWrap)
+}
+
+// 渲染模板化报告（renderType === 'template'）
+// AI 选模板 + 框架套模板渲染，用户可在 UI 切换其他模板
+function renderTemplateReport(item, container) {
+  const { data, templateId, fieldMapping, reportTitle } = item
+
+  // 报告标题
+  if (reportTitle) {
+    const titleEl = document.createElement('div')
+    titleEl.className = 'data-template-title'
+    titleEl.textContent = reportTitle
+    container.appendChild(titleEl)
+  }
+
+  // 模板切换栏
+  const switchBar = document.createElement('div')
+  switchBar.className = 'data-template-switch'
+  BUILTIN_TEMPLATES.forEach(t => {
+    const btn = document.createElement('button')
+    btn.className = 'template-switch-btn' + (t.id === templateId ? ' active' : '')
+    btn.textContent = t.name
+    btn.addEventListener('click', () => {
+      // 切换模板：重新渲染
+      switchBar.querySelectorAll('.template-switch-btn').forEach(b => b.classList.remove('active'))
+      btn.classList.add('active')
+      // 清除之前的渲染内容（保留标题和切换栏）
+      const renderArea = container.querySelector('.data-template-render-area')
+      if (renderArea) renderArea.innerHTML = ''
+      _renderTemplateInto(t, data, fieldMapping, renderArea)
+    })
+    switchBar.appendChild(btn)
+  })
+  container.appendChild(switchBar)
+
+  // 渲染区域
+  const renderArea = document.createElement('div')
+  renderArea.className = 'data-template-render-area'
+  container.appendChild(renderArea)
+
+  // 初始渲染（用 AI 选的模板）
+  const initialTemplate = getTemplateById(templateId) || BUILTIN_TEMPLATES[0]
+  _renderTemplateInto(initialTemplate, data, fieldMapping, renderArea)
+}
+
+// 用指定模板渲染数据到容器
+function _renderTemplateInto(template, data, fieldMapping, container) {
+  if (!template || !template.template) {
+    container.textContent = '模板无效'
+    return
+  }
+
+  // 应用字段映射：把数据字段名映射到模板字段名
+  let mappedData = data
+  if (fieldMapping && typeof fieldMapping === 'object') {
+    // fieldMapping 格式：{ template_field: data_field }
+    // 把每条数据的 data_field 改名为 template_field
+    mappedData = (Array.isArray(data) ? data : []).map(item => {
+      if (!item || typeof item !== 'object') return item
+      const mapped = { ...item }
+      for (const [tmplField, dataField] of Object.entries(fieldMapping)) {
+        if (dataField !== tmplField && item[dataField] !== undefined) {
+          mapped[tmplField] = item[dataField]
+        }
+      }
+      return mapped
+    })
+  }
+
+  // 构造模板上下文
+  let context
+  if (template.id === 'data_table') {
+    // data_table 特殊处理：从数据提取字段列表，构造 headers 和 rows
+    if (!Array.isArray(mappedData) || mappedData.length === 0) {
+      context = { headers: [], rows: [] }
+    } else {
+      const headers = Object.keys(mappedData[0])
+      const rows = mappedData.map(rowItem =>
+        headers.map(h => {
+          const val = rowItem[h]
+          if (val === null || val === undefined) return ''
+          if (typeof val === 'object') return JSON.stringify(val)
+          return String(val).slice(0, 500) // 单元格内容截断到 500 字符
+        })
+      )
+      context = { headers, rows }
+    }
+  } else {
+    context = { items: Array.isArray(mappedData) ? mappedData : [mappedData] }
+  }
+
+  // 用模板引擎渲染
+  let html
+  try {
+    html = renderTemplate(template.template, context)
+  } catch (e) {
+    container.textContent = `模板渲染失败: ${e.message}`
+    return
+  }
+
+  // 用 iframe 渲染（隔离样式）
+  const iframeWrap = document.createElement('div')
+  iframeWrap.className = 'data-html-report-wrap'
+
+  const iframe = document.createElement('iframe')
+  iframe.className = 'data-html-report-iframe'
+  iframe.sandbox = 'allow-same-origin'
+
+  const wrappedHtml = `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif; padding: 12px; color: #262626; line-height: 1.6; }
+  ${template.css || ''}
+</style>
+</head>
+<body>
+${html}
+</body>
+</html>`
+
+  iframe.srcdoc = wrappedHtml
+
+  // 高度自适应（复用 renderHtmlReport 的逻辑）
+  const adjustHeight = () => {
+    try {
+      const doc = iframe.contentDocument
+      if (doc && doc.body) {
+        const newHeight = doc.body.scrollHeight
+        const currentHeight = parseInt(iframe.style.height) || 0
+        if (newHeight > currentHeight) {
+          iframe.style.height = `${newHeight + 20}px`
+        }
+      }
+    } catch (e) { /* ignore */ }
+  }
+
+  iframe.addEventListener('load', () => {
+    adjustHeight()
+    setTimeout(adjustHeight, 100)
+    setTimeout(adjustHeight, 500)
+    setTimeout(adjustHeight, 1500)
+    try {
+      const doc = iframe.contentDocument
+      if (doc && doc.body) {
+        const mo = new MutationObserver(adjustHeight)
+        mo.observe(doc.body, { childList: true, subtree: true, attributes: true })
+      }
+    } catch (e) { /* ignore */ }
+  })
+
+  iframeWrap.appendChild(iframe)
+  container.appendChild(iframeWrap)
 }
 
 function renderArrayAsTable(arr, schema, container) {
