@@ -4,7 +4,7 @@ import { fetchWithTimeout, callServiceWithTimeout } from '../shared/utils.js'
 import { initFeaturePanels, appendDebugLogToPanel } from './feature-panels.js'
 import { ExportService } from '../shared/export-service.js'
 import { renderTemplate } from '../shared/template-engine.js'
-import { BUILTIN_TEMPLATES, getTemplateById } from '../shared/report-templates.js'
+import { BUILTIN_TEMPLATES, getTemplateById, getMergedTemplates } from '../shared/report-templates.js'
 
 const MSG_TYPES = {
   CALL_SERVICE: 'callService',
@@ -19,6 +19,9 @@ let currentPort = null
 let recentlyStreamedContent = '' // 防止 storage.onChanged 重复添加 streaming 内容
 let agentMode = false      // Agent 自主决策模式
 let agentStepCards = []    // Agent 步骤卡片
+let currentThinkingEl = null  // 当前 AI 思考卡片（单一，新思考覆盖旧的）
+let currentStreamEl = null    // 当前流式回复元素（typing/最终回复）
+let currentStepCard = null    // 当前工具步骤卡片，思考卡片插入到它之后
 let currentModelInfo = null     // 当前选中模型的能力信息
 let currentSelectedModelId = null  // 当前选中模型 ID（与配置同步）
 let attachedImage = null        // 已附加的图片 base64 data URL
@@ -657,7 +660,9 @@ async function loadAgentMode() {
 
       // 先注册消息监听器，再发送 agentAttach（避免回放消息比监听器先到达）
       const card = addAgentStepCard()
+      currentStepCard = card
       card.querySelector('.agent-step-title').textContent = 'Agent 重连中...'
+      currentThinkingEl = null
       let streamDiv = null
       let fullContent = ''
       let toolResults = []
@@ -665,6 +670,8 @@ async function loadAgentMode() {
         if (msg.type === 'agentTodoUpdate') { forwardTodoUpdate(msg.data); return }
         if (msg.type === 'agentStart') {
           card.querySelector('.agent-step-title').textContent = 'Agent 已启动，分析需求中...'
+        } else if (msg.type === 'agentThinking') {
+          appendAgentThinking(msg.content)
         } else if (msg.type === 'agentStatus') {
           card.querySelector('.agent-step-title').textContent = msg.text || '处理中...'
         } else if (msg.type === 'agentStep') {
@@ -678,6 +685,15 @@ async function loadAgentMode() {
           chatMessages.scrollTop = chatMessages.scrollHeight
         } else if (msg.type === 'agentStepResult') {
           if (msg.toolName === 'search_tools') return
+          // 失败的工具结果不显示（用户只关心成功的执行成果）
+          if (msg.success === false || isToolResultFailed(msg.result)) {
+            // 不移除卡片，重置为等待状态，保留给下一个工具使用
+            const t = card.querySelector('.agent-step-title')
+            const b = card.querySelector('.agent-step-body')
+            if (t) t.textContent = '继续处理中...'
+            if (b) b.textContent = ''
+            return
+          }
           const body = card.querySelector('.agent-step-body')
           let displayResult = summarizeToolResult(msg.toolName, msg.result || '')
           body.textContent = displayResult
@@ -688,7 +704,7 @@ async function loadAgentMode() {
           const level = String(msg.label || '').includes('触发') ? 'warn' : String(msg.label || '').includes('终止') ? 'error' : 'info'
           appendDebugLog(msg.label || 'debug', msg.detail || '', level)
         } else if (msg.type === 'streamChunk') {
-          if (!streamDiv) { streamDiv = addStreamingMessage(); fullContent = '' }
+          if (!streamDiv) { streamDiv = addStreamingMessage(); currentStreamEl = streamDiv; fullContent = '' }
           fullContent += msg.content
           updateStreamingMessage(streamDiv, fullContent)
           chatMessages.scrollTop = chatMessages.scrollHeight
@@ -768,40 +784,72 @@ function formatToolArgs(toolName, toolArgs) {
   }
 }
 
+// 添加 AI 思考内容到聊天区（单一卡片，新思考覆盖旧思考）
+// 思考卡片插入到工具步骤卡片之前、流式回复之前
+function appendAgentThinking(content) {
+  if (!content || !content.trim()) return
+  const text = content.trim()
+  const displayText = text.length > 500 ? text.slice(0, 500) + '...' : text
+  if (currentThinkingEl) {
+    // 已有思考卡片：仅更新内容（新思考覆盖旧思考）
+    const body = currentThinkingEl.querySelector('.agent-thinking-body')
+    if (body) body.textContent = displayText
+  } else {
+    // 首次创建思考卡片，插入到工具步骤卡片之前
+    currentThinkingEl = document.createElement('div')
+    currentThinkingEl.className = 'agent-thinking-card'
+    currentThinkingEl.innerHTML = '<div class="agent-thinking-header">💭 AI 思考</div><div class="agent-thinking-body">' + escapeHtml(displayText) + '</div>'
+    if (currentStepCard && currentStepCard.parentNode) {
+      chatMessages.insertBefore(currentThinkingEl, currentStepCard)
+    } else if (currentStreamEl) {
+      chatMessages.insertBefore(currentThinkingEl, currentStreamEl)
+    } else {
+      chatMessages.appendChild(currentThinkingEl)
+    }
+  }
+  chatMessages.scrollTop = chatMessages.scrollHeight
+}
+
+// 判断工具结果是否失败（前端兜底解析，配合后端 success 字段）
+function isToolResultFailed(rawResult) {
+  if (!rawResult) return false
+  try {
+    const parsed = JSON.parse(rawResult)
+    if (parsed?.ok === false || parsed?.error || parsed?.skipped) return true
+    return false
+  } catch { return false }
+}
+
 // 将工具执行结果转为可读摘要，避免显示原始JSON
+// 注意：失败的结果已在调用前过滤，此函数只处理成功的结果
 function summarizeToolResult(toolName, rawResult) {
   let parsed = null
   try { parsed = JSON.parse(rawResult) } catch {}
 
-  // 执行失败
-  if (parsed && parsed.ok === false && parsed.error) {
-    return '失败：' + parsed.error
-  }
-
-  // 按工具类型生成摘要
+  // 按工具类型生成人性化摘要
   switch (toolName) {
     case 'read_page_content':
-      if (parsed?.title) return `已读取页面「${parsed.title}」(${(parsed.content || '').length}字)`
+      if (parsed?.title) return `已读取页面「${parsed.title}」，正文 ${(parsed.content || '').length} 字`
       return '已读取当前页面内容'
     case 'extract_content': {
-      if (!parsed) return '提取完成'
+      if (!parsed) return '已提取页面数据'
       const items = parsed.result || parsed
       if (Array.isArray(items)) return `已提取 ${items.length} 条数据`
       if (typeof items === 'string') return items.length > 100 ? items.slice(0, 100) + '...' : items
-      return '提取完成'
+      return '已提取页面数据'
     }
     case 'get_interactive_elements':
-      if (Array.isArray(parsed)) return `发现 ${parsed.length} 个可交互元素`
-      return '已获取可交互元素'
+      if (Array.isArray(parsed)) return `已发现 ${parsed.length} 个可交互元素`
+      return '已获取页面可交互元素'
     case 'get_element_info':
       return '已获取元素详细信息'
     case 'click_element':
       return '已点击目标元素'
     case 'fill_input':
-      return '已填写输入框'
+      return '已填写输入框内容'
     case 'navigate_to':
       if (parsed?.url) return `已导航到 ${parsed.url}`
-      return '页面导航完成'
+      return '已完成页面导航'
     case 'go_back':
       return '已返回上一页'
     case 'go_forward':
@@ -815,34 +863,58 @@ function summarizeToolResult(toolName, rawResult) {
     case 'press_key':
       return '已执行按键操作'
     case 'find_text_on_page':
-      if (parsed?.count !== undefined) return `找到 ${parsed.count} 处匹配`
+      if (parsed?.count !== undefined) return `已找到 ${parsed.count} 处匹配文本`
       return '文本搜索完成'
     case 'wait_for_element':
       return '目标元素已出现'
     case 'create_todo':
-      if (parsed?.ok && parsed.totalTodos) return `已创建待办列表（${parsed.totalTodos}个待办）`
-      if (parsed?.errors) return '待办创建失败：' + parsed.errors.slice(0, 2).join('；')
-      return '待办列表操作完成'
+      if (parsed?.ok && parsed.totalTodos) return `已创建待办计划（${parsed.totalTodos} 个步骤）`
+      return '待办计划已创建'
     case 'screenshot_visible':
-      return '已截取当前页面'
+      return '已截取当前页面截图'
+    case 'generate_script': {
+      // generate_script 成功后返回的 finalResult 是文本描述，不是 JSON
+      if (parsed?.ok === false) return '代码执行未返回有效结果'
+      if (parsed?.storeId && parsed.count !== undefined) return `已处理 ${parsed.count} 条数据并存储（ID: ${parsed.storeId}）`
+      if (parsed?.message) return parsed.message
+      // finalResult 可能是纯文本描述
+      if (typeof rawResult === 'string' && !rawResult.startsWith('{')) {
+        return rawResult.length > 200 ? rawResult.slice(0, 200) + '...' : rawResult
+      }
+      return '自定义脚本已执行完成'
+    }
+    case 'render_report': {
+      if (parsed?.ok && parsed.storeId) {
+        return `已准备报告（模板: ${parsed.template || '未知'}，数据: ${parsed.count || 0} 条）`
+      }
+      if (parsed?.message) return parsed.message
+      return '报告数据已准备完成'
+    }
     case 'finish_task':
-      return parsed || '任务完成'
+      return parsed?.summary || parsed || '任务已完成'
     default:
       if (toolName?.startsWith('inject_script_')) {
         if (parsed) {
-          if (parsed.ok === false) return '脚本执行失败：' + (parsed.error || '未知错误')
           if (Array.isArray(parsed)) return `脚本执行完成，返回 ${parsed.length} 条结果`
           if (parsed.result) {
             if (Array.isArray(parsed.result)) return `脚本执行完成，处理了 ${parsed.result.length} 条数据`
             if (typeof parsed.result === 'string') return parsed.result.length > 100 ? parsed.result.slice(0, 100) + '...' : parsed.result
           }
-          if (parsed.count !== undefined) return `脚本执行完成，处理了 ${parsed.count} 条`
+          if (parsed.count !== undefined) return `脚本执行完成，处理了 ${parsed.count} 条数据`
         }
         return '脚本执行完成'
       }
-      // 兜底：尝试简短展示
-      if (typeof rawResult === 'string' && rawResult.length > 150) return rawResult.slice(0, 150) + '...'
-      return rawResult || '执行完成'
+      // 兜底：提取关键信息，避免显示原始JSON
+      if (parsed && typeof parsed === 'object') {
+        if (parsed.count !== undefined) return `执行完成，处理了 ${parsed.count} 条数据`
+        if (parsed.result) {
+          if (Array.isArray(parsed.result)) return `执行完成，返回 ${parsed.result.length} 条结果`
+          if (typeof parsed.result === 'string') return parsed.result.length > 100 ? parsed.result.slice(0, 100) + '...' : parsed.result
+        }
+        if (parsed.message) return parsed.message
+      }
+      if (typeof rawResult === 'string' && rawResult.length > 120) return rawResult.slice(0, 120) + '...'
+      return '执行完成'
   }
 }
 
@@ -875,9 +947,12 @@ function updateAgentStepCard(card, step, toolName, toolArgs, status) {
 
 async function runAgent(userText, pageContext) {
   agentStepCards = []
+  currentThinkingEl = null
   const card = addAgentStepCard()
+  currentStepCard = card
 
-  const streamDiv = addStreamingMessage()
+  const streamDiv = addStreamingMessage()  // 预创建：显示 typing indicator，让用户知道 AI 在工作
+  currentStreamEl = streamDiv
   let fullContent = ''
   const toolResults = [] // 收集工具执行结果，streamDone时一并存入历史
 
@@ -897,6 +972,8 @@ async function runAgent(userText, pageContext) {
       if (msg.type === 'agentTodoUpdate') { forwardTodoUpdate(msg.data); return }
       if (msg.type === 'agentStart') {
         card.querySelector('.agent-step-title').textContent = 'Agent 已启动，分析需求中...'
+      } else if (msg.type === 'agentThinking') {
+        appendAgentThinking(msg.content)
       } else if (msg.type === 'agentStatus') {
         card.querySelector('.agent-step-title').textContent = msg.text || '处理中...'
       } else if (msg.type === 'agentStep') {
@@ -910,6 +987,15 @@ async function runAgent(userText, pageContext) {
         chatMessages.scrollTop = chatMessages.scrollHeight
       } else if (msg.type === 'agentStepResult') {
         if (msg.toolName === 'search_tools') return
+        // 失败的工具结果不显示（用户只关心成功的执行成果）
+        if (msg.success === false || isToolResultFailed(msg.result)) {
+          // 不移除卡片，重置为等待状态，保留给下一个工具使用
+          const t = card.querySelector('.agent-step-title')
+          const b = card.querySelector('.agent-step-body')
+          if (t) t.textContent = '继续处理中...'
+          if (b) b.textContent = ''
+          return
+        }
         const body = card.querySelector('.agent-step-body')
         let displayResult = summarizeToolResult(msg.toolName, msg.result || '')
         body.textContent = displayResult
@@ -1047,6 +1133,9 @@ function startNewChat() {
   isStreaming = false
   agentMode = false
   agentStepCards = []
+  currentThinkingEl = null
+  currentStreamEl = null
+  currentStepCard = null
   attachedImage = null
   attachedPdf = null
   persistAttachments()
@@ -2180,10 +2269,11 @@ function renderTemplateReport(item, container) {
     container.appendChild(titleEl)
   }
 
-  // 模板切换栏
+  // 模板切换栏（使用合并后的模板列表：后端模板 + 内置模板）
+  const allTemplates = getMergedTemplates()
   const switchBar = document.createElement('div')
   switchBar.className = 'data-template-switch'
-  BUILTIN_TEMPLATES.forEach(t => {
+  allTemplates.forEach(t => {
     const btn = document.createElement('button')
     btn.className = 'template-switch-btn' + (t.id === templateId ? ' active' : '')
     btn.textContent = t.name
@@ -2206,7 +2296,7 @@ function renderTemplateReport(item, container) {
   container.appendChild(renderArea)
 
   // 初始渲染（用 AI 选的模板）
-  const initialTemplate = getTemplateById(templateId) || BUILTIN_TEMPLATES[0]
+  const initialTemplate = getTemplateById(templateId) || allTemplates[0] || BUILTIN_TEMPLATES[0]
   _renderTemplateInto(initialTemplate, data, fieldMapping, renderArea)
 }
 

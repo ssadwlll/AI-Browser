@@ -262,6 +262,10 @@ body{font-family:var(--font-sans);background:var(--bg-white);color:var(--text-pr
 .agent-step-icon{font-size:16px}
 .agent-step-title{font-weight:600;color:var(--text-primary);font-size:var(--fs-xs)}
 .agent-step-body{font-family:var(--font-mono);font-size:var(--fs-xxs);color:var(--text-quaternary);white-space:pre-wrap;word-break:break-all;max-height:120px;overflow-y:auto;line-height:1.5;padding:6px 8px;background:var(--bg-white);border-radius:var(--radius)}
+/* AI 思考内容卡片 */
+.agent-thinking-card{margin:8px 16px;padding:10px 14px;background:linear-gradient(135deg,#f0f4ff 0%,#f8f0ff 100%);border:1px solid #d4d0f0;border-radius:var(--radius-lg);font-size:var(--fs-xs)}
+.agent-thinking-header{font-weight:600;color:#5b50c2;font-size:var(--fs-xxs);margin-bottom:6px}
+.agent-thinking-body{font-size:var(--fs-xxs);color:var(--text-secondary);line-height:1.6;white-space:pre-wrap;word-break:break-word}
 .agent-history-step{padding:2px 0;color:var(--text-secondary);font-size:var(--fs-xs)}
 .agent-history-step .step-num{color:var(--ai-primary);font-weight:600}
 

@@ -193,6 +193,32 @@ export class ToolService {
     return null
   }
 
+  // 拉取后端报告模板列表（供 render_report 工具使用）
+  // 返回与 BUILTIN_TEMPLATES 同格式的模板数组，失败时返回空数组
+  async fetchReportTemplates() {
+    const config = await this.configService.getSyncConfig()
+    if (!config.serverUrl) return []
+    try {
+      const auth = await this.configService.getAppAuth()
+      const authHeaders = await this.configService.generateAuthHeaders(auth.appKey, auth.appSecret)
+      const baseUrl = config.serverUrl.replace(/\/+$/, '')
+      const res = await fetchWithTimeout(`${baseUrl}/api/report-templates`, {
+        headers: authHeaders,
+      }, 10000, 0)
+      if (!res.ok) {
+        console.warn('[ToolService] fetchReportTemplates HTTP', res.status)
+        return []
+      }
+      const data = await res.json()
+      if (data.success && Array.isArray(data.data)) {
+        return data.data
+      }
+    } catch (e) {
+      console.warn('[ToolService] fetchReportTemplates error:', e.message)
+    }
+    return []
+  }
+
   async executeTool(tool, tabId, funcArgs) {
     console.log('[ToolService] executeTool:', tool.id, tool.name, 'type:', tool.toolType)
     const injectData = await this.fetchInjectData(tool.id)

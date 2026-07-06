@@ -1,5 +1,6 @@
 // 报告模板定义（内置 4 个模板）
-// 后续可从后端脚本库加载（tool_type: 'report_template'），加载失败时降级使用这些内置模板
+// 可从后端 report_templates 表加载（GET /api/report-templates），加载失败时降级使用这些内置模板
+// 远程模板优先级高于内置模板（同 ID 时远程覆盖内置）
 // 模板语法：Handlebars 兼容（{{var}}、{{#each}}、{{#if}}、{{this}}、{{@index}}）
 
 export const BUILTIN_TEMPLATES = [
@@ -162,18 +163,77 @@ export const BUILTIN_TEMPLATES = [
   },
 ]
 
+// ============ 远程模板加载（带缓存和降级）============
+
+// 远程模板缓存
+let _remoteTemplates = null
+let _remoteLoadedAt = 0
+const REMOTE_CACHE_TTL = 5 * 60 * 1000 // 5 分钟缓存
+
 /**
- * 根据 ID 查找模板
+ * 从后端加载报告模板（带 5 分钟缓存）
+ * @param {function} fetcher - 异步函数，返回模板数组（与 BUILTIN_TEMPLATES 同格式）
+ * @returns {Promise<array>} 合并后的完整模板列表（远程优先 + 内置降级）
+ */
+export async function loadRemoteTemplates(fetcher) {
+  // 缓存有效期内直接返回合并列表
+  if (_remoteTemplates && Date.now() - _remoteLoadedAt < REMOTE_CACHE_TTL) {
+    return getMergedTemplates()
+  }
+  try {
+    const remote = await fetcher()
+    if (Array.isArray(remote) && remote.length > 0) {
+      _remoteTemplates = remote
+      _remoteLoadedAt = Date.now()
+      console.log(`[ReportTemplates] 从后端加载 ${remote.length} 个模板`)
+    } else {
+      _remoteTemplates = []
+      _remoteLoadedAt = Date.now()
+    }
+  } catch (e) {
+    console.warn('[ReportTemplates] 从后端加载模板失败，降级使用内置模板:', e.message)
+    _remoteTemplates = []
+    _remoteLoadedAt = Date.now()
+  }
+  return getMergedTemplates()
+}
+
+/**
+ * 获取合并后的完整模板列表（远程优先，同 ID 远程覆盖内置）
+ */
+export function getMergedTemplates() {
+  if (!_remoteTemplates || _remoteTemplates.length === 0) {
+    return BUILTIN_TEMPLATES
+  }
+  // 远程模板优先：同 ID 时远程覆盖内置
+  const builtinIds = new Set(BUILTIN_TEMPLATES.map(t => t.id))
+  const remoteOnly = _remoteTemplates.filter(t => !builtinIds.has(t.id))
+  const overridden = BUILTIN_TEMPLATES.map(b => {
+    const remote = _remoteTemplates.find(r => r.id === b.id)
+    return remote || b
+  })
+  return [...overridden, ...remoteOnly]
+}
+
+/**
+ * 根据 ID 查找模板（远程优先）
  */
 export function getTemplateById(id) {
+  // 先从远程缓存查找
+  if (_remoteTemplates) {
+    const remote = _remoteTemplates.find(t => t.id === id)
+    if (remote) return remote
+  }
+  // 降级到内置模板
   return BUILTIN_TEMPLATES.find(t => t.id === id) || null
 }
 
 /**
  * 获取所有模板的精简列表（用于工具描述）
+ * 返回合并后的模板列表（远程 + 内置）
  */
 export function getTemplateList() {
-  return BUILTIN_TEMPLATES.map(t => ({
+  return getMergedTemplates().map(t => ({
     id: t.id,
     name: t.name,
     description: t.description,

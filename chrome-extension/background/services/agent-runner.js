@@ -6,6 +6,7 @@ import { executeDOMTool } from './agent-dom-executor.js'
 import { shouldStoreToPayload, storeToPayload, smartTruncateResult, buildDataOverview, normalizePayload, formatSchemaSummary } from './agent-payload-utils.js'
 import { runJudge, saveToChatHistoryStorage, getTargetTab, recordMemory } from './agent-judge.js'
 import { buildTools } from './agent-tool-builder.js'
+import { loadRemoteTemplates } from '../../shared/report-templates.js'
 import { WorkingMemory } from './working-memory.js'
 import { ContextCompressor } from './context-compressor.js'
 import { ScratchpadService } from './scratchpad-service.js'
@@ -332,6 +333,14 @@ export async function runAgent(ctx) {
   let hasSearchedTools = false
   todoScheduler.clear()
   const _usedSelectorToolCombo = new Set()
+
+  // ===== 预加载后端报告模板（带 5 分钟缓存，失败降级用内置模板）=====
+  // 在构建工具列表前加载，使 render_report 工具的模板描述包含后端模板
+  try {
+    await loadRemoteTemplates(() => toolService.fetchReportTemplates())
+  } catch (e) {
+    console.warn('[Agent] 预加载报告模板失败，使用内置模板:', e.message)
+  }
 
   const rawHistory = (chatHistory || [])
   // 移除末尾连续的失败 agent 回复及其对应 user 消息，避免 LLM 被历史错误误导重复生成相同内容
@@ -914,6 +923,10 @@ ${allData.length > 0 ? '全局存储:\n' + allData.join('\n') : ''}${payloadItem
       if (msg.tool_calls && msg.tool_calls.length > 0) {
         console.log('[Agent] tool_calls:', msg.tool_calls.map(t => t.function.name).join(', '))
         _debugLog(`📥 第${aiRequestCount}轮 LLM响应: tool_calls`, msg.tool_calls.map(t => `${t.function.name}(${JSON.stringify(t.function.arguments || {})})`).join('\n'))
+        // 将 AI 思考内容发送到 UI（AI 在调用工具前的推理/计划文本）
+        if (msg.content && msg.content.trim()) {
+          postToUI(tabId, { type: 'agentThinking', content: msg.content.trim() })
+        }
         // 输出已存储数据信息（从内存索引读取，无需异步）
         const storedDataSummary = payloadStore.entries.filter(e => e.sessionId === sessionId).map(e => {
           const count = e.metadata?.count || 1
@@ -1272,7 +1285,7 @@ ${allData.length > 0 ? '全局存储:\n' + allData.join('\n') : ''}${payloadItem
               if (!targetTab) {
                 toolResult = JSON.stringify({ ok: false, error: '目标标签页不可用' })
                 executedTools.push({ name: `${funcName}(标签页不可用)`, result: toolResult })
-                postToUI(tabId, { type: 'agentStepResult', step: totalToolCalls, toolName: funcName, result: toolResult, done: false })
+                postToUI(tabId, { type: 'agentStepResult', step: totalToolCalls, toolName: funcName, result: toolResult, success: false, done: false })
                 messages.push({ role: 'tool', tool_call_id: toolCall.id, content: toolResult })
                 continue
               }
@@ -1291,7 +1304,7 @@ ${allData.length > 0 ? '全局存储:\n' + allData.join('\n') : ''}${payloadItem
                     toolResult = JSON.stringify({ ok: false, error: `前置检查失败: ${precheckReason}` })
                     executedTools.push({ name: `${funcName}(precheck失败)`, result: toolResult })
                     recordMemory(configService, scriptId, false, 0, `前置检查失败: ${precheckReason}`, '').catch(() => {})
-                    postToUI(tabId, { type: 'agentStepResult', step: totalToolCalls, toolName: funcName, result: toolResult, done: false })
+                    postToUI(tabId, { type: 'agentStepResult', step: totalToolCalls, toolName: funcName, result: toolResult, success: false, done: false })
                     messages.push({ role: 'tool', tool_call_id: toolCall.id, content: toolResult })
                     continue
                   }
@@ -1413,6 +1426,13 @@ ${allData.length > 0 ? '全局存储:\n' + allData.join('\n') : ''}${payloadItem
                 return JSON.stringify({ ok: true, result: `截图已获取 (${sizeKB}KB, JPEG)，格式: ${header}...`, _hasScreenshot: true, _dataUrl: dataUrl })
               } catch (e) { return JSON.stringify({ ok: false, error: `截图失败: ${e.message}` }) }
             })()
+            executedTools.push({ name: funcName, result: toolResult })
+          } else if (funcName === 'render_report') {
+            // render_report：模板化报告渲染
+            // 实际数据处理（从 data_refs 取数据、合并、存储到 payloadStore）在下方
+            // "工具结果处理"阶段执行（与 generate_script 类似），这里仅设置占位结果
+            postToUI(tabId, { type: 'agentStep', step: totalToolCalls, toolName: funcName, toolArgs: funcArgs, status: 'running' })
+            toolResult = JSON.stringify({ ok: true, _pending: true, message: 'render_report 数据处理中...' })
             executedTools.push({ name: funcName, result: toolResult })
           } else if (['extract_content','click_element','fill_input','wait_for_element','save_as_file','navigate_to','go_back','find_text_on_page','get_element_info','scroll_page','hover_element','select_dropdown','press_key','go_forward','get_interactive_elements','detect_page_template'].includes(funcName)) {
             const selectorTools = ['extract_content', 'get_element_info', 'find_text_on_page']

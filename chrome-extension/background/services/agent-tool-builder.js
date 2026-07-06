@@ -392,7 +392,7 @@ export function buildTools(searchResults, currentPageUrl, round, scriptService, 
 
   // === render_report（模板化报告渲染）===
   // AI 选模板 + 框架套模板渲染，比 generate_script 写 HTML 更稳定
-  // 模板可从后端脚本库加载（tool_type: 'report_template'），加载失败降级用内置模板
+  // 模板从后端 report_templates 表加载（agent-runner 启动时预加载），加载失败降级用内置模板
   const _templateList = getTemplateList()
   const _templateDesc = _templateList.map(t => `· ${t.id}（${t.name}）: ${t.description}`).join('\n')
   tools.push({

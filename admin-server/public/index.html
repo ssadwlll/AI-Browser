@@ -55,6 +55,9 @@
         <div class="nav-item" data-page="forge" onclick="switchPage('forge')">
           <span class="icon">🔨</span> 脚本工坊
         </div>
+        <div class="nav-item" data-page="reporttemplates" onclick="switchPage('reporttemplates')">
+          <span class="icon">📋</span> 报告模板
+        </div>
       </div>
       <div class="nav-group">
         <div class="nav-group-title">AI 服务</div>
@@ -132,6 +135,31 @@
           <tbody id="scriptTable"><tr><td colspan="9" class="empty-state">加载中...</td></tr></tbody></table>
         </div>
         <div class="pagination" id="scriptPagination"></div>
+      </div>
+    </div>
+
+    <!-- ===== 报告模板 ===== -->
+    <div id="page-reporttemplates" class="page">
+      <div class="page-header">
+        <h2>报告模板管理</h2>
+        <button class="btn btn-primary" onclick="showTemplateModal()">+ 新建模板</button>
+      </div>
+      <div class="card">
+        <div class="search-bar">
+          <input type="text" id="templateSearch" placeholder="搜索模板名称/ID..." onkeydown="if(event.key==='Enter')loadReportTemplates(1)">
+          <select id="templateStatusFilter" onchange="loadReportTemplates(1)" style="width:120px;padding:8px;border:1px solid var(--border);border-radius:var(--radius);font-size:13px;outline:none">
+            <option value="">全部状态</option>
+            <option value="published">已发布</option>
+            <option value="draft">草稿</option>
+            <option value="archived">已归档</option>
+          </select>
+          <button class="btn btn-primary btn-sm" onclick="loadReportTemplates(1)">搜索</button>
+        </div>
+        <div class="table-wrap">
+          <table><thead><tr><th>ID</th><th>模板ID</th><th>名称</th><th>描述</th><th>数据形态</th><th>排序</th><th>状态</th><th>更新时间</th><th>操作</th></tr></thead>
+          <tbody id="reportTemplateTable"><tr><td colspan="9" class="empty-state">加载中...</td></tr></tbody></table>
+        </div>
+        <div class="pagination" id="reportTemplatePagination"></div>
       </div>
     </div>
 
@@ -659,9 +687,57 @@
   </div>
 </div>
 
+<!-- 报告模板编辑弹窗 -->
+<div id="templateModal" class="modal-overlay hidden" onclick="if(event.target===this)closeTemplateModal()">
+  <div class="modal-box tall" style="width:800px">
+    <h3 id="templateModalTitle">新建模板</h3>
+    <div id="templateError" class="error-msg"></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <div class="form-group"><label>模板ID * <span style="font-weight:400;font-size:11px;color:var(--text2)">英文标识，如 news_card_list</span></label><input type="text" id="tplTemplateId" placeholder="news_card_list"></div>
+      <div class="form-group"><label>模板名称 *</label><input type="text" id="tplName" placeholder="新闻卡片列表"></div>
+    </div>
+    <div class="form-group"><label>描述</label><textarea id="tplDescription" rows="2" placeholder="模板用途说明"></textarea></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">
+      <div class="form-group"><label>数据形态</label><select id="tplDataKind"><option value="array">array（数组）</option><option value="object">object（对象）</option></select></div>
+      <div class="form-group"><label>排序</label><input type="number" id="tplSortOrder" value="0"></div>
+      <div class="form-group"><label>状态</label><select id="tplStatus"><option value="published">已发布</option><option value="draft">草稿</option><option value="archived">已归档</option></select></div>
+    </div>
+    <div class="form-group">
+      <label>字段定义 (JSON) <span style="font-weight:400;font-size:11px;color:var(--text2)">供 AI 做字段映射参考，data_table 类型可留空</span></label>
+      <textarea id="tplFields" rows="4" style="font-family:monospace;font-size:12px" placeholder='[{"key":"title","label":"标题","required":true},{"key":"url","label":"链接","required":false}]'></textarea>
+    </div>
+    <div class="form-group">
+      <label>HTML 模板 * <span style="font-weight:400;font-size:11px;color:var(--text2)">Handlebars 语法：{{var}} {{#each items}} {{#if field}}</span></label>
+      <textarea id="tplTemplate" class="code-edit" style="min-height:180px" spellcheck="false" placeholder="<div>{{#each items}}<h3>{{title}}</h3>{{/each}}</div>"></textarea>
+    </div>
+    <div class="form-group">
+      <label>CSS 样式</label>
+      <textarea id="tplCss" class="code-edit" style="min-height:120px" spellcheck="false" placeholder=".report-news-list { ... }"></textarea>
+    </div>
+    <input type="hidden" id="tplId" value="">
+    <div class="modal-actions">
+      <button class="btn btn-sm" onclick="closeTemplateModal()" style="background:var(--bg);color:var(--text)">取消</button>
+      <button class="btn btn-success btn-sm" onclick="previewTemplate()">预览</button>
+      <button class="btn btn-primary btn-sm" onclick="saveTemplate()">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- 报告模板预览弹窗 -->
+<div id="templatePreviewModal" class="modal-overlay hidden" onclick="if(event.target===this)closeTemplatePreviewModal()">
+  <div class="modal-box wide tall">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+      <h3 style="margin:0">模板预览</h3>
+      <button class="btn btn-sm" onclick="closeTemplatePreviewModal()" style="background:var(--bg);color:var(--text)">关闭</button>
+    </div>
+    <div id="templatePreviewArea" style="border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;min-height:300px"></div>
+  </div>
+</div>
+
 <!-- ===== 脚本加载顺序 ===== -->
 <script src="js/common.js"></script>
 <script src="js/scripts.js"></script>
+<script src="js/report-templates.js"></script>
 <script src="js/users.js"></script>
 <script src="js/categories.js"></script>
 <script src="js/appkeys.js"></script>
@@ -690,6 +766,7 @@ function switchPage(page) {
   if (page === 'aicalllogs') initAICallLogs();
   if (page === 'attachments') loadAttachments(1);
   if (page === 'forge') loadForgePage();
+  if (page === 'reporttemplates') loadReportTemplates(1);
   if (page === 'appsettings') loadAppSettings();
   if (page === 'convarchives') loadConvArchives(1);
 }
