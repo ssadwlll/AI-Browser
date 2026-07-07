@@ -396,7 +396,8 @@ export async function runAgent(ctx) {
 === 工具使用策略 ===
 - DOM工具（extract_content、click_element等）：用于页面探索、简单数据提取、交互操作
 - inject_script_N：用于批量处理、深度数据采集（N是search_tools查到的脚本ID）
-- generate_script：动态生成代码执行任意JS逻辑（fetch网络请求/DOM操作/数据处理等），运行在页面上下文。返回 HTML 字符串时可自动渲染为可视化报告
+- generate_script：动态生成代码执行任意JS逻辑（DOM操作/数据处理/同源fetch等）。代码运行在 async 函数体中，可直接 await；必须用 return 返回结果。受页面 CSP 限制（严格 CSP 站点会报 unsafe-eval 错误，此时改用 inject_script_N 或 DOM 工具）。返回 HTML 字符串时自动渲染为可视化报告
+- fetch_url：在扩展后台发起网络请求，突破 CORS 限制。跨域 fetch 用此工具，不要用 generate_script 中的 fetch
 - search_tools：搜索脚本库，查找可用的远程脚本
 - finish_task：完成所有任务后输出最终结果
 
@@ -1339,6 +1340,43 @@ ${allData.length > 0 ? '全局存储:\n' + allData.join('\n') : ''}${payloadItem
               }
               recordMemory(configService, scriptId, memOk, execDuration, memOk ? '' : (execResult?.error || ''), memSummary).catch(() => {})
             }
+          } else if (funcName === 'fetch_url') {
+            // 后台代理 fetch：突破页面 CORS 限制
+            // SW 有 host_permissions 豁免，可跨域 fetch；不受页面 CSP 限制
+            const url = typeof funcArgs.url === 'string' ? funcArgs.url : ''
+            if (!url) {
+              toolResult = JSON.stringify({ ok: false, error: 'url 参数不能为空' })
+              executedTools.push({ name: `${funcName}(空url)`, result: toolResult })
+              postToUI(tabId, { type: 'agentStepResult', step: totalToolCalls, toolName: funcName, result: toolResult, done: false })
+              messages.push({ role: 'tool', tool_call_id: toolCall.id, content: toolResult })
+              continue
+            }
+            postToUI(tabId, { type: 'agentStep', step: totalToolCalls, toolName: funcName, toolArgs: { url, method: funcArgs.method || 'GET' }, status: 'running' })
+            try {
+              const fetchOpts = {
+                method: funcArgs.method || 'GET',
+                headers: funcArgs.headers || {},
+              }
+              if (funcArgs.body && ['POST', 'PUT', 'PATCH'].includes(fetchOpts.method.toUpperCase())) {
+                fetchOpts.body = funcArgs.body
+              }
+              const resp = await fetchWithTimeout(url, fetchOpts, 30000)
+              if (!resp.ok) {
+                toolResult = JSON.stringify({ ok: false, error: `HTTP ${resp.status}: ${resp.statusText}` })
+              } else {
+                const returnMode = funcArgs.return_mode || 'text'
+                if (returnMode === 'json') {
+                  const data = await resp.json()
+                  toolResult = JSON.stringify({ ok: true, result: data })
+                } else {
+                  const text = await resp.text()
+                  toolResult = JSON.stringify({ ok: true, result: text, _contentType: resp.headers.get('content-type') || '' })
+                }
+              }
+            } catch (e) {
+              toolResult = JSON.stringify({ ok: false, error: `fetch 失败: ${e.message}` })
+            }
+            executedTools.push({ name: funcName, result: toolResult })
           } else if (funcName === 'generate_script') {
             // 动态代码执行：把 data_refs 全量数据注入 window.__store，执行 code，返回 {ok, result}
             const targetTab = await getTargetTab(tabId)
@@ -1375,19 +1413,35 @@ ${allData.length > 0 ? '全局存储:\n' + allData.join('\n') : ''}${payloadItem
                 }
               }
               // 在页面中注入 window.__store 并执行 code
-              // 关键：必须用 world: 'MAIN'，否则 isolated world 受页面 CSP 限制，new Function 会被拦截
-              // 参见 inject_script_N 的实现（tool-service.js executeJSTool）
+              // 关键：使用 world: 'MAIN' + new AsyncFunction
+              // - MAIN world：共享页面 DOM/window，new Function 受页面 CSP 限制
+              //   （页面 CSP 允许 unsafe-eval 时能工作；严格 CSP 页面如新浪会失败，需降级 DOM 工具）
+              // - ISOLATED world 不可用：受扩展 MV3 默认 CSP 限制，new Function 永远不工作
+              // - AsyncFunction 构造器：让 AI 代码顶层可直接 await，无需包 async IIFE
+              // - fetch 在 MAIN world 受页面 CORS 限制，跨域请求需用 fetch_url 工具（SW 代理）
               const [execResult] = await chrome.scripting.executeScript({
                 target: { tabId: targetTab.id },
                 world: 'MAIN',
-                func: (storeObj, userCode) => {
+                func: async (storeObj, userCode) => {
                   try {
                     window.__store = window.__store || {}
                     if (storeObj && typeof storeObj === 'object') {
                       for (const k of Object.keys(storeObj)) window.__store[k] = storeObj[k]
                     }
-                    const fn = new Function(userCode)
-                    const r = fn()
+                    // 用 AsyncFunction 构造器：代码顶层可直接 await，return 值作为结果
+                    const AsyncFunction = Object.getPrototypeOf(async function(){}).constructor
+                    const fn = new AsyncFunction(userCode)
+                    const r = await fn()
+                    // 按工具返回规范：空返回值视为失败，避免 AI 拿到 undefined 困惑
+                    if (r === undefined || r === null) {
+                      return { ok: false, error: '代码未返回结果，请确保使用 return 语句返回数据' }
+                    }
+                    // 空对象/空字符串/空数组也提示（避免 AI 以为成功但无数据）
+                    if ((typeof r === 'object' && !Array.isArray(r) && Object.keys(r).length === 0)
+                        || (Array.isArray(r) && r.length === 0)
+                        || (typeof r === 'string' && r.length === 0)) {
+                      return { ok: false, error: '代码返回了空数据，请检查逻辑（如 fetch 是否被 CSP/CORS 拦截、选择器是否匹配）' }
+                    }
                     return { ok: true, result: r }
                   } catch (e) {
                     return { ok: false, error: e.message }

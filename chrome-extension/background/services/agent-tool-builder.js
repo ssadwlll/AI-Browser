@@ -349,15 +349,35 @@ export function buildTools(searchResults, currentPageUrl, round, scriptService, 
     type: 'function',
     function: {
       name: 'generate_script',
-      description: '动态生成并执行JS代码，运行在当前页面上下文。可执行任意JS逻辑：发起网络请求(fetch)、操作DOM、处理已存储数据(window.__store.pX)等。用 return 返回结果。返回 HTML 字符串（以 < 开头）时，框架会自动用 iframe 渲染为可视化报告。',
+      description: '动态生成并执行JS代码，运行在页面上下文（MAIN world）。可执行任意JS逻辑：操作DOM、处理已存储数据(window.__store.pX)、同源fetch等。代码在 async 函数中执行，可直接使用 await。必须用 return 返回结果。返回 HTML 字符串（以 < 开头）时，框架会自动用 iframe 渲染为可视化报告。注意：受页面 CSP 限制，部分严格 CSP 的站点（如新浪）可能拒绝执行；跨域 fetch 受 CORS 限制，需用 fetch_url 工具。',
       parameters: {
         type: 'object',
         properties: {
-          code: { type: 'string', description: '要执行的JS代码。可通过 window.__store.p1 访问已存储数据，也可直接 fetch 网络请求或操作当前页面 DOM。用 return 返回结果。返回 HTML 字符串时会自动渲染为报告（支持 table/card/grid 等标签，框架已内置基础样式）。例1: return await fetch(url).then(r=>r.text())  例2: return window.__store.p1.filter(x => x.text.length > 5)  例3: return `<div class="card"><h3>${item.title}</h3><p>${item.body}</p></div>`' },
+          code: { type: 'string', description: '要执行的JS代码。\n- 运行在 async 函数体中，可直接使用 await（无需包 async IIFE）\n- 必须用 return 返回结果；未 return 或返回空值会报错\n- 通过 window.__store.p1 访问 data_refs 注入的数据\n- 可用 document.querySelector、DOMParser 等操作当前页面 DOM\n- 跨域 fetch 会受 CORS 限制，改用 fetch_url 工具\n- 受页面 CSP 限制，若报 unsafe-eval 错误请改用 inject_script_N 或 DOM 工具\n- 返回 HTML 字符串（以 < 开头）会自动渲染为报告\n\n例1（数据处理）: return window.__store.p1.filter(x => x.text.length > 5)\n例2（HTML报告）: return `<div class="card"><h3>${item.title}</h3><p>${item.body}</p></div>`\n例3（同源fetch）: const r = await fetch("/api/data"); return await r.json()\n例4（批量处理）: const items = window.__store.p1; return items.map(x => ({title: x.text, url: x.attrs.href}))' },
           data_refs: { type: 'array', items: { type: 'string' }, description: '引用的数据ID列表，如 ["p1","p2"]。系统会把全量数据注入到 window.__store 供 code 访问' },
           description: { type: 'string', description: '代码功能简述（便于追踪）' },
         },
         required: ['code'],
+      },
+    },
+  })
+
+  // === fetch_url（后台代理 fetch，突破 CORS）===
+  tools.push({
+    type: 'function',
+    function: {
+      name: 'fetch_url',
+      description: '在扩展后台发起网络请求，突破页面 CORS 限制（manifest 已配 host_permissions: <all_urls>）。适用于跨域获取 HTML/JSON 数据。返回响应文本（字符串）。如需解析 HTML，可将结果存入 data_refs 后用 generate_script 配合 DOMParser 处理（注意 CSP 限制）。',
+      parameters: {
+        type: 'object',
+        properties: {
+          url: { type: 'string', description: '请求 URL' },
+          method: { type: 'string', description: 'HTTP 方法，默认 GET' },
+          headers: { type: 'object', description: '请求头，如 { "User-Agent": "Mozilla/5.0" }' },
+          body: { type: 'string', description: '请求体（POST/PUT 时使用）' },
+          return_mode: { type: 'string', description: '返回模式："text"(默认,返回响应文本) 或 "json"(尝试解析为JSON)' },
+        },
+        required: ['url'],
       },
     },
   })

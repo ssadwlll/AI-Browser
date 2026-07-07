@@ -102,7 +102,8 @@ export class TodoScheduler {
 - action: 工具名称，可用值：
   · extract_content / click_element / navigate_to / read_page_content（DOM工具）
   · inject_script_N（脚本库脚本，N为ID）
-  · generate_script（动态代码执行，可 fetch/DOM 操作/数据处理等。返回 HTML 字符串可渲染为可视化报告）
+  · fetch_url（后台代理 fetch，突破 CORS 限制，获取跨域 HTML/JSON）
+  · generate_script（动态代码执行，可 DOM 操作/数据处理等。返回 HTML 字符串可渲染为可视化报告。注意：受页面 CSP 限制，跨域 fetch 用 fetch_url）
   · render_report（用预设模板渲染数据报告，比 generate_script 写 HTML 更稳定。模板：news_card_list/data_table/timeline/product_grid）
   · finish_task（完成并输出结果，必须是最后一步）
 - description: 简要描述此步骤做什么
@@ -110,7 +111,7 @@ export class TodoScheduler {
 === 工作流程 ===
 1. 了解页面结构（detect_page_template / get_interactive_elements）
 2. 根据需要选择工具执行：extract_content 提取元素 / inject_script_N 调用脚本 / navigate_to 导航 / click_element 点击 / read_page_content 读取页面内容
-3. 如需批量处理或代码执行（fetch/DOM操作/数据处理等），用 generate_script 作为独立待办步骤
+3. 跨域 fetch 用 fetch_url；同源 fetch / DOM 操作 / 数据处理用 generate_script
 4. 汇总结果（finish_task）
 
 === 正确示例 ===

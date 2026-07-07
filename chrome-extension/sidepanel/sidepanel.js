@@ -2300,6 +2300,20 @@ function renderTemplateReport(item, container) {
   _renderTemplateInto(initialTemplate, data, fieldMapping, renderArea)
 }
 
+// 从对象按点分路径取值，如 _resolveDataPath({attrs:{href:'x'}}, 'attrs.href') → 'x'
+// 不支持路径则直接按整字符串作为 key 取（兼容旧用法）
+function _resolveDataPath(obj, path) {
+  if (!obj || typeof obj !== 'object' || typeof path !== 'string') return undefined
+  if (!path.includes('.')) return obj[path]
+  const parts = path.split('.')
+  let val = obj
+  for (const p of parts) {
+    if (val === null || val === undefined) return undefined
+    val = val[p]
+  }
+  return val
+}
+
 // 用指定模板渲染数据到容器
 function _renderTemplateInto(template, data, fieldMapping, container) {
   if (!template || !template.template) {
@@ -2311,14 +2325,15 @@ function _renderTemplateInto(template, data, fieldMapping, container) {
   let mappedData = data
   if (fieldMapping && typeof fieldMapping === 'object') {
     // fieldMapping 格式：{ template_field: data_field }
+    // data_field 支持嵌套路径，如 "attrs.href" 表示从 item.attrs.href 取值
     // 把每条数据的 data_field 改名为 template_field
     mappedData = (Array.isArray(data) ? data : []).map(item => {
       if (!item || typeof item !== 'object') return item
       const mapped = { ...item }
       for (const [tmplField, dataField] of Object.entries(fieldMapping)) {
-        if (dataField !== tmplField && item[dataField] !== undefined) {
-          mapped[tmplField] = item[dataField]
-        }
+        if (dataField === tmplField) continue
+        const val = _resolveDataPath(item, dataField)
+        if (val !== undefined) mapped[tmplField] = val
       }
       return mapped
     })
