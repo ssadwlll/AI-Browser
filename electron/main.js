@@ -11,6 +11,7 @@ const AgentLoop = require('./ai/agent_loop')
 const TOOL_DEFINITIONS = require('./ai/tool_definitions')
 const ToolExecutor = require('./ai/tool_executor')
 const TabManager = require('./tab_manager')
+const serviceManager = require('./service_manager')
 
 let mainWindow
 let tray = null
@@ -300,11 +301,264 @@ function registerIpcHandlers() {
     return { position: panelPosition, ratio: panelRatio }
   })
 
-  // --- AI 对话 ---
+  // --- 内置工具浮动窗口（独立 BrowserWindow，全窗口可移动，不受 BrowserView 拦截） ---
+  let toolWindow = null
+  ipcMain.handle('tool-window:open', async (event) => {
+    // 如果窗口已存在，聚焦它
+    if (toolWindow && !toolWindow.isDestroyed()) {
+      if (toolWindow.isMinimized()) toolWindow.restore()
+      toolWindow.focus()
+      return { success: true }
+    }
+    const [parentW, parentH] = mainWindow.getContentSize()
+    const [parentX, parentY] = mainWindow.getPosition()
+    // 窗口尺寸：560×480，居中偏右
+    const wWidth = 560
+    const wHeight = 480
+    const wX = parentX + Math.floor((parentW - wWidth) / 2) + 40
+    const wY = parentY + Math.floor((parentH - wHeight) / 2) - 20
+
+    toolWindow = new BrowserWindow({
+      width: wWidth,
+      height: wHeight,
+      x: wX,
+      y: wY,
+      parent: mainWindow,
+      frame: false,        // 无边框，自定义标题栏实现拖拽
+      resizable: true,
+      minimizable: false,
+      maximizable: false,
+      fullscreenable: false,
+      skipTaskbar: true,   // 不显示在任务栏
+      alwaysOnTop: true,
+      backgroundColor: '#1a1a2e',
+      webPreferences: {
+        nodeIntegration: false,
+        contextIsolation: true,
+        preload: path.join(__dirname, 'preload.js'),
+      },
+    })
+
+    // 开发环境加载 Vite 开发服务器，生产环境加载打包文件
+    // 用 query 参数 ?window=feature-panels 标识工具窗口
+    if (process.env.NODE_ENV === 'development') {
+      toolWindow.loadURL('http://localhost:5173/?window=feature-panels')
+    } else {
+      toolWindow.loadFile(path.join(__dirname, '../dist/index.html'), { query: { window: 'feature-panels' } })
+    }
+
+    toolWindow.on('closed', () => { toolWindow = null })
+    return { success: true }
+  })
+
+  ipcMain.handle('tool-window:close', async () => {
+    if (toolWindow && !toolWindow.isDestroyed()) {
+      toolWindow.close()
+      toolWindow = null
+    }
+    return { success: true }
+  })
+
+  // --- 全景对话窗口（独立 BrowserWindow，实时显示 Agent 对话轮次） ---
+  let conversationWindow = null
+  ipcMain.handle('conversation-window:open', async (event) => {
+    if (conversationWindow && !conversationWindow.isDestroyed()) {
+      if (conversationWindow.isMinimized()) conversationWindow.restore()
+      conversationWindow.focus()
+      return { success: true }
+    }
+    const [parentW, parentH] = mainWindow.getContentSize()
+    const [parentX, parentY] = mainWindow.getPosition()
+    const wWidth = 680
+    const wHeight = 600
+    const wX = parentX + Math.floor((parentW - wWidth) / 2) - 40
+    const wY = parentY + Math.floor((parentH - wHeight) / 2) - 20
+
+    conversationWindow = new BrowserWindow({
+      width: wWidth,
+      height: wHeight,
+      x: wX,
+      y: wY,
+      parent: mainWindow,
+      frame: false,
+      resizable: true,
+      minimizable: false,
+      maximizable: false,
+      fullscreenable: false,
+      skipTaskbar: true,
+      alwaysOnTop: true,
+      backgroundColor: '#1a1a2e',
+      webPreferences: {
+        nodeIntegration: false,
+        contextIsolation: true,
+        preload: path.join(__dirname, 'preload.js'),
+      },
+    })
+
+    if (process.env.NODE_ENV === 'development') {
+      conversationWindow.loadURL('http://localhost:5173/?window=conversation')
+    } else {
+      conversationWindow.loadFile(path.join(__dirname, '../dist/index.html'), { query: { window: 'conversation' } })
+    }
+
+    conversationWindow.on('closed', () => { conversationWindow = null })
+    return { success: true }
+  })
+
+  ipcMain.handle('conversation-window:close', async () => {
+    if (conversationWindow && !conversationWindow.isDestroyed()) {
+      conversationWindow.close()
+      conversationWindow = null
+    }
+    return { success: true }
+  })
+
+  // --- 数据报告窗口（独立 BrowserWindow，Agent 完成时自动弹出） ---
+  let reportWindow = null
+  // 缓存最新的报告数据，供报告窗口加载时读取
+  let lastReportData = null
+
+  // agent_runner 通过 invoke 调用此接口，传递报告数据并打开窗口
+  ipcMain.handle('report-window:show', async (event, { items, summary, taskId }) => {
+    // 缓存报告数据
+    lastReportData = { items: items || [], summary: summary || '', taskId: taskId || '', timestamp: Date.now() }
+
+    // 如果窗口已存在，聚焦并发送新数据
+    if (reportWindow && !reportWindow.isDestroyed()) {
+      if (reportWindow.isMinimized()) reportWindow.restore()
+      reportWindow.focus()
+      // 发送最新报告数据给窗口
+      reportWindow.webContents.send('report:data', lastReportData)
+      return { success: true }
+    }
+
+    // 创建新窗口
+    const [parentW, parentH] = mainWindow.getContentSize()
+    const [parentX, parentY] = mainWindow.getPosition()
+    const wWidth = 720
+    const wHeight = 560
+    const wX = parentX + Math.floor((parentW - wWidth) / 2)
+    const wY = parentY + Math.floor((parentH - wHeight) / 2)
+
+    reportWindow = new BrowserWindow({
+      width: wWidth,
+      height: wHeight,
+      x: wX,
+      y: wY,
+      parent: mainWindow,
+      frame: false,
+      resizable: true,
+      minimizable: false,
+      maximizable: false,
+      fullscreenable: false,
+      skipTaskbar: true,
+      alwaysOnTop: true,
+      backgroundColor: '#1a1a2e',
+      webPreferences: {
+        nodeIntegration: false,
+        contextIsolation: true,
+        preload: path.join(__dirname, 'preload.js'),
+      },
+    })
+
+    if (process.env.NODE_ENV === 'development') {
+      reportWindow.loadURL('http://localhost:5173/?window=report')
+    } else {
+      reportWindow.loadFile(path.join(__dirname, '../dist/index.html'), { query: { window: 'report' } })
+    }
+
+    // 窗口加载完成后发送报告数据
+    reportWindow.webContents.once('did-finish-load', () => {
+      if (lastReportData) {
+        reportWindow.webContents.send('report:data', lastReportData)
+      }
+    })
+
+    reportWindow.on('closed', () => { reportWindow = null })
+    return { success: true }
+  })
+
+  // 报告窗口加载时主动获取缓存的报告数据
+  ipcMain.handle('report-window:get-data', async () => {
+    return global._lastReportData || lastReportData || null
+  })
+
+  ipcMain.handle('report-window:close', async () => {
+    if (reportWindow && !reportWindow.isDestroyed()) {
+      reportWindow.close()
+      reportWindow = null
+    }
+    return { success: true }
+  })
+
+  // 监听 report:open 事件（service_manager 通过 mainWindow.webContents.send 触发）
+  // 内部调用 report-window:show 的逻辑
+  ipcMain.on('report:open', async (_event, data) => {
+    console.log('[Main] 收到 report:open，准备显示报告窗口')
+    // 复用 report-window:show 的逻辑
+    if (!data || !data.items || data.items.length === 0) return
+
+    // 缓存报告数据
+    lastReportData = { items: data.items, summary: data.summary || '', taskId: data.taskId || '', timestamp: Date.now() }
+
+    // 如果窗口已存在，聚焦并发送新数据
+    if (reportWindow && !reportWindow.isDestroyed()) {
+      if (reportWindow.isMinimized()) reportWindow.restore()
+      reportWindow.focus()
+      reportWindow.webContents.send('report:data', lastReportData)
+      return
+    }
+
+    // 创建新窗口
+    const [parentW, parentH] = mainWindow.getContentSize()
+    const [parentX, parentY] = mainWindow.getPosition()
+    const wWidth = 720
+    const wHeight = 560
+    const wX = parentX + Math.floor((parentW - wWidth) / 2)
+    const wY = parentY + Math.floor((parentH - wHeight) / 2)
+
+    reportWindow = new BrowserWindow({
+      width: wWidth,
+      height: wHeight,
+      x: wX,
+      y: wY,
+      parent: mainWindow,
+      frame: false,
+      resizable: true,
+      minimizable: false,
+      maximizable: false,
+      fullscreenable: false,
+      skipTaskbar: true,
+      alwaysOnTop: true,
+      backgroundColor: '#1a1a2e',
+      webPreferences: {
+        nodeIntegration: false,
+        contextIsolation: true,
+        preload: path.join(__dirname, 'preload.js'),
+      },
+    })
+
+    if (process.env.NODE_ENV === 'development') {
+      reportWindow.loadURL('http://localhost:5173/?window=report')
+    } else {
+      reportWindow.loadFile(path.join(__dirname, '../dist/index.html'), { query: { window: 'report' } })
+    }
+
+    reportWindow.webContents.once('did-finish-load', () => {
+      if (lastReportData) {
+        reportWindow.webContents.send('report:data', lastReportData)
+      }
+    })
+
+    reportWindow.on('closed', () => { reportWindow = null })
+  })
   ipcMain.handle('ai:chat', async (event, { messages, config }) => {
     try {
-      llmProvider.setConfig(config)
-      const reply = await llmProvider.chat(messages)
+      const reply = await proxyChat(messages, {
+        model: config?.model,
+        temperature: config?.temperature,
+        maxTokens: config?.maxTokens,
+      })
       return { success: true, reply }
     } catch (e) {
       return { success: false, error: e.message }
@@ -313,8 +567,11 @@ function registerIpcHandlers() {
 
   ipcMain.handle('ai:chat-stream', async (event, { messages, config }) => {
     try {
-      llmProvider.setConfig(config)
-      const stream = await llmProvider.chatStream(messages)
+      const stream = proxyChatStream(messages, {
+        model: config?.model,
+        temperature: config?.temperature,
+        maxTokens: config?.maxTokens,
+      })
       for await (const item of stream) {
         if (item.type === 'content') safeSend('stream:chunk', { source: 'chat', chunk: item.content })
       }
@@ -350,9 +607,196 @@ function registerIpcHandlers() {
 
   let unifiedAbortFlag = false
 
+  // ============ 后端 AI 代理调用（普通聊天模式也走后端代理） ============
+  // 与 Agent 模式共用 /api/ai-proxy/chat，统一模型路由和用量统计
+
+  /**
+   * 通过后端 AI 代理调用 LLM（非流式）
+   * @param {Array} messages - 消息数组
+   * @param {object} opts - { tools, model, temperature, maxTokens }
+   * @returns {Promise<{content, tool_calls}>} AI 回复
+   */
+  async function proxyChat(messages, opts = {}) {
+    const configService = serviceManager.get('configService')
+    if (!configService) throw new Error('ConfigService 未初始化')
+
+    const aiConfig = await configService.getAIConfig()
+    const auth = await configService.getAppAuth()
+    if (!auth.appKey || !auth.appSecret) {
+      throw new Error('未配置 AppKey/AppSecret，请在设置 → 服务端连接中配置')
+    }
+
+    const url = await configService.getAIProxyUrl()
+    const headers = await configService.generateAuthHeaders(auth.appKey, auth.appSecret)
+
+    const body = {
+      model: opts.model || aiConfig.model,
+      messages,
+      temperature: opts.temperature ?? aiConfig.temperature ?? 0.7,
+      max_tokens: opts.maxTokens || aiConfig.maxTokens || 4096,
+      stream: false,
+    }
+    if (opts.tools && opts.tools.length > 0) {
+      body.tools = opts.tools
+      body.tool_choice = 'auto'
+    }
+
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), 60000)
+
+    try {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { ...headers, 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      })
+      clearTimeout(timeoutId)
+
+      if (!res.ok) {
+        const text = await res.text().catch(() => '')
+        throw new Error(`AI代理请求失败: ${res.status} ${text.slice(0, 300)}`)
+      }
+
+      const data = await res.json()
+      if (!data.success) {
+        throw new Error(data.error || data.message || 'AI代理返回错误')
+      }
+
+      // 后端返回 { success, data: { choices: [{ message }] } } 或 { success, data: { content, tool_calls } }
+      const payload = data.data || data
+      if (payload.choices && payload.choices[0]) {
+        return payload.choices[0].message
+      }
+      return { content: payload.content || '', tool_calls: payload.tool_calls }
+    } finally {
+      clearTimeout(timeoutId)
+    }
+  }
+
+  /**
+   * 通过后端 AI 代理调用 LLM（流式，async generator）
+   * @param {Array} messages - 消息数组
+   * @param {object} opts - { tools, model, temperature, maxTokens }
+   * @yields {{ type: 'content'|'tool_calls', content?: string, tool_calls?: array }}
+   */
+  async function* proxyChatStream(messages, opts = {}) {
+    const configService = serviceManager.get('configService')
+    if (!configService) throw new Error('ConfigService 未初始化')
+
+    const aiConfig = await configService.getAIConfig()
+    const auth = await configService.getAppAuth()
+    if (!auth.appKey || !auth.appSecret) {
+      throw new Error('未配置 AppKey/AppSecret，请在设置 → 服务端连接中配置')
+    }
+
+    const url = await configService.getAIProxyUrl()
+    const headers = await configService.generateAuthHeaders(auth.appKey, auth.appSecret)
+
+    const body = {
+      model: opts.model || aiConfig.model,
+      messages,
+      temperature: opts.temperature ?? aiConfig.temperature ?? 0.7,
+      max_tokens: opts.maxTokens || aiConfig.maxTokens || 4096,
+      stream: true,
+    }
+    if (opts.tools && opts.tools.length > 0) {
+      body.tools = opts.tools
+      body.tool_choice = 'auto'
+    }
+
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), 300000) // 5分钟超时
+
+    try {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { ...headers, 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      })
+      clearTimeout(timeoutId)
+
+      if (!res.ok) {
+        const text = await res.text().catch(() => '')
+        throw new Error(`AI代理请求失败: ${res.status} ${text.slice(0, 300)}`)
+      }
+
+      // 解析 SSE 流
+      const reader = res.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+      let toolCallsAccum = {}
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split('\n')
+        buffer = lines.pop() || ''
+
+        for (const line of lines) {
+          const trimmed = line.trim()
+          if (!trimmed || !trimmed.startsWith('data:')) continue
+
+          const dataStr = trimmed.slice(5).trim()
+          if (dataStr === '[DONE]') {
+            if (Object.keys(toolCallsAccum).length > 0) {
+              const toolCalls = Object.values(toolCallsAccum).sort((a, b) => (a.index || 0) - (b.index || 0))
+              yield { type: 'tool_calls', tool_calls }
+            }
+            return
+          }
+
+          try {
+            const chunk = JSON.parse(dataStr)
+            // 兼容两种格式：后端代理的 { success, data } 或原始 OpenAI SSE
+            const choices = chunk.choices || (chunk.data && chunk.data.choices)
+            if (!choices || !choices[0]) continue
+
+            const delta = choices[0].delta
+            if (!delta) continue
+
+            if (delta.content) {
+              yield { type: 'content', content: delta.content }
+            }
+
+            if (delta.tool_calls) {
+              for (const tc of delta.tool_calls) {
+                const idx = tc.index ?? 0
+                if (!toolCallsAccum[idx]) {
+                  toolCallsAccum[idx] = {
+                    index: idx,
+                    id: tc.id || '',
+                    type: tc.type || 'function',
+                    function: { name: '', arguments: '' },
+                  }
+                }
+                if (tc.id) toolCallsAccum[idx].id = tc.id
+                if (tc.type) toolCallsAccum[idx].type = tc.type
+                if (tc.function?.name) toolCallsAccum[idx].function.name += tc.function.name
+                if (tc.function?.arguments) toolCallsAccum[idx].function.arguments += tc.function.arguments
+              }
+            }
+          } catch (e) {
+            // 非 JSON 行，跳过
+          }
+        }
+      }
+
+      // 流结束但没收到 [DONE]，检查是否有累积的 tool_calls
+      if (Object.keys(toolCallsAccum).length > 0) {
+        const toolCalls = Object.values(toolCallsAccum).sort((a, b) => (a.index || 0) - (b.index || 0))
+        yield { type: 'tool_calls', tool_calls }
+      }
+    } finally {
+      clearTimeout(timeoutId)
+    }
+  }
+
   ipcMain.handle('ai:unified-chat', async (event, { messages, config, maxToolRounds }) => {
     try {
-      llmProvider.setConfig(config)
       unifiedAbortFlag = false
       const maxRounds = maxToolRounds || 20
       let currentMessages = [
@@ -362,13 +806,21 @@ function registerIpcHandlers() {
 
       safeSend('unified:start', {})
 
+      // 从 config 中提取模型（UI 传入选中的模型）
+      const chatOpts = {
+        model: config?.model,
+        temperature: config?.temperature,
+        maxTokens: config?.maxTokens,
+        tools: TOOL_DEFINITIONS,
+      }
+
       for (let round = 0; round < maxRounds; round++) {
         if (unifiedAbortFlag) {
           safeSend('unified:done', { success: false, summary: '已中止' })
           return { success: false, summary: '已中止' }
         }
 
-        const aiMessage = await llmProvider.chat(currentMessages, { tools: TOOL_DEFINITIONS })
+        const aiMessage = await proxyChat(currentMessages, chatOpts)
 
         if (!aiMessage.tool_calls || aiMessage.tool_calls.length === 0) {
           const content = aiMessage.content || ''
@@ -431,7 +883,6 @@ function registerIpcHandlers() {
 
   ipcMain.handle('ai:unified-chat-stream', async (event, { messages, config, maxToolRounds }) => {
     try {
-      llmProvider.setConfig(config)
       unifiedAbortFlag = false
       const maxRounds = maxToolRounds || 20
       let currentMessages = [
@@ -440,6 +891,14 @@ function registerIpcHandlers() {
       ]
 
       safeSend('unified:start', {})
+
+      // 从 config 中提取模型（UI 传入选中的模型）
+      const chatOpts = {
+        model: config?.model,
+        temperature: config?.temperature,
+        maxTokens: config?.maxTokens,
+        tools: TOOL_DEFINITIONS,
+      }
 
       for (let round = 0; round < maxRounds; round++) {
         if (unifiedAbortFlag) {
@@ -455,7 +914,7 @@ function registerIpcHandlers() {
 
         // 添加超时保护
         const streamPromise = (async () => {
-          const stream = llmProvider.chatStream(currentMessages, { tools: TOOL_DEFINITIONS })
+          const stream = proxyChatStream(currentMessages, chatOpts)
           for await (const item of stream) {
             if (unifiedAbortFlag) break
             if (item.type === 'content') {
@@ -1008,12 +1467,19 @@ app.whenReady().then(() => {
   resizeBrowserView()
   setupRequestInterception()
   mainWindow.on('resize', resizeBrowserView)
+
+  // 初始化迁移的服务（Agent v2、配置管理、上下文管理、定时任务等）
+  serviceManager.init({ tabManager, actionExecutor, toolExecutor }).catch(err => {
+    console.error('[ServiceManager] 初始化失败:', err)
+  })
 })
 
 app.on('window-all-closed', () => {})
 
 app.on('before-quit', () => {
   app.isQuitting = true
+  // 清理迁移服务的资源（定时器、存储刷新等）
+  serviceManager.cleanup()
 })
 
 app.on('activate', () => {

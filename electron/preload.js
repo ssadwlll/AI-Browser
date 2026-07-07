@@ -29,6 +29,27 @@ contextBridge.exposeInMainWorld('api', {
     setPosition: ({ position, ratio }) => ipcRenderer.invoke('panel:set-position', { position, ratio }),
     getPosition: () => ipcRenderer.invoke('panel:get-position'),
   },
+  // 内置工具浮动窗口
+  toolWindow: {
+    open: () => ipcRenderer.invoke('tool-window:open'),
+    close: () => ipcRenderer.invoke('tool-window:close'),
+  },
+  // 全景对话窗口
+  conversationWindow: {
+    open: () => ipcRenderer.invoke('conversation-window:open'),
+    close: () => ipcRenderer.invoke('conversation-window:close'),
+  },
+  // 数据报告窗口
+  reportWindow: {
+    show: (data) => ipcRenderer.invoke('report-window:show', data),
+    getData: () => ipcRenderer.invoke('report-window:get-data'),
+    close: () => ipcRenderer.invoke('report-window:close'),
+    onData: (callback) => {
+      const handler = (_event, data) => callback(data)
+      ipcRenderer.on('report:data', handler)
+      return () => ipcRenderer.removeListener('report:data', handler)
+    },
+  },
   // 标签页管理
   tabs: {
     create: (url) => ipcRenderer.invoke('tabs:create', { url }),
@@ -182,5 +203,114 @@ contextBridge.exposeInMainWorld('api', {
       ipcRenderer.on('agent:done', handler)
       return () => ipcRenderer.removeListener('agent:done', handler)
     },
+  },
+  // ============ 迁移自 chrome-extension 的新增 API ============
+  // Agent v2 自主决策（完整迁移版：8阶段主循环 + 15层防死循环 + 工作记忆 + 上下文压缩）
+  agent2: {
+    start: ({ tabId, userMessage, chatHistory, modelInfo }) =>
+      ipcRenderer.invoke('agent:v2-start', { tabId, userMessage, chatHistory, modelInfo }),
+    abort: (tabId) => ipcRenderer.invoke('agent:v2-abort', { tabId }),
+    getStatus: (tabId) => ipcRenderer.invoke('agent:v2-status', { tabId }),
+    getRunning: () => ipcRenderer.invoke('agent:v2-running'),
+    judge: ({ userMessage, agentSummary, executedTools }) =>
+      ipcRenderer.invoke('agent:v2-judge', { userMessage, agentSummary, executedTools }),
+    recordMemory: ({ scriptId, success, durationMs, errorMessage, resultSummary }) =>
+      ipcRenderer.invoke('agent:v2-record-memory', { scriptId, success, durationMs, errorMessage, resultSummary }),
+    // 事件监听（统一事件通道 agent:v2-event）
+    onEvent: (callback) => {
+      const handler = (e, { channel, data }) => callback(channel, data)
+      ipcRenderer.on('agent:v2-event', handler)
+      return () => ipcRenderer.removeListener('agent:v2-event', handler)
+    },
+    onDone: (callback) => {
+      const handler = (e, data) => callback(data)
+      ipcRenderer.on('agent:v2-done', handler)
+      return () => ipcRenderer.removeListener('agent:v2-done', handler)
+    },
+  },
+  // 配置管理
+  config: {
+    getAI: () => ipcRenderer.invoke('config:get-ai'),
+    saveAI: (config) => ipcRenderer.invoke('config:save-ai', { config }),
+    getSync: () => ipcRenderer.invoke('config:get-sync'),
+    saveSync: (config) => ipcRenderer.invoke('config:save-sync', { config }),
+    getAgent: () => ipcRenderer.invoke('config:get-agent'),
+    saveAgent: (config) => ipcRenderer.invoke('config:save-agent', { config }),
+    getAppSettings: () => ipcRenderer.invoke('config:get-app-settings'),
+    getAvailableModels: () => ipcRenderer.invoke('config:get-available-models'),
+    getSelectionTools: () => ipcRenderer.invoke('config:get-selection-tools'),
+    saveSelectionTools: (enabled) => ipcRenderer.invoke('config:save-selection-tools', { enabled }),
+  },
+  // 待办调度
+  todo: {
+    getTemplate: ({ userMessage, pageContent, searchResults }) =>
+      ipcRenderer.invoke('todo:get-template', { userMessage, pageContent, searchResults }),
+    submit: (items) => ipcRenderer.invoke('todo:submit', { items }),
+    getCurrent: () => ipcRenderer.invoke('todo:get-current'),
+    getProgress: () => ipcRenderer.invoke('todo:get-progress'),
+    getContext: () => ipcRenderer.invoke('todo:get-context'),
+    clear: () => ipcRenderer.invoke('todo:clear'),
+  },
+  // 定时任务
+  scheduledTask: {
+    list: () => ipcRenderer.invoke('scheduled-task:list'),
+    create: (task) => ipcRenderer.invoke('scheduled-task:create', { task }),
+    update: (taskId, updates) => ipcRenderer.invoke('scheduled-task:update', { taskId, updates }),
+    delete: (taskId) => ipcRenderer.invoke('scheduled-task:delete', { taskId }),
+    get: (taskId) => ipcRenderer.invoke('scheduled-task:get', { taskId }),
+    enable: (taskId) => ipcRenderer.invoke('scheduled-task:enable', { taskId }),
+    disable: (taskId) => ipcRenderer.invoke('scheduled-task:disable', { taskId }),
+  },
+  // 任务模板
+  taskTemplate: {
+    list: (category) => ipcRenderer.invoke('task-template:list', { category }),
+    get: (templateId) => ipcRenderer.invoke('task-template:get', { templateId }),
+    create: (template) => ipcRenderer.invoke('task-template:create', { template }),
+    update: (templateId, updates) => ipcRenderer.invoke('task-template:update', { templateId, updates }),
+    delete: (templateId) => ipcRenderer.invoke('task-template:delete', { templateId }),
+    instantiate: (templateId, variables) => ipcRenderer.invoke('task-template:instantiate', { templateId, variables }),
+    export: (templateId) => ipcRenderer.invoke('task-template:export', { templateId }),
+    import: (jsonStr) => ipcRenderer.invoke('task-template:import', { jsonStr }),
+  },
+  // 工具录制
+  toolRecording: {
+    list: (limit) => ipcRenderer.invoke('tool-recording:list', { limit }),
+    get: (sessionId) => ipcRenderer.invoke('tool-recording:get', { sessionId }),
+    delete: (sessionId) => ipcRenderer.invoke('tool-recording:delete', { sessionId }),
+    export: (sessionId) => ipcRenderer.invoke('tool-recording:export', { sessionId }),
+    import: (jsonStr) => ipcRenderer.invoke('tool-recording:import', { jsonStr }),
+  },
+  // 中间推理 (Scratchpad)
+  scratchpad: {
+    list: (limit) => ipcRenderer.invoke('scratchpad:list', { limit }),
+    load: (sessionId) => ipcRenderer.invoke('scratchpad:load', { sessionId }),
+    delete: (sessionId) => ipcRenderer.invoke('scratchpad:delete', { sessionId }),
+    clear: () => ipcRenderer.invoke('scratchpad:clear'),
+    export: (sessionId) => ipcRenderer.invoke('scratchpad:export', { sessionId }),
+    exportAll: () => ipcRenderer.invoke('scratchpad:export-all'),
+  },
+  // 人工介入
+  humanIntervention: {
+    getPending: () => ipcRenderer.invoke('human-intervention:get-pending'),
+    respond: (requestId, response) => ipcRenderer.invoke('human-intervention:respond', { requestId, response }),
+    cancel: (requestId) => ipcRenderer.invoke('human-intervention:cancel', { requestId }),
+    clearExpired: (maxAgeMs) => ipcRenderer.invoke('human-intervention:clear-expired', { maxAgeMs }),
+  },
+  // 结果输出
+  output: {
+    list: (limit) => ipcRenderer.invoke('output:list', { limit }),
+    get: (sessionId) => ipcRenderer.invoke('output:get', { sessionId }),
+    delete: (sessionId) => ipcRenderer.invoke('output:delete', { sessionId }),
+    clear: () => ipcRenderer.invoke('output:clear'),
+    export: (sessionId) => ipcRenderer.invoke('output:export', { sessionId }),
+  },
+  // 任务归档
+  taskArchive: {
+    list: (limit) => ipcRenderer.invoke('task-archive:list', { limit }),
+    get: (archiveId) => ipcRenderer.invoke('task-archive:get', { archiveId }),
+    delete: (archiveId) => ipcRenderer.invoke('task-archive:delete', { archiveId }),
+    clear: () => ipcRenderer.invoke('task-archive:clear'),
+    search: (query) => ipcRenderer.invoke('task-archive:search', { query }),
+    findSimilar: (archiveId) => ipcRenderer.invoke('task-archive:find-similar', { archiveId }),
   },
 })

@@ -27,6 +27,204 @@ const TOOL_LABELS = {
   drag_and_drop: '拖拽',
 }
 
+// ============ Agent v2 工具名中文映射（迁移自 chrome-extension 的 TOOL_META） ============
+const AGENT_TOOL_LABELS = {
+  search_tools: '搜索工具',
+  read_page_content: '读取页面',
+  click_element: '点击元素',
+  fill_input: '填写输入',
+  wait_for_element: '等待元素',
+  get_interactive_elements: '获取可交互元素',
+  detect_page_template: '检测页面模板',
+  find_text_on_page: '查找文本',
+  get_element_info: '获取元素信息',
+  extract_content: '提取内容',
+  scroll_page: '滚动页面',
+  hover_element: '悬停元素',
+  select_dropdown: '选择下拉',
+  press_key: '按键',
+  screenshot_visible: '截图',
+  navigate_to: '导航',
+  go_back: '后退',
+  go_forward: '前进',
+  inject_script: '注入脚本',
+  generate_script: '生成脚本',
+  fetch_url: '请求URL',
+  create_todo: '创建待办',
+  render_report: '渲染报告',
+  finish_task: '完成任务',
+}
+
+// Agent v2 工具图标映射
+const AGENT_TOOL_ICONS = {
+  search_tools: '🔍',
+  read_page_content: '⚡',
+  click_element: '⚡',
+  fill_input: '⚡',
+  wait_for_element: '⚡',
+  finish_task: '✅',
+  navigate_to: '🧭',
+  screenshot_visible: '📸',
+  extract_content: '📄',
+  generate_script: '🚀',
+  inject_script: '🚀',
+}
+
+// ============ Agent v2 工具参数格式化（迁移自 chrome-extension formatToolArgs） ============
+function formatAgentToolArgs(toolName, toolArgs) {
+  const a = toolArgs || {}
+  switch (toolName) {
+    case 'search_tools':
+      return `搜索关键词：${a.query || ''}`
+    case 'read_page_content':
+      return '读取当前页面的标题和正文'
+    case 'extract_content':
+      return `提取元素：${a.selector || ''}${a.multiple ? '（提取所有）' : ''}${Array.isArray(a.attributes) && a.attributes.length ? ' [属性:' + a.attributes.join(',') + ']' : ''}`
+    case 'click_element':
+      return `点击元素：${a.selector || ''}`
+    case 'fill_input':
+      return `填写内容：${a.selector || ''} = "${a.value || ''}"${a.submit ? '（回车提交）' : ''}`
+    case 'wait_for_element':
+      return `等待元素出现：${a.selector || ''}`
+    case 'navigate_to':
+      return `导航到：${a.url || ''}`
+    case 'go_back':
+      return '返回上一页'
+    case 'go_forward':
+      return '前进到下一页'
+    case 'scroll_page':
+      return a.direction ? `滚动方向：${a.direction}` : '滚动页面'
+    case 'hover_element':
+      return `悬停元素：${a.selector || ''}`
+    case 'select_dropdown':
+      return `选择下拉：${a.selector || ''} = "${a.value || ''}"`
+    case 'press_key':
+      return `按键：${a.key || ''}`
+    case 'screenshot_visible':
+      return '截取当前页面可见区域'
+    case 'find_text_on_page':
+      return `查找文本：${a.text || ''}`
+    case 'finish_task':
+      return a.summary || '任务完成'
+    case 'create_todo':
+      return '创建待办执行计划'
+    case 'render_report':
+      return a.template ? `渲染报告（模板：${a.template}）` : '渲染数据报告'
+    case 'generate_script':
+      return a.description ? `生成脚本：${a.description}` : '生成并执行自定义脚本'
+    default:
+      // inject_script_xxx 等动态工具
+      if (toolName && toolName.startsWith('inject_script')) {
+        return `执行脚本：${a.scriptName || '工具库脚本'}`
+      }
+      // 其他工具：用简洁的键值对展示
+      const entries = Object.entries(a).filter(([, v]) => v !== undefined && v !== '')
+      return entries.length > 0 ? entries.map(([k, v]) => `${k}: ${v}`).join('，') : ''
+  }
+}
+
+// 判断工具结果是否失败（前端兜底解析，配合后端 success 字段）
+function isAgentToolResultFailed(rawResult) {
+  if (!rawResult) return false
+  try {
+    const parsed = typeof rawResult === 'string' ? JSON.parse(rawResult) : rawResult
+    if (parsed?.ok === false || parsed?.error || parsed?.skipped) return true
+    return false
+  } catch { return false }
+}
+
+// 将工具执行结果转为可读摘要（迁移自 chrome-extension summarizeToolResult）
+function summarizeAgentToolResult(toolName, rawResult) {
+  let parsed = null
+  try { parsed = typeof rawResult === 'string' ? JSON.parse(rawResult) : rawResult } catch {}
+
+  switch (toolName) {
+    case 'read_page_content':
+      if (parsed?.title) return `已读取页面「${parsed.title}」，正文 ${(parsed.content || '').length} 字`
+      return '已读取当前页面内容'
+    case 'extract_content': {
+      if (!parsed) return '已提取页面数据'
+      const items = parsed.result || parsed
+      if (Array.isArray(items)) return `已提取 ${items.length} 条数据`
+      if (typeof items === 'string') return items.length > 100 ? items.slice(0, 100) + '...' : items
+      return '已提取页面数据'
+    }
+    case 'get_interactive_elements':
+      if (Array.isArray(parsed)) return `已发现 ${parsed.length} 个可交互元素`
+      return '已获取页面可交互元素'
+    case 'click_element':
+      return '已点击目标元素'
+    case 'fill_input':
+      return '已填写输入框内容'
+    case 'navigate_to':
+      if (parsed?.url) return `已导航到 ${parsed.url}`
+      return '已完成页面导航'
+    case 'go_back':
+      return '已返回上一页'
+    case 'go_forward':
+      return '已前进到下一页'
+    case 'scroll_page':
+      return '已滚动页面'
+    case 'hover_element':
+      return '已悬停目标元素'
+    case 'select_dropdown':
+      return '已选择下拉选项'
+    case 'press_key':
+      return '已执行按键操作'
+    case 'find_text_on_page':
+      if (parsed?.count !== undefined) return `已找到 ${parsed.count} 处匹配文本`
+      return '文本搜索完成'
+    case 'wait_for_element':
+      return '目标元素已出现'
+    case 'create_todo':
+      if (parsed?.ok && parsed.totalTodos) return `已创建待办计划（${parsed.totalTodos} 个步骤）`
+      return '待办计划已创建'
+    case 'screenshot_visible':
+      return '已截取当前页面截图'
+    case 'generate_script': {
+      if (parsed?.ok === false) return '代码执行未返回有效结果'
+      if (parsed?.storeId && parsed.count !== undefined) return `已处理 ${parsed.count} 条数据并存储（ID: ${parsed.storeId}）`
+      if (parsed?.message) return parsed.message
+      if (typeof rawResult === 'string' && !rawResult.startsWith('{')) {
+        return rawResult.length > 200 ? rawResult.slice(0, 200) + '...' : rawResult
+      }
+      return '自定义脚本已执行完成'
+    }
+    case 'render_report': {
+      if (parsed?.ok && parsed.storeId) {
+        return `已准备报告（模板: ${parsed.template || '未知'}，数据: ${parsed.count || 0} 条）`
+      }
+      if (parsed?.message) return parsed.message
+      return '报告数据已准备完成'
+    }
+    case 'finish_task':
+      return (typeof parsed === 'string' ? parsed : parsed?.summary) || '任务已完成'
+    default:
+      if (toolName && toolName.startsWith('inject_script')) {
+        if (parsed) {
+          if (Array.isArray(parsed)) return `脚本执行完成，返回 ${parsed.length} 条结果`
+          if (parsed.result) {
+            if (Array.isArray(parsed.result)) return `脚本执行完成，处理了 ${parsed.result.length} 条数据`
+            if (typeof parsed.result === 'string') return parsed.result.length > 100 ? parsed.result.slice(0, 100) + '...' : parsed.result
+          }
+          if (parsed.count !== undefined) return `脚本执行完成，处理了 ${parsed.count} 条数据`
+        }
+        return '脚本执行完成'
+      }
+      // 兜底：提取关键信息，避免显示原始JSON
+      if (parsed && typeof parsed === 'object') {
+        if (parsed.count !== undefined) return `执行完成，处理了 ${parsed.count} 条数据`
+        if (parsed.result) {
+          if (Array.isArray(parsed.result)) return `执行完成，返回 ${parsed.result.length} 条结果`
+          if (typeof parsed.result === 'string') return parsed.result.length > 100 ? parsed.result.slice(0, 100) + '...' : parsed.result
+        }
+        if (parsed.message) return parsed.message
+      }
+      if (typeof rawResult === 'string' && rawResult.length > 120) return rawResult.slice(0, 120) + '...'
+      return '执行完成'
+  }
+}
+
 const SESSIONS_KEY = 'ai-browser-sessions'
 const SAVED_SCRIPTS_KEY = 'ai-browser-scripts'
 
@@ -58,6 +256,330 @@ function saveSavedScripts(scripts) {
   localStorage.setItem(SAVED_SCRIPTS_KEY, JSON.stringify(scripts))
 }
 
+// ============ Agent v2 数据报告渲染组件（迁移自 chrome-extension renderDataReport） ============
+// 单个数据区块：可折叠，支持 array(表格) / object(字段卡片) / html(sandbox iframe) / template(表格) 四种渲染
+function DataReportSection({ item, defaultExpanded }) {
+  const { id, toolName, schema, data, renderType } = item
+  const count = Array.isArray(data) ? data.length : (data && typeof data === 'object' ? Object.keys(data).length : 1)
+  const [expanded, setExpanded] = useState(!!defaultExpanded)
+  const [copied, setCopied] = useState(false)
+
+  const handleCopy = () => {
+    const text = typeof data === 'string' ? data : JSON.stringify(data, null, 2)
+    try {
+      navigator.clipboard.writeText(text).then(() => {
+        setCopied(true)
+        setTimeout(() => setCopied(false), 1500)
+      })
+    } catch { /* 忽略剪贴板异常 */ }
+  }
+
+  return (
+    <div className="data-report-section">
+      <div className="data-section-header" onClick={() => setExpanded(e => !e)}>
+        <span className="data-section-toggle">{expanded ? '▼' : '▶'}</span>
+        <span className="data-section-id">{id}</span>
+        <span className="data-section-meta">{AGENT_TOOL_LABELS[toolName] || toolName || '数据'} · {count} 条</span>
+      </div>
+      {expanded && (
+        <div className="data-section-body">
+          {/* 截断提示 */}
+          {data && data._truncated && (
+            <div className="data-truncated-warn">⚠ 数据量过大，已截断显示前部分</div>
+          )}
+          <DataReportContent item={item} />
+          {/* 操作按钮：复制 JSON */}
+          <div className="data-section-actions">
+            <button className="data-copy-btn" onClick={handleCopy}>
+              {copied ? '已复制' : '复制 JSON'}
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// 数据区块内容渲染：根据 renderType / 数据类型选择渲染方式
+function DataReportContent({ item }) {
+  const { data, renderType, schema } = item
+
+  // renderType='html': AI 生成的 HTML 报告，用 sandboxed iframe 渲染（仅 allow-same-origin，无 allow-scripts）
+  if (renderType === 'html' && typeof data === 'string') {
+    return <HtmlReportIframe htmlContent={data} />
+  }
+
+  // renderType='template': 简化处理为表格（提取 data 数组）
+  if (renderType === 'template') {
+    const arr = Array.isArray(data) ? data : (data?.result && Array.isArray(data.result) ? data.result : [])
+    if (arr.length > 0) return <DataTable arr={arr} schema={schema} />
+    return <div className="data-empty">(模板报告无表格数据)</div>
+  }
+
+  // 数组 → 表格
+  if (Array.isArray(data)) {
+    return <DataTable arr={data} schema={schema} />
+  }
+
+  // 对象 → 字段卡片网格
+  if (data && typeof data === 'object') {
+    return <DataFieldGrid obj={data} />
+  }
+
+  // 基本类型
+  return <div className="data-primitive">{String(data)}</div>
+}
+
+// 数组渲染为表格（sticky thead，最多 200 行）
+function DataTable({ arr, schema }) {
+  if (arr.length === 0) return <div className="data-empty">(空数组)</div>
+
+  // 基本类型数组 → 列表
+  const isArrayOfPrimitives = arr.every(x => typeof x !== 'object' || x === null)
+  if (isArrayOfPrimitives) {
+    return (
+      <div className="data-list">
+        {arr.map((v, i) => (
+          <div className="data-list-item" key={i}>
+            <span className="data-list-idx">{i}</span>
+            <span className="data-list-val">{String(v)}</span>
+          </div>
+        ))}
+      </div>
+    )
+  }
+
+  const keys = schema ? Object.keys(schema) : Object.keys(arr[0] || {})
+  if (keys.length === 0) return <div className="data-empty">(无字段)</div>
+
+  const MAX_ROWS = 200
+  const displayRows = arr.length > MAX_ROWS ? arr.slice(0, MAX_ROWS) : arr
+
+  const renderCell = (v) => {
+    if (v === null || v === undefined) return <span className="data-null">null</span>
+    if (typeof v === 'object') {
+      const preview = JSON.stringify(v).slice(0, 50)
+      return <span className="data-obj-preview" title={JSON.stringify(v).slice(0, 200)}>{preview}</span>
+    }
+    if (typeof v === 'string' && v.length > 80) {
+      return <span title={v}>{v.slice(0, 80)}...</span>
+    }
+    return String(v)
+  }
+
+  return (
+    <>
+      <div className="data-table-wrap">
+        <table className="data-table">
+          <thead>
+            <tr>
+              <th>#</th>
+              {keys.map(k => (
+                <th key={k} title={schema?.[k] || ''}>
+                  {k}
+                  <span className="data-col-type">{schema?.[k] || ''}</span>
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {displayRows.map((row, i) => (
+              <tr key={i}>
+                <td className="data-row-idx">{i}</td>
+                {keys.map(k => <td key={k}>{renderCell(row?.[k])}</td>)}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {arr.length > MAX_ROWS && (
+        <div className="data-more-rows">仅显示前 {MAX_ROWS} 行，共 {arr.length} 行</div>
+      )}
+    </>
+  )
+}
+
+// 对象渲染为字段卡片网格
+function DataFieldGrid({ obj }) {
+  const keys = Object.keys(obj)
+  if (keys.length === 0) return <div className="data-empty">(空对象)</div>
+
+  const renderVal = (v) => {
+    if (v === null || v === undefined) return <span className="data-null">null</span>
+    if (Array.isArray(v)) {
+      return <><span className="data-type-badge">Array({v.length})</span><span className="data-obj-preview">{JSON.stringify(v).slice(0, 80)}</span></>
+    }
+    if (typeof v === 'object') {
+      return <><span className="data-type-badge">Object</span><span className="data-obj-preview">{JSON.stringify(v).slice(0, 80)}</span></>
+    }
+    if (typeof v === 'string' && v.length > 100) {
+      return <span title={v}>{v.slice(0, 100)}...</span>
+    }
+    return String(v)
+  }
+
+  return (
+    <div className="data-fields-grid">
+      {keys.map(k => (
+        <div className="data-field" key={k}>
+          <div className="data-field-key">{k}</div>
+          <div className="data-field-val">{renderVal(obj[k])}</div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+// HTML 报告 iframe（sandbox="allow-same-origin"，无 allow-scripts，高度自适应）
+function HtmlReportIframe({ htmlContent }) {
+  const iframeRef = useRef(null)
+
+  // 包裹完整 HTML 文档：仅注入基础样式重置（不注入脚本，因为 allow-scripts 被禁用）
+  const wrappedHtml = `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; padding: 12px; color: #262626; line-height: 1.6; background:#fff; }
+  img { max-width: 100%; }
+  table { width: 100%; border-collapse: collapse; margin: 8px 0; }
+  th, td { border: 1px solid #e5e5e5; padding: 8px; text-align: left; }
+  th { background: #f5f5f5; font-weight: 600; }
+  a { color: #6841ea; }
+  h1, h2, h3 { margin: 12px 0 8px; }
+  h1 { font-size: 20px; } h2 { font-size: 16px; } h3 { font-size: 14px; }
+  p { margin: 6px 0; }
+  ul, ol { margin: 6px 0; padding-left: 20px; }
+  .card { border: 1px solid #e5e5e5; border-radius: 8px; padding: 12px; margin: 8px 0; }
+  .card-title { font-weight: 600; font-size: 15px; margin-bottom: 6px; }
+  .card-meta { font-size: 12px; color: #8c8c8c; margin-bottom: 8px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
+</style>
+</head>
+<body>
+${htmlContent}
+</body>
+</html>`
+
+  // iframe load 后调整高度 + 持续观察内部 DOM 变化（如图片加载完成）
+  const adjustHeight = useCallback(() => {
+    try {
+      const doc = iframeRef.current?.contentDocument
+      if (doc && doc.body) {
+        const newHeight = doc.body.scrollHeight
+        const currentHeight = parseInt(iframeRef.current.style.height) || 0
+        if (newHeight > currentHeight) {
+          iframeRef.current.style.height = `${newHeight + 20}px`
+        }
+      }
+    } catch { /* 跨域访问失败时忽略 */ }
+  }, [])
+
+  const handleLoad = useCallback(() => {
+    adjustHeight()
+    // 兜底：多次调整，防止字体/图片延迟加载导致高度变化
+    setTimeout(adjustHeight, 100)
+    setTimeout(adjustHeight, 500)
+    setTimeout(adjustHeight, 1500)
+    try {
+      const doc = iframeRef.current?.contentDocument
+      if (doc && doc.body) {
+        const mo = new MutationObserver(adjustHeight)
+        mo.observe(doc.body, { childList: true, subtree: true, attributes: true })
+      }
+    } catch { /* ignore */ }
+  }, [adjustHeight])
+
+  return (
+    <div className="data-html-report-wrap">
+      <iframe
+        ref={iframeRef}
+        className="data-html-report-iframe"
+        sandbox="allow-same-origin"
+        srcDoc={wrappedHtml}
+        onLoad={handleLoad}
+        title="html-report"
+      />
+    </div>
+  )
+}
+
+// 数据报告容器组件
+function AgentDataReport({ items }) {
+  return (
+    <div className="agent-data-report">
+      <div className="data-report-header">
+        <span className="data-report-icon">📊</span>
+        <span className="data-report-title">采集数据报告</span>
+        <span className="data-report-count">{items.length} 份数据</span>
+      </div>
+      {items.map((item, idx) => (
+        <DataReportSection key={item.id || idx} item={item} defaultExpanded={idx === 0} />
+      ))}
+    </div>
+  )
+}
+
+// ============ Agent v2 工具步骤卡片组件 ============
+// 结构：齿轮图标 ⚙ + 步骤标题 + 可展开的参数/结果
+// 状态图标：running ⏳ / done ✅ / error ❌
+function AgentStepCard({ msg }) {
+  const { step, toolName, toolArgs, status, resultDisplay } = msg
+  const [expanded, setExpanded] = useState(false)
+
+  // 工具中文名与图标
+  const isInject = toolName && toolName.startsWith('inject_script')
+  const displayName = isInject
+    ? (toolArgs?.scriptName || '执行脚本')
+    : (AGENT_TOOL_LABELS[toolName] || toolName || '执行工具')
+  const toolIcon = isInject ? '🚀' : (AGENT_TOOL_ICONS[toolName] || '⚙')
+
+  // 状态图标与卡片状态类
+  let statusIcon = '⚙'
+  let statusClass = ''
+  if (status === 'running') { statusIcon = '⏳'; statusClass = 'running' }
+  else if (status === 'done') { statusIcon = '✅'; statusClass = 'done' }
+  else if (status === 'error') { statusIcon = '❌'; statusClass = 'error' }
+
+  // 步骤标题：有 step 编号时显示"步骤 N: 工具名"，否则显示工具名/状态文本
+  const title = (step !== undefined && step !== null)
+    ? `步骤 ${step}: ${displayName}`
+    : (displayName || 'Agent 工作中...')
+
+  // 参数摘要
+  const argsText = toolName ? formatAgentToolArgs(toolName, toolArgs) : ''
+  const hasDetail = !!(argsText || resultDisplay)
+
+  return (
+    <div key={msg.id} className={`agent-step-card ${statusClass}`}>
+      <div
+        className="agent-step-header"
+        onClick={() => hasDetail && setExpanded(e => !e)}
+        style={{ cursor: hasDetail ? 'pointer' : 'default' }}
+      >
+        <span className="agent-step-icon">{toolIcon}</span>
+        <span className="agent-step-title">
+          <span className="agent-step-status">{statusIcon}</span> {title}
+        </span>
+        {hasDetail && (
+          <span className="agent-step-toggle">{expanded ? '▾' : '▸'}</span>
+        )}
+      </div>
+      {hasDetail && expanded && (
+        <div className="agent-step-body">
+          {argsText && (
+            <div className="agent-step-args">{argsText}</div>
+          )}
+          {resultDisplay && (
+            <div className="agent-step-result">{resultDisplay}</div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function UnifiedPanel({ config }) {
   const [messages, setMessages] = useState([])
   const [input, setInput] = useState('')
@@ -79,6 +601,22 @@ export default function UnifiedPanel({ config }) {
   const chatHistoryRef = useRef([]) // 发送给AI的对话历史
   const currentStreamMsgIdRef = useRef(null)
 
+  // ============ Agent v2 模式状态 ============
+  const [agentMode, setAgentMode] = useState(false) // Agent 自主决策模式开关
+  const agentStatusIdRef = useRef(null)      // Agent 状态行消息 id（单例，agentStart/agentStatus 更新它）
+  const agentThinkingIdRef = useRef(null)    // AI 思考卡片消息 id（单例覆盖式，新思考覆盖旧内容）
+  const agentStepIdsRef = useRef({})         // 工具步骤卡片 id 映射：{ [step]: msgId }
+  const agentStreamIdRef = useRef(null)      // Agent 流式回复消息 id
+  const agentUserMessageRef = useRef('')     // 当前 Agent 任务的用户消息（用于异常时回滚）
+
+  // ============ 模型选择状态 ============
+  const [modelList, setModelList] = useState([])        // 可用模型列表（扁平数组）
+  const [modelProviders, setModelProviders] = useState([]) // 模型供应商列表
+  const [selectedModelId, setSelectedModelId] = useState(null) // 当前选中的模型 ID
+  const [currentModelInfo, setCurrentModelInfo] = useState(null) // 当前模型能力信息
+  const [showModelDropdown, setShowModelDropdown] = useState(false) // 模型下拉面板开关
+  const [modelLoading, setModelLoading] = useState(false)  // 模型列表加载中
+
   // 加载自动注入脚本
   useEffect(() => {
     window.api.action.getAutoInjectScripts().then(res => {
@@ -95,6 +633,91 @@ export default function UnifiedPanel({ config }) {
     return unsubscribe
   }, [])
 
+  // ============ 加载模型列表 ============
+  const loadModels = useCallback(async () => {
+    setModelLoading(true)
+    try {
+      // 先检查同步配置是否已设置
+      const syncRes = await window.api.config.getSync()
+      const sync = syncRes?.data || syncRes
+      if (!sync?.appKey || !sync?.appSecret) {
+        setModelLoading(false)
+        return
+      }
+      const res = await window.api.config.getAvailableModels()
+      // res 结构: { success: true, data: { providers: [...], models: [...] } }
+      // success 在 res 外层，不在 res.data 上
+      if (!res?.success) {
+        setModelLoading(false)
+        return
+      }
+      const data = res?.data || res
+      const providers = data.providers || []
+      const models = data.models || []
+      setModelProviders(providers)
+      setModelList(models)
+
+      // 读取当前 AI 配置中的模型 ID
+      const aiRes = await window.api.config.getAI()
+      const aiConfig = aiRes?.data || aiRes
+      const currentModel = aiConfig?.model
+      if (currentModel) {
+        setSelectedModelId(currentModel)
+        // 查找模型能力信息
+        const model = models.find(m => m.model_id === currentModel)
+        if (model) {
+          setCurrentModelInfo({
+            modelId: model.model_id,
+            provider: model.provider_id,
+            displayName: model.display_name || model.model_id,
+            supportsVision: String(model.supports_vision) === '1',
+            supportsTools: String(model.supports_tools) === '1',
+            temperature: model.temperature != null ? model.temperature : 0.7,
+            contextWindow: model.context_window || 8192,
+            maxTokens: model.max_tokens || 4096,
+          })
+        }
+      } else if (models.length > 0) {
+        // 默认选中第一个模型
+        handleSelectModel(models[0].model_id, models, providers)
+      }
+    } catch (e) {
+      console.warn('加载模型列表失败:', e)
+    } finally {
+      setModelLoading(false)
+    }
+  }, [])
+
+  // 选择模型
+  const handleSelectModel = useCallback(async (modelId, models, providers) => {
+    const model = (models || modelList).find(m => m.model_id === modelId)
+    if (model) {
+      setCurrentModelInfo({
+        modelId: model.model_id,
+        provider: model.provider_id,
+        displayName: model.display_name || model.model_id,
+        supportsVision: String(model.supports_vision) === '1',
+        supportsTools: String(model.supports_tools) === '1',
+        temperature: model.temperature != null ? model.temperature : 0.7,
+        contextWindow: model.context_window || 8192,
+        maxTokens: model.max_tokens || 4096,
+      })
+    }
+    setSelectedModelId(modelId)
+    setShowModelDropdown(false)
+    // 保存到配置
+    try {
+      await window.api.config.saveAI({ model: modelId })
+    } catch (e) {
+      console.warn('保存模型选择失败:', e)
+    }
+  }, [modelList])
+
+  // 组件挂载时加载模型列表
+  useEffect(() => {
+    loadModels()
+  }, [loadModels])
+
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
@@ -109,6 +732,21 @@ export default function UnifiedPanel({ config }) {
   // 更新消息
   const updateMessage = useCallback((id, updates) => {
     setMessages(prev => prev.map(m => m.id === id ? { ...m, ...updates } : m))
+  }, [])
+
+  // 在指定消息 id 之前插入新消息（用于思考卡片插入到步骤卡片之前）
+  // 若找不到目标消息，则追加到末尾。返回新消息 id。
+  const insertMessageBefore = useCallback((beforeId, msg) => {
+    const id = nextIdRef.current++
+    setMessages(prev => {
+      const idx = prev.findIndex(m => m.id === beforeId)
+      const newMsg = { id, timestamp: Date.now(), ...msg }
+      if (idx === -1) return [...prev, newMsg]
+      const next = [...prev]
+      next.splice(idx, 0, newMsg)
+      return next
+    })
+    return id
   }, [])
 
   // ============ 会话管理 ============
@@ -133,9 +771,11 @@ export default function UnifiedPanel({ config }) {
       const sessionData = {
         id: activeSessionId,
         title: messages.find(m => m.role === 'user')?.content?.substring(0, 40) || '新会话',
-        messages: messages.map(({ role, type, content, jsCode, toolName, success, error, result, description }) =>
-          ({ role, type, content, jsCode, toolName, success, error, result, description })
-        ),
+        messages: messages.map(({ role, type, content, jsCode, toolName, success, error, result, description,
+          // Agent v2 相关字段（持久化以便恢复）
+          step, toolArgs, status, resultDisplay, items, searchResults }) =>
+          ({ role, type, content, jsCode, toolName, success, error, result, description,
+             step, toolArgs, status, resultDisplay, items, searchResults })),
         chatHistory,
         updatedAt: Date.now(),
         messageCount: messages.length,
@@ -291,6 +931,214 @@ export default function UnifiedPanel({ config }) {
     }
   }, [handleThinking, handleStreamChunk, handleToolCall, handleToolResult, handleFinalReply, handleDone])
 
+  // ============ Agent v2 事件监听 ============
+  // 监听 window.api.agent2.onEvent 推送的事件，渲染步骤卡片/思考卡片/数据报告/流式回复
+  useEffect(() => {
+    // Agent 事件回调需引用最新状态，使用 ref 镜像避免闭包陈旧
+    const handleAgentEvent = (channel, data) => {
+      switch (channel) {
+        case 'agentStart': {
+          // 显示"Agent 已启动，分析需求中..."（单例状态行）
+          const text = 'Agent 已启动，分析需求中...'
+          if (agentStatusIdRef.current) {
+            updateMessage(agentStatusIdRef.current, { content: text })
+          } else {
+            const id = addMessage({ role: 'system', type: 'agent_status', content: text })
+            agentStatusIdRef.current = id
+          }
+          break
+        }
+        case 'agentThinking': {
+          // 更新思考卡片（单例覆盖式：新思考覆盖旧内容，不堆叠）
+          const content = (data?.content || '').trim()
+          if (!content) break
+          const displayText = content.length > 500 ? content.slice(0, 500) + '...' : content
+          if (agentThinkingIdRef.current) {
+            // 已有思考卡片：仅更新内容
+            updateMessage(agentThinkingIdRef.current, { content: displayText })
+          } else {
+            // 首次创建思考卡片，插入到第一个步骤卡片之前（若无步骤卡片则追加到末尾）
+            const firstStepId = Object.values(agentStepIdsRef.current)[0] || null
+            const id = firstStepId
+              ? insertMessageBefore(firstStepId, { role: 'system', type: 'agent_thinking', content: displayText })
+              : addMessage({ role: 'system', type: 'agent_thinking', content: displayText })
+            agentThinkingIdRef.current = id
+          }
+          break
+        }
+        case 'agentStatus': {
+          // 更新状态文本（单例状态行）
+          const text = data?.text || '处理中...'
+          if (agentStatusIdRef.current) {
+            updateMessage(agentStatusIdRef.current, { content: text })
+          } else {
+            const id = addMessage({ role: 'system', type: 'agent_status', content: text })
+            agentStatusIdRef.current = id
+          }
+          break
+        }
+        case 'agentStep': {
+          // 创建/更新工具步骤卡片（按 step 编号，按顺序排列）
+          const step = data?.step
+          const toolName = data?.toolName || ''
+          const toolArgs = data?.toolArgs
+          const status = data?.status || 'running'
+          const existingId = agentStepIdsRef.current[step]
+          if (existingId) {
+            updateMessage(existingId, { step, toolName, toolArgs, status })
+          } else {
+            const id = addMessage({
+              role: 'system', type: 'agent_step',
+              step, toolName, toolArgs, status, resultDisplay: '',
+            })
+            agentStepIdsRef.current[step] = id
+          }
+          break
+        }
+        case 'agentSearchResult': {
+          // 显示搜索到的工具列表（更新到最近的步骤卡片）
+          const results = data?.results || []
+          const stepIds = Object.values(agentStepIdsRef.current)
+          const lastStepId = stepIds[stepIds.length - 1]
+          if (lastStepId) {
+            const text = results.length > 0
+              ? '找到 ' + results.length + ' 个工具：\n' + results.map(r => '  - ' + r.name + ': ' + (r.description || '')).join('\n')
+              : '未找到匹配的工具'
+            updateMessage(lastStepId, { searchResults: results, resultDisplay: text })
+          }
+          break
+        }
+        case 'agentStepResult': {
+          // 更新步骤卡片结果（search_tools 结果不显示）
+          const step = data?.step
+          const toolName = data?.toolName
+          if (toolName === 'search_tools') break
+          const success = data?.success !== false && !isAgentToolResultFailed(data?.result)
+          const stepId = agentStepIdsRef.current[step]
+          if (!stepId) break
+          if (!success) {
+            // 失败的工具结果：卡片标记为 error，保留可读摘要
+            updateMessage(stepId, {
+              status: 'error',
+              success: false,
+              resultDisplay: '执行未成功，已跳过',
+            })
+            break
+          }
+          const displayResult = summarizeAgentToolResult(toolName, data?.result || '')
+          const isDone = data?.done
+          updateMessage(stepId, {
+            // 成功的工具结果：该步骤标记为完成（done 字段表示是否为最后一步 finish_task）
+            status: 'done',
+            success: true,
+            result: data?.result,
+            resultDisplay: displayResult,
+            ...(isDone ? { finishTask: true } : {}),
+          })
+          break
+        }
+        case 'agentDataReport': {
+          // 渲染结构化数据报告
+          console.log('[UI] agentDataReport 事件收到:', JSON.stringify(data).slice(0, 200))
+          const items = data?.items || []
+          console.log('[UI] agentDataReport items 数量:', items.length)
+          if (items.length > 0) {
+            addMessage({ role: 'system', type: 'agent_data_report', items })
+          } else {
+            console.warn('[UI] agentDataReport items 为空!', data)
+          }
+          break
+        }
+        case 'agentTodoUpdate': {
+          // 待办列表更新
+          const todoData = data?.data || data
+          const progress = todoData?.progress
+          const items = todoData?.items || []
+          if (items.length > 0) {
+            // progress 可能是对象 { total, completed, percentage } 或数字
+            const pct = typeof progress === 'object' ? progress?.percentage : progress
+            const completed = typeof progress === 'object' ? progress?.completed : undefined
+            const total = typeof progress === 'object' ? progress?.total : items.length
+            const progressText = pct !== undefined
+              ? `（进度 ${completed ?? '?'}/${total ?? items.length}，${pct}%）`
+              : ''
+            const text = `📋 待办计划：${items.length} 个步骤${progressText}`
+            if (agentStatusIdRef.current) {
+              updateMessage(agentStatusIdRef.current, { content: text })
+            }
+          }
+          break
+        }
+        case 'agentDebug': {
+          // 调试日志（可选，控制台输出，不渲染到 UI 避免干扰）
+          // 仅在控制台记录，前端不展示
+          break
+        }
+        case 'streamChunk': {
+          // 流式追加文本（Agent v2 流式回复）
+          const chunk = data?.content || ''
+          if (!agentStreamIdRef.current) {
+            const id = addMessage({ role: 'assistant', type: 'reply', content: '' })
+            agentStreamIdRef.current = id
+          }
+          setMessages(prev => prev.map(m => {
+            if (m.id !== agentStreamIdRef.current) return m
+            return { ...m, content: (m.content || '') + chunk }
+          }))
+          break
+        }
+        case 'streamDone': {
+          // 流式完成：将回复加入对话历史，重置流式引用
+          if (agentStreamIdRef.current) {
+            setMessages(prev => {
+              const msg = prev.find(m => m.id === agentStreamIdRef.current)
+              if (msg?.content) {
+                chatHistoryRef.current.push({ role: 'assistant', content: msg.content })
+              }
+              return prev
+            })
+            agentStreamIdRef.current = null
+          }
+          break
+        }
+        case 'agentError': {
+          // 错误处理：显示错误，回滚最后一条未完成的用户消息
+          const errMsg = data?.error || 'Agent 运行异常'
+          if (agentStreamIdRef.current) {
+            updateMessage(agentStreamIdRef.current, { content: '❌ ' + errMsg })
+            agentStreamIdRef.current = null
+          } else {
+            addMessage({ role: 'assistant', type: 'error', content: `Agent 异常: ${errMsg}` })
+          }
+          // 标记最近步骤卡片为 error
+          const stepIds = Object.values(agentStepIdsRef.current)
+          const lastStepId = stepIds[stepIds.length - 1]
+          if (lastStepId) updateMessage(lastStepId, { status: 'error' })
+          // 回滚最后一条未完成的 user message（避免历史里残留孤儿 user 消息）
+          const last = chatHistoryRef.current[chatHistoryRef.current.length - 1]
+          if (last && last.role === 'user' && last.content === agentUserMessageRef.current) {
+            chatHistoryRef.current.pop()
+          }
+          setLoading(false)
+          break
+        }
+        default:
+          break
+      }
+    }
+
+    const unsubscribe = window.api.agent2.onEvent(handleAgentEvent)
+    const unsubscribeDone = window.api.agent2.onDone(() => {
+      // Agent 完成，重置 loading 与各引用
+      setLoading(false)
+      agentStreamIdRef.current = null
+    })
+    return () => {
+      if (typeof unsubscribe === 'function') unsubscribe()
+      if (typeof unsubscribeDone === 'function') unsubscribeDone()
+    }
+  }, [addMessage, updateMessage, insertMessageBefore])
+
   // ============ 发送消息 ============
 
   const handleSend = async () => {
@@ -308,10 +1156,74 @@ export default function UnifiedPanel({ config }) {
 
     chatHistoryRef.current.push({ role: 'user', content: userMsg })
 
+    // ============ Agent v2 模式：走 window.api.agent2.start ============
+    if (agentMode) {
+      // 重置 Agent 单例引用（每次新任务重新开始）
+      agentStatusIdRef.current = null
+      agentThinkingIdRef.current = null
+      agentStepIdsRef.current = {}
+      agentStreamIdRef.current = null
+      agentUserMessageRef.current = userMsg
+
+      try {
+        // 启动 Agent（tabId=null 表示使用活跃标签页）
+        // 传递当前选中模型的能力信息（temperature/contextWindow/maxTokens）
+        const modelInfo = currentModelInfo ? {
+          modelId: currentModelInfo.modelId,
+          temperature: currentModelInfo.temperature,
+          contextWindow: currentModelInfo.contextWindow,
+          maxTokens: currentModelInfo.maxTokens,
+          supportsTools: currentModelInfo.supportsTools,
+          supportsVision: currentModelInfo.supportsVision,
+        } : { temperature: 0.7, maxTokens: 4096 }
+
+        // 如果启用了对话全景，自动打开全景窗口
+        try {
+          const agentRes = await window.api.config.getAgent()
+          if (agentRes?.success && agentRes.data?.conversationViewer) {
+            window.api?.conversationWindow?.open()
+          }
+        } catch (e) { console.warn('[UnifiedPanel] 读取 agent 配置失败:', e.message) }
+
+        const startRes = await window.api.agent2.start({
+          tabId: null,
+          userMessage: userMsg,
+          chatHistory: chatHistoryRef.current,
+          modelInfo,
+        })
+        // 启动失败兜底
+        if (startRes && startRes.success === false) {
+          addMessage({
+            role: 'assistant', type: 'error',
+            content: `Agent 启动失败: ${startRes.error || '未知错误'}`,
+          })
+          // 回滚刚加入的用户消息
+          if (chatHistoryRef.current[chatHistoryRef.current.length - 1]?.content === userMsg) {
+            chatHistoryRef.current.pop()
+          }
+          setLoading(false)
+        }
+        // 成功启动后，事件由 onEvent/onDone 推送，loading 在 onDone/streamDone/agentError 中重置
+      } catch (e) {
+        addMessage({ role: 'assistant', type: 'error', content: `Agent 异常: ${e.message || '请求失败'}` })
+        if (chatHistoryRef.current[chatHistoryRef.current.length - 1]?.content === userMsg) {
+          chatHistoryRef.current.pop()
+        }
+        setLoading(false)
+      }
+      return
+    }
+
+    // ============ 普通模式：走 window.api.unified.chatStream ============
+    // 合并当前选中的模型到 config，确保用用户选的模型而非旧 localStorage 配置
     try {
+      const mergedConfig = {
+        ...config,
+        model: currentModelInfo?.modelId || config.model,
+      }
       const result = await window.api.unified.chatStream(
         chatHistoryRef.current,
-        config,
+        mergedConfig,
         config.maxToolRounds || 20,
       )
       
@@ -595,6 +1507,15 @@ export default function UnifiedPanel({ config }) {
 
   // 中止
   const handleAbort = async () => {
+    if (agentMode) {
+      // Agent v2 模式：中止 Agent（tabId=null 表示活跃标签页）
+      try {
+        await window.api.agent2.abort(null)
+      } catch { /* 忽略中止异常 */ }
+      setLoading(false)
+      agentStreamIdRef.current = null
+      return
+    }
     await window.api.unified.abort()
   }
 
@@ -662,6 +1583,12 @@ export default function UnifiedPanel({ config }) {
     setMessages([])
     chatHistoryRef.current = []
     nextIdRef.current = 1
+    // 重置 Agent v2 单例引用
+    agentStatusIdRef.current = null
+    agentThinkingIdRef.current = null
+    agentStepIdsRef.current = {}
+    agentStreamIdRef.current = null
+    agentUserMessageRef.current = ''
   }
 
   const handleKeyDown = (e) => {
@@ -675,6 +1602,32 @@ export default function UnifiedPanel({ config }) {
 
   const renderMessage = (msg) => {
     if (msg.role === 'system') {
+      // ---- Agent v2 状态行（agentStart/agentStatus） ----
+      if (msg.type === 'agent_status') {
+        return (
+          <div key={msg.id} className="msg-system agent-status-msg">
+            <span className="agent-status-dot" />
+            <span>{msg.content}</span>
+          </div>
+        )
+      }
+      // ---- Agent v2 思考卡片（单例覆盖式，紫蓝渐变背景） ----
+      if (msg.type === 'agent_thinking') {
+        return (
+          <div key={msg.id} className="agent-thinking-card">
+            <div className="agent-thinking-header">💭 AI 思考</div>
+            <div className="agent-thinking-content">{msg.content}</div>
+          </div>
+        )
+      }
+      // ---- Agent v2 工具步骤卡片（齿轮图标 + 步骤标题 + 可展开参数/结果） ----
+      if (msg.type === 'agent_step') {
+        return <AgentStepCard key={msg.id} msg={msg} />
+      }
+      // ---- Agent v2 数据报告 ----
+      if (msg.type === 'agent_data_report') {
+        return <AgentDataReport key={msg.id} items={msg.items || []} />
+      }
       if (msg.type === 'thinking') {
         return (
           <div key={msg.id} className="msg-system thinking-msg">
@@ -882,6 +1835,14 @@ export default function UnifiedPanel({ config }) {
           </button>
           <button className="toolbar-btn" onClick={() => setShowAutoInject(!showAutoInject)} title="自动注入脚本（页面刷新后自动执行）">
             自动注入 ({autoInjectScripts.length})
+          </button>
+          {/* Agent v2 模式切换按钮（激活态品牌紫色） */}
+          <button
+            className={`toolbar-btn agent-mode-btn ${agentMode ? 'active' : ''}`}
+            onClick={() => setAgentMode(m => !m)}
+            title={agentMode ? 'Agent 自主决策模式已开启（点击关闭）' : '开启 Agent 自主决策模式（8阶段主循环 + 工具自动调用）'}
+          >
+            ⚡ Agent {agentMode ? '已开启' : ''}
           </button>
           {loading && (
             <button className="toolbar-btn stop-btn" onClick={handleAbort}>
@@ -1116,7 +2077,75 @@ export default function UnifiedPanel({ config }) {
 
       {/* 输入区 */}
       <div className="unified-input-area">
-        <div className="input-row">
+        {/* 模型选择下拉面板 */}
+        {showModelDropdown && (
+          <div className="model-dropdown-panel" ref={(el) => {
+            // 点击外部关闭
+            if (el && !el._hasClickListener) {
+              el._hasClickListener = true
+              setTimeout(() => {
+                const handler = (e) => {
+                  if (!el.contains(e.target) && !e.target.closest('.model-pill-btn')) {
+                    setShowModelDropdown(false)
+                  }
+                }
+                document.addEventListener('click', handler)
+              }, 0)
+            }
+          }}>
+            <div className="model-dropdown-header">
+              <span>选择模型</span>
+              <button className="model-dropdown-close" onClick={() => setShowModelDropdown(false)}>✕</button>
+            </div>
+            <div className="model-dropdown-content">
+              {modelLoading ? (
+                <div className="model-dropdown-empty">加载中...</div>
+              ) : modelList.length === 0 ? (
+                <div className="model-dropdown-empty">
+                  暂无可用模型<br/>
+                  <span style={{ fontSize: 11 }}>请在「设置 → 服务端连接」配置 AppKey/AppSecret</span>
+                </div>
+              ) : (
+                modelProviders.map(provider => {
+                  const providerModels = modelList.filter(m => m.provider_id === provider.id)
+                  if (providerModels.length === 0) return null
+                  return (
+                    <div key={provider.id}>
+                      <div className="model-group-label">
+                        {provider.display_name || provider.name || '模型'}
+                      </div>
+                      {providerModels.map(model => (
+                        <div
+                          key={model.model_id}
+                          className={`model-item ${selectedModelId === model.model_id ? 'selected' : ''}`}
+                          onClick={() => handleSelectModel(model.model_id, modelList, modelProviders)}
+                        >
+                          <span className="model-item-name">
+                            {model.display_name || model.model_id}
+                          </span>
+                          <div className="model-item-tags">
+                            {String(model.supports_vision) === '1' && (
+                              <span className="model-tag vision">图片</span>
+                            )}
+                            {String(model.supports_tools) === '1' && (
+                              <span className="model-tag">工具</span>
+                            )}
+                          </div>
+                          {selectedModelId === model.model_id && (
+                            <span className="model-item-check">✓</span>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )
+                })
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* 输入框 */}
+        <div className="input-box-wrapper">
           <textarea
             className="unified-input"
             value={input}
@@ -1126,17 +2155,34 @@ export default function UnifiedPanel({ config }) {
               e.target.style.height = Math.min(e.target.scrollHeight, 150) + 'px'
             }}
             onKeyDown={handleKeyDown}
-            placeholder="输入问题或任务，AI自主决策调用工具..."
+            placeholder={agentMode ? 'Agent 模式：输入任务，AI 自主决策调用工具完成...' : '输入问题或任务，AI自主决策调用工具...'}
             rows={1}
             disabled={loading}
           />
-          <button
-            className="send-btn"
-            onClick={handleSend}
-            disabled={loading || !input.trim()}
-          >
-            {loading ? '运行中' : '发送'}
-          </button>
+          {/* 底部工具栏：模型选择 + 发送 */}
+          <div className="sender-bar">
+            <button
+              className={`model-pill-btn ${showModelDropdown ? 'open' : ''}`}
+              onClick={() => setShowModelDropdown(!showModelDropdown)}
+              title="切换模型"
+            >
+              <span className="model-pill-name">
+                {modelLoading ? '加载中' : (currentModelInfo?.displayName || '选择模型')}
+              </span>
+              <svg className="model-pill-chevron" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <polyline points="6 9 12 15 18 9" style={{ transform: showModelDropdown ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }} />
+              </svg>
+            </button>
+            <div className="sender-right">
+              <button
+                className="send-btn"
+                onClick={handleSend}
+                disabled={loading || !input.trim()}
+              >
+                {loading ? '运行中' : '发送'}
+              </button>
+            </div>
+          </div>
         </div>
       </div>
 
