@@ -37,14 +37,14 @@ function isWindowValid() {
 
 function safeSend(channel, data) {
   // 发送到主窗口
-  if (isWindowValid()) {
-    mainWindow.webContents.send(channel, data)
+  if (isWindowValid() && !mainWindow.webContents.isDestroyed()) {
+    try { mainWindow.webContents.send(channel, data) } catch { /* 忽略 */ }
   }
   // 广播到所有其他窗口（侧边栏分离窗口、全景对话窗口等）
   try {
     const { BrowserWindow } = require('electron')
     BrowserWindow.getAllWindows().forEach(win => {
-      if (win.webContents && !win.webContents.isDestroyed() && win !== mainWindow) {
+      if (win.webContents && !win.isDestroyed() && !win.webContents.isDestroyed() && win !== mainWindow) {
         try { win.webContents.send(channel, data) } catch { /* 忽略 */ }
       }
     })
@@ -1498,6 +1498,63 @@ function registerIpcHandlers() {
       return { success: false, error: e.message }
     }
   })
+
+  // ===== AppKey 签名认证的脚本接口（扩展端使用，无需 JWT Token）=====
+
+  // 生成 AppKey 签名头
+  function generateAppAuthHeaders(appKey, appSecret) {
+    const crypto = require('crypto')
+    const timestamp = String(Math.floor(Date.now() / 1000))
+    const message = appKey + timestamp
+    const sign = crypto.createHmac('sha256', appSecret).update(message).digest('hex')
+    return {
+      'Content-Type': 'application/json',
+      'X-App-Key': appKey,
+      'X-Timestamp': timestamp,
+      'X-Sign': sign,
+    }
+  }
+
+  // 获取脚本列表（AppKey 签名，使用 agent-index 接口）
+  ipcMain.handle('scripts:search', async (event, { serverUrl, appKey, appSecret, keyword }) => {
+    try {
+      if (!serverUrl || !appKey || !appSecret) {
+        return { success: false, error: '请先在设置中配置服务器地址和 AppKey/AppSecret' }
+      }
+      const baseUrl = serverUrl.replace(/\/+$/, '')
+      const headers = generateAppAuthHeaders(appKey, appSecret)
+      // 有关键词用 search 接口，无关键词用 agent-index 接口
+      const url = keyword
+        ? `${baseUrl}/api/scripts/search?q=${encodeURIComponent(keyword)}`
+        : `${baseUrl}/api/scripts/agent-index`
+      const res = await fetchWithTimeout(url, { headers }, 15000)
+      if (!res.ok) return { success: false, error: `HTTP ${res.status}` }
+      const data = await res.json()
+      return { success: data.success !== false, data: data.data || data }
+    } catch (e) {
+      return { success: false, error: e.message }
+    }
+  })
+
+  // 获取脚本详情（含代码，AppKey 签名，使用 inject 接口）
+  ipcMain.handle('scripts:get-detail', async (event, { serverUrl, appKey, appSecret, id }) => {
+    try {
+      if (!serverUrl || !appKey || !appSecret) {
+        return { success: false, error: '请先配置服务器地址和 AppKey/AppSecret' }
+      }
+      const baseUrl = serverUrl.replace(/\/+$/, '')
+      const headers = generateAppAuthHeaders(appKey, appSecret)
+      const res = await fetchWithTimeout(`${baseUrl}/api/scripts/${id}/inject`, { headers }, 15000)
+      if (!res.ok) return { success: false, error: `HTTP ${res.status}` }
+      const data = await res.json()
+      return { success: data.success !== false, data: data.data || data }
+    } catch (e) {
+      return { success: false, error: e.message }
+    }
+  })
+
+  // 上传脚本（仍用 JWT Token，因为 POST /api/scripts 需要 auth 中间件）
+  // 保留原有 admin:upload-script handler
 
   // 登录管理后台
   ipcMain.handle('admin:login', async (event, { serverUrl, username, password }) => {

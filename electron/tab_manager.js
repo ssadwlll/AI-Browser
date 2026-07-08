@@ -279,7 +279,11 @@ class TabManager {
     })
     menuItems.push({
       label: '检查', accelerator: 'Ctrl+Shift+I',
-      click: () => wc.openDevTools({ mode: 'detach' }),
+      click: () => {
+        // 像 Chrome 一样：打开 DevTools 并自动定位到右键点击位置的 DOM 元素
+        wc.inspectElement(params.x, params.y)
+        // 如果 DevTools 未打开，inspectElement 会自动打开并定位元素
+      },
     })
 
     return Menu.buildFromTemplate(menuItems)

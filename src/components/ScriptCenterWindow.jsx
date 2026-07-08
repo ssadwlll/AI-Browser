@@ -26,6 +26,8 @@ function defaultConfig() {
   return {
     adminServerUrl: 'http://localhost:3001',
     adminToken: '',
+    appKey: '',
+    appSecret: '',
   }
 }
 
@@ -37,6 +39,8 @@ function loadConfig() {
     return {
       adminServerUrl: parsed.adminServerUrl || defaultConfig().adminServerUrl,
       adminToken: parsed.adminToken || '',
+      appKey: parsed.appKey || '',
+      appSecret: parsed.appSecret || '',
     }
   } catch {
     return defaultConfig()
@@ -142,9 +146,10 @@ export default function ScriptCenterWindow() {
 
   const loadRemoteScripts = useCallback(async (page, keyword) => {
     const serverUrl = config.adminServerUrl || ''
-    const token = config.adminToken || ''
-    if (!serverUrl || !token) {
-      setRemoteError('请先在主窗口设置中配置管理后台地址和 Token')
+    const appKey = config.appKey || ''
+    const appSecret = config.appSecret || ''
+    if (!serverUrl || !appKey || !appSecret) {
+      setRemoteError('请先在主窗口设置中配置服务器地址和 AppKey/AppSecret')
       setRemoteScripts([])
       return
     }
@@ -153,8 +158,9 @@ export default function ScriptCenterWindow() {
     const usePage = page || 1
     setRemotePage(usePage)
     try {
-      const result = await window.api.admin.getScripts({
-        serverUrl, token: token, page: usePage, keyword: keyword !== undefined ? keyword : searchKeyword,
+      const kw = keyword !== undefined ? keyword : searchKeyword
+      const result = await window.api.scripts.search({
+        serverUrl, appKey, appSecret, keyword: kw,
       })
       if (result.success && result.data) {
         // 兼容多种返回结构：数组 / { data: [...] } / { list: [...] }
@@ -165,7 +171,7 @@ export default function ScriptCenterWindow() {
         setRemoteScripts(list)
       } else {
         setRemoteScripts([])
-        setRemoteError(result.error || result.data?.error || '加载失败')
+        setRemoteError(result.error || '加载失败')
       }
     } catch (e) {
       setRemoteScripts([])
@@ -177,11 +183,11 @@ export default function ScriptCenterWindow() {
 
   // 首次加载远程脚本（配置就绪后）
   useEffect(() => {
-    if (config.adminServerUrl && config.adminToken) {
+    if (config.adminServerUrl && config.appKey && config.appSecret) {
       loadRemoteScripts(1, '')
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [config.adminServerUrl, config.adminToken])
+  }, [config.adminServerUrl, config.appKey, config.appSecret])
 
   const handleSearch = () => {
     setSearchKeyword(searchInput)
@@ -194,11 +200,12 @@ export default function ScriptCenterWindow() {
     loadRemoteScripts(1, '')
   }
 
-  // 获取远程脚本代码（通过详情接口）
+  // 获取远程脚本代码（通过 AppKey 签名的 inject 接口）
   const fetchRemoteCode = async (serverScript) => {
     const serverUrl = config.adminServerUrl || ''
-    const token = config.adminToken || ''
-    const detailResult = await window.api.admin.getScriptDetail({ serverUrl, token, id: serverScript.id })
+    const appKey = config.appKey || ''
+    const appSecret = config.appSecret || ''
+    const detailResult = await window.api.scripts.getDetail({ serverUrl, appKey, appSecret, id: serverScript.id })
     if (!detailResult.success || !detailResult.data) {
       throw new Error(detailResult.error || '获取脚本详情失败')
     }
@@ -348,7 +355,7 @@ export default function ScriptCenterWindow() {
 
   // ============ 渲染 ============
 
-  const configReady = !!(config.adminServerUrl && config.adminToken)
+  const configReady = !!(config.adminServerUrl && config.appKey && config.appSecret)
 
   return (
     <div className="scw-root">

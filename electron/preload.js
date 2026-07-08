@@ -187,7 +187,7 @@ contextBridge.exposeInMainWorld('api', {
       return () => ipcRenderer.removeListener('unified:done', handler)
     },
   },
-  // 管理后台 API
+  // 管理后台 API（JWT Token 认证）
   admin: {
     uploadScript: ({ serverUrl, token, name, code, description, categoryId, urlPattern, toolType, toolConfig, metadata }) =>
       ipcRenderer.invoke('admin:upload-script', { serverUrl, token, name, code, description, categoryId, urlPattern, toolType, toolConfig, metadata }),
@@ -199,6 +199,13 @@ contextBridge.exposeInMainWorld('api', {
       ipcRenderer.invoke('admin:get-categories', { serverUrl, token }),
     login: ({ serverUrl, username, password }) =>
       ipcRenderer.invoke('admin:login', { serverUrl, username, password }),
+  },
+  // 脚本 API（AppKey 签名认证，扩展端使用）
+  scripts: {
+    search: ({ serverUrl, appKey, appSecret, keyword }) =>
+      ipcRenderer.invoke('scripts:search', { serverUrl, appKey, appSecret, keyword }),
+    getDetail: ({ serverUrl, appKey, appSecret, id }) =>
+      ipcRenderer.invoke('scripts:get-detail', { serverUrl, appKey, appSecret, id }),
   },
   // 智能体
   agent: {
