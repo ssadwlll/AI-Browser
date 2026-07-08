@@ -36,9 +36,19 @@ function isWindowValid() {
 }
 
 function safeSend(channel, data) {
+  // 发送到主窗口
   if (isWindowValid()) {
     mainWindow.webContents.send(channel, data)
   }
+  // 广播到所有其他窗口（侧边栏分离窗口、全景对话窗口等）
+  try {
+    const { BrowserWindow } = require('electron')
+    BrowserWindow.getAllWindows().forEach(win => {
+      if (win.webContents && !win.webContents.isDestroyed() && win !== mainWindow) {
+        try { win.webContents.send(channel, data) } catch { /* 忽略 */ }
+      }
+    })
+  } catch { /* 忽略 */ }
 }
 
 // ============ 窗口与视图 ============
@@ -475,6 +485,117 @@ function registerIpcHandlers() {
     if (sidebarWindow && !sidebarWindow.isDestroyed()) {
       sidebarWindow.close()
       // 'closed' 事件会清理 sidebarWindow 并恢复主窗口侧边栏
+    }
+    return { success: true }
+  })
+
+  // --- 脚本中心窗口（独立 BrowserWindow，浏览/下载/注入后台脚本） ---
+  let scriptCenterWindow = null
+  ipcMain.handle('script-center:open', async () => {
+    // 如果窗口已存在，聚焦它
+    if (scriptCenterWindow && !scriptCenterWindow.isDestroyed()) {
+      if (scriptCenterWindow.isMinimized()) scriptCenterWindow.restore()
+      scriptCenterWindow.focus()
+      return { success: true }
+    }
+
+    scriptCenterWindow = new BrowserWindow({
+      width: 800,
+      height: 600,
+      minWidth: 480,
+      minHeight: 400,
+      parent: mainWindow,
+      frame: false,          // 无边框，自定义标题栏实现拖拽
+      resizable: true,
+      minimizable: true,
+      maximizable: false,
+      fullscreenable: false,
+      skipTaskbar: false,    // 显示在任务栏（独立窗口）
+      alwaysOnTop: false,
+      backgroundColor: '#1a1a2e',
+      title: '脚本中心',
+      webPreferences: {
+        nodeIntegration: false,
+        contextIsolation: true,
+        preload: path.join(__dirname, 'preload.js'),
+      },
+    })
+
+    // 开发环境加载 Vite 开发服务器，生产环境加载打包文件
+    // 用 query 参数 ?window=script-center 标识脚本中心窗口
+    if (process.env.NODE_ENV === 'development') {
+      scriptCenterWindow.loadURL('http://localhost:5173/?window=script-center')
+    } else {
+      scriptCenterWindow.loadFile(path.join(__dirname, '../dist/index.html'), { query: { window: 'script-center' } })
+    }
+
+    scriptCenterWindow.on('closed', () => { scriptCenterWindow = null })
+
+    return { success: true }
+  })
+
+  ipcMain.handle('script-center:close', async () => {
+    if (scriptCenterWindow && !scriptCenterWindow.isDestroyed()) {
+      scriptCenterWindow.close()
+      scriptCenterWindow = null
+    }
+    return { success: true }
+  })
+
+  // --- 数据报告窗口（独立 BrowserWindow，Agent 完成时自动弹出） ---
+  let historyWindow = null
+  ipcMain.handle('history-window:open', async () => {
+    // 如果窗口已存在，聚焦它
+    if (historyWindow && !historyWindow.isDestroyed()) {
+      if (historyWindow.isMinimized()) historyWindow.restore()
+      historyWindow.focus()
+      return { success: true }
+    }
+
+    const [parentW, parentH] = mainWindow.getContentSize()
+    const [parentX, parentY] = mainWindow.getPosition()
+    const wWidth = 600
+    const wHeight = 500
+    const wX = parentX + Math.floor((parentW - wWidth) / 2)
+    const wY = parentY + Math.floor((parentH - wHeight) / 2)
+
+    historyWindow = new BrowserWindow({
+      width: wWidth,
+      height: wHeight,
+      x: wX,
+      y: wY,
+      parent: mainWindow,
+      frame: false,          // 无边框，自定义标题栏实现拖拽
+      resizable: true,
+      minimizable: false,
+      maximizable: false,
+      fullscreenable: false,
+      skipTaskbar: true,
+      alwaysOnTop: true,
+      backgroundColor: '#1a1a2e',
+      title: '历史会话管理',
+      webPreferences: {
+        nodeIntegration: false,
+        contextIsolation: true,
+        preload: path.join(__dirname, 'preload.js'),
+      },
+    })
+
+    // 开发环境加载 Vite 开发服务器，生产环境加载打包文件
+    // 用 query 参数 ?window=history 标识历史记录管理窗口
+    if (process.env.NODE_ENV === 'development') {
+      historyWindow.loadURL('http://localhost:5173/?window=history')
+    } else {
+      historyWindow.loadFile(path.join(__dirname, '../dist/index.html'), { query: { window: 'history' } })
+    }
+
+    historyWindow.on('closed', () => { historyWindow = null })
+    return { success: true }
+  })
+
+  ipcMain.handle('history-window:close', async () => {
+    if (historyWindow && !historyWindow.isDestroyed()) {
+      historyWindow.close()
     }
     return { success: true }
   })

@@ -54,6 +54,16 @@ contextBridge.exposeInMainWorld('api', {
       return () => ipcRenderer.removeListener('sidebar-window:closed', handler)
     },
   },
+  // 脚本中心窗口
+  scriptCenterWindow: {
+    open: () => ipcRenderer.invoke('script-center:open'),
+    close: () => ipcRenderer.invoke('script-center:close'),
+  },
+  // 历史记录管理窗口
+  historyWindow: {
+    open: () => ipcRenderer.invoke('history-window:open'),
+    close: () => ipcRenderer.invoke('history-window:close'),
+  },
   // 数据报告窗口
   reportWindow: {
     show: (data) => ipcRenderer.invoke('report-window:show', data),

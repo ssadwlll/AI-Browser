@@ -297,122 +297,8 @@ function DataReportSection({ item, defaultExpanded }) {
         </div>
       )}
 
-      {/* 历史会话管理模态弹窗 */}
-      {showHistoryModal && (
-        <div className="modal-overlay" onClick={() => setShowHistoryModal(false)}>
-          <div className="modal-content modal-content-wide" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header">
-              <span className="modal-title">历史会话管理 ({sessions.length})</span>
-              <button className="modal-close" onClick={() => setShowHistoryModal(false)}>✕</button>
-            </div>
-            <div className="modal-body modal-body-scroll">
-              {sessions.length === 0 && (
-                <div className="session-empty">暂无历史会话</div>
-              )}
-              {sessions.map(s => (
-                <div
-                  key={s.id}
-                  className={`session-item ${s.id === activeSessionId ? 'active' : ''}`}
-                  onClick={() => { handleSwitchSession(s); setShowHistoryModal(false) }}
-                >
-                  <div className="session-item-title">{s.title}</div>
-                  <div className="session-item-meta">
-                    <span>{new Date(s.updatedAt).toLocaleString()}</span>
-                    <span>{s.messageCount || 0} 条消息</span>
-                  </div>
-                  <button
-                    className="session-delete-btn"
-                    onClick={(e) => { e.stopPropagation(); handleDeleteSession(s.id, e) }}
-                    title="删除会话"
-                  >✗</button>
-                </div>
-              ))}
-            </div>
-            <div className="modal-footer">
-              <button className="modal-btn modal-btn-cancel" onClick={() => setShowHistoryModal(false)}>关闭</button>
-              <button className="modal-btn modal-btn-confirm" onClick={handleNewSession}>新建会话</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* 脚本中心模态弹窗 */}
-      {showScriptCenterModal && (
-        <div className="modal-overlay" onClick={() => setShowScriptCenterModal(false)}>
-          <div className="modal-content modal-content-wide" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header">
-              <span className="modal-title">脚本中心</span>
-              <button className="modal-close" onClick={() => setShowScriptCenterModal(false)}>✕</button>
-            </div>
-            <div className="modal-body">
-              {/* 搜索栏 */}
-              <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
-                <input
-                  className="modal-input"
-                  type="text"
-                  style={{ flex: 1 }}
-                  placeholder="输入关键词搜索脚本..."
-                  value={scriptCenterSearch}
-                  onChange={(e) => setScriptCenterSearch(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === 'Enter') loadScriptCenter(1, e.target.value) }}
-                />
-                <button className="modal-btn modal-btn-confirm" onClick={() => loadScriptCenter(1, scriptCenterSearch)}>搜索</button>
-                <button className="modal-btn modal-btn-cancel" onClick={() => loadScriptCenter(1)}>刷新</button>
-              </div>
-              {/* 脚本列表 */}
-              <div className="modal-body-scroll">
-                {scriptCenterLoading && <div className="session-empty">加载中...</div>}
-                {!scriptCenterLoading && scriptCenterList.length === 0 && (
-                  <div className="session-empty">暂无远程脚本，请确保管理后台已启动且有脚本数据</div>
-                )}
-                {!scriptCenterLoading && scriptCenterList.map(script => (
-                  <div key={script.id} className="session-item script-item">
-                    <div className="session-item-title">{script.name}</div>
-                    {script.description && (
-                      <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 2 }}>{script.description}</div>
-                    )}
-                    <div className="session-item-meta">
-                      <span>{script.category_name || '未分类'}</span>
-                      <span>v{script.version || '1.0.0'}</span>
-                      <span>下载 {script.download_count || 0} 次</span>
-                      {script.tool_type && script.tool_type !== 'js' && <span style={{ color: 'var(--accent)' }}>{script.tool_type}</span>}
-                    </div>
-                    <div style={{ display: 'flex', gap: '4px', marginTop: 6 }}>
-                      <button
-                        style={{ background: '#10b981', color: '#fff', fontSize: 11, padding: '4px 10px', borderRadius: 6, border: 'none', cursor: 'pointer' }}
-                        onClick={() => handleDownloadFromCenter(script)}
-                        title="下载到本地脚本库"
-                      >下载到本地</button>
-                      <button
-                        style={{ background: 'var(--accent)', color: '#fff', fontSize: 11, padding: '4px 10px', borderRadius: 6, border: 'none', cursor: 'pointer' }}
-                        onClick={async () => {
-                          const detail = await window.api.admin.getScriptDetail({ serverUrl: config.adminServerUrl, token: config.adminToken, id: script.id })
-                          if (detail.success) {
-                            const code = detail.data?.data?.code || detail.data?.code || ''
-                            if (code) { await window.api.action.execute(code) }
-                          }
-                        }}
-                        title="注入到当前页面"
-                      >注入页面</button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-              {/* 分页 */}
-              {!scriptCenterLoading && scriptCenterList.length > 0 && (
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, padding: '8px 0', fontSize: 12, color: 'var(--text-secondary)' }}>
-                  <button className="modal-btn modal-btn-cancel" onClick={() => loadScriptCenter(scriptCenterPage - 1)} disabled={scriptCenterPage <= 1}>上一页</button>
-                  <span>第 {scriptCenterPage} 页</span>
-                  <button className="modal-btn modal-btn-cancel" onClick={() => loadScriptCenter(scriptCenterPage + 1)}>下一页</button>
-                </div>
-              )}
-            </div>
-            <div className="modal-footer">
-              <button className="modal-btn modal-btn-cancel" onClick={() => setShowScriptCenterModal(false)}>关闭</button>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* 历史会话管理已迁移为独立窗口（window.api.historyWindow.open()） */}
+      {/* 脚本中心已迁移为独立窗口（window.api.scriptCenterWindow.open()） */}
     </div>
   )
 }
@@ -706,16 +592,9 @@ export default function UnifiedPanel({ config }) {
   const [showSessionList, setShowSessionList] = useState(false)
   const [savedScripts, setSavedScripts] = useState(() => loadSavedScripts())
   const [showSavedScripts, setShowSavedScripts] = useState(false)
-  const [showScriptCenter, setShowScriptCenter] = useState(false)
-  const [scriptCenterList, setScriptCenterList] = useState([])
-  const [scriptCenterLoading, setScriptCenterLoading] = useState(false)
-  const [scriptCenterPage, setScriptCenterPage] = useState(1)
-  const [scriptCenterSearch, setScriptCenterSearch] = useState('')
   const [autoInjectScripts, setAutoInjectScripts] = useState([])
   const [showAutoInject, setShowAutoInject] = useState(false)
   const [modal, setModal] = useState(null) // {title, message, defaultValue, placeholder, resolve}
-  const [showHistoryModal, setShowHistoryModal] = useState(false)
-  const [showScriptCenterModal, setShowScriptCenterModal] = useState(false)
   const messagesEndRef = useRef(null)
   const nextIdRef = useRef(1)
   const chatHistoryRef = useRef([]) // 发送给AI的对话历史
@@ -956,6 +835,40 @@ export default function UnifiedPanel({ config }) {
       handleNewSession()
     }
   }, [activeSessionId, handleNewSession])
+
+  // 用 ref 保存最新的 handleSwitchSession，供 storage 事件监听器调用（避免闭包过期）
+  const handleSwitchSessionRef = useRef(handleSwitchSession)
+  useEffect(() => {
+    handleSwitchSessionRef.current = handleSwitchSession
+  }, [handleSwitchSession])
+
+  // ============ 跨窗口会话通信（与历史记录管理窗口 HistoryWindow 协作） ============
+  // 监听 localStorage 变化（同 origin 的其他窗口写入时触发）：
+  //   - 'ai-browser-load-session'：历史窗口请求载入某会话 → 切换到该会话
+  //   - 'ai-browser-sessions'：历史窗口删除/清空会话 → 刷新本窗口会话列表
+  useEffect(() => {
+    const handleStorage = (e) => {
+      // 载入会话：历史窗口设置了要载入的会话 ID
+      if (e.key === 'ai-browser-load-session' && e.newValue) {
+        const sessionId = e.newValue
+        try {
+          const all = JSON.parse(localStorage.getItem(SESSIONS_KEY) || '[]')
+          const session = all.find(s => s.id === sessionId)
+          if (session) {
+            handleSwitchSessionRef.current(session)
+          }
+        } catch { /* 忽略解析错误 */ }
+      }
+      // 会话列表变更：历史窗口删除单个或全部会话 → 同步刷新
+      if (e.key === SESSIONS_KEY) {
+        try {
+          setSessions(e.newValue ? JSON.parse(e.newValue) : [])
+        } catch { /* 忽略解析错误 */ }
+      }
+    }
+    window.addEventListener('storage', handleStorage)
+    return () => window.removeEventListener('storage', handleStorage)
+  }, [])
 
   // ============ 统一AI事件监听 ============
 
@@ -1751,65 +1664,7 @@ export default function UnifiedPanel({ config }) {
     await window.api.unified.abort()
   }
 
-  // ============ 脚本中心 ============
-  const loadScriptCenter = async (page, keyword) => {
-    const serverUrl = config.adminServerUrl || ''
-    const tk = config.adminToken || ''
-    if (!serverUrl || !tk) {
-      addMessage({ role: 'assistant', type: 'error', content: '请先在设置中配置管理后台地址和 Token' })
-      return
-    }
-    setScriptCenterLoading(true)
-    setScriptCenterPage(page || 1)
-    try {
-      const searchKw = keyword !== undefined ? keyword : scriptCenterSearch
-      const result = await window.api.admin.getScripts({ serverUrl, token: tk, page: page || 1, keyword: searchKw })
-      if (result.success && result.data) {
-        setScriptCenterList(Array.isArray(result.data) ? result.data : [])
-      } else {
-        addMessage({ role: 'assistant', type: 'error', content: `加载脚本中心失败: ${result.error || '未知错误'}` })
-      }
-    } catch (e) {
-      addMessage({ role: 'assistant', type: 'error', content: `加载脚本中心异常: ${e.message}` })
-    } finally {
-      setScriptCenterLoading(false)
-    }
-  }
-
-  // 从脚本中心下载脚本到本地
-  const handleDownloadFromCenter = async (serverScript) => {
-    const serverUrl = config.adminServerUrl || ''
-    const tk = config.adminToken || ''
-    try {
-      // 先获取脚本详情（包含代码内容）
-      const detailResult = await window.api.admin.getScriptDetail({ serverUrl, token: tk, id: serverScript.id })
-      if (!detailResult.success || !detailResult.data) {
-        addMessage({ role: 'assistant', type: 'error', content: `获取脚本详情失败: ${detailResult.error || '未知错误'}` })
-        return
-      }
-      const detail = detailResult.data.data || detailResult.data
-      const code = detail.code || detail.content || ''
-      if (!code) {
-        addMessage({ role: 'assistant', type: 'error', content: '脚本内容为空，无法下载' })
-        return
-      }
-      const newScript = {
-        id: 'script_' + Date.now(),
-        name: serverScript.name,
-        description: serverScript.description || '',
-        code,
-        savedAt: Date.now(),
-      }
-      setSavedScripts(prev => {
-        const updated = [newScript, ...prev]
-        saveSavedScripts(updated)
-        return updated
-      })
-      addMessage({ role: 'system', type: 'tool_call', content: `脚本 "${serverScript.name}" 已从脚本中心下载到本地` })
-    } catch (e) {
-      addMessage({ role: 'assistant', type: 'error', content: `下载脚本异常: ${e.message}` })
-    }
-  }
+  // ============ 脚本中心已迁移为独立窗口（window.api.scriptCenterWindow.open()） ============
 
   // 清空当前会话消息
   const handleClear = () => {
@@ -2063,17 +1918,11 @@ export default function UnifiedPanel({ config }) {
           <button className="toolbar-btn" onClick={handleNewSession} title="新建会话">
             + 新会话
           </button>
-          <button className="toolbar-btn" onClick={() => setShowHistoryModal(true)} title="历史会话">
+          <button className="toolbar-btn" onClick={() => window.api.historyWindow.open()} title="历史会话">
             历史 ({sessions.length})
           </button>
-          <button className="toolbar-btn" onClick={() => setShowSavedScripts(!showSavedScripts)} title="已保存的脚本">
-            脚本 ({savedScripts.length})
-          </button>
-          <button className="toolbar-btn" onClick={() => { setShowScriptCenterModal(true); loadScriptCenter(1) }} title="从后台脚本中心浏览和下载脚本">
+          <button className="toolbar-btn" onClick={() => window.api.scriptCenterWindow?.open()} title="打开脚本中心（独立窗口，浏览/下载/注入后台脚本）">
             脚本中心
-          </button>
-          <button className="toolbar-btn" onClick={() => setShowAutoInject(!showAutoInject)} title="自动注入脚本（页面刷新后自动执行）">
-            自动注入 ({autoInjectScripts.length})
           </button>
           {/* Agent v2 模式切换按钮（激活态品牌紫色） */}
           <button

@@ -5,6 +5,8 @@ import { FeaturePanelsWindow } from './components/FeaturePanels.jsx'
 import ConversationViewerWindow from './components/ConversationViewerWindow.jsx'
 import ReportWindow from './components/ReportWindow.jsx'
 import SidebarWindow from './components/SidebarWindow.jsx'
+import HistoryWindow from './components/HistoryWindow.jsx'
+import ScriptCenterWindow from './components/ScriptCenterWindow.jsx'
 import './styles/main.css'
 
 // 根据 URL query 参数判断渲染哪个根组件
@@ -12,6 +14,8 @@ import './styles/main.css'
 // ?window=conversation → 全景对话窗口
 // ?window=report → 数据报告窗口
 // ?window=sidebar → 侧边栏分离窗口
+// ?window=history → 历史记录管理窗口
+// ?window=script-center → 脚本中心窗口
 // 其他 → 主应用
 const params = new URLSearchParams(window.location.search)
 const windowType = params.get('window')
@@ -38,6 +42,18 @@ if (windowType === 'feature-panels') {
   ReactDOM.createRoot(document.getElementById('root')).render(
     <React.StrictMode>
       <SidebarWindow />
+    </React.StrictMode>
+  )
+} else if (windowType === 'history') {
+  ReactDOM.createRoot(document.getElementById('root')).render(
+    <React.StrictMode>
+      <HistoryWindow />
+    </React.StrictMode>
+  )
+} else if (windowType === 'script-center') {
+  ReactDOM.createRoot(document.getElementById('root')).render(
+    <React.StrictMode>
+      <ScriptCenterWindow />
     </React.StrictMode>
   )
 } else {
