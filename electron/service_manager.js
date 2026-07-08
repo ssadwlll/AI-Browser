@@ -8,6 +8,7 @@ const { ipcMain } = require('electron')
 const ConfigService = require('./services/config_service')
 const StorageService = require('./services/storage_service')  // 导出为对象，直接使用
 const DBService = require('./services/db_service')            // 导出为对象，直接使用
+const ToolService = require('./services/tool_service')
 const { fetchWithTimeout, safeJsonStringify, safeJsonParse } = require('./services/utils')
 
 // 上下文管理
@@ -83,10 +84,11 @@ class ServiceManager {
     const taskArchiveService = new TaskArchiveService(scratchpadService, outputService)
 
     // ---- Agent 核心 ----
-    // toolService 和 pageService 暂传 null，后续可接入 admin-server
-    // 共享 PayloadStore/GlobalDataStore/TodoScheduler 实例，确保 IPC 和 Agent 使用同一份状态
+    // toolService：通过后端 admin-server API 搜索和执行脚本，同时提供 matchUrl 方法
+    // scriptService 与 toolService 合并为同一服务（职责相似）
+    const toolService = new ToolService(configService)
     const agentService = new AgentService(
-      configService, null, null, null,
+      configService, toolService, null, toolService,
       toolRecordingService, agentResumeService,
       tabManager, actionExecutor,
       { payloadStore, globalDataStore, todoScheduler }
@@ -223,19 +225,38 @@ class ServiceManager {
             }
           }
 
-          // 发送到主窗口
+          // 发送到主窗口（event.sender 优先，销毁后回退到第一个可用窗口）
+          let targetWC = null
           if (event.sender && !event.sender.isDestroyed()) {
-            event.sender.send(`agent:v2-event`, { channel, data })
+            targetWC = event.sender
+          } else {
+            try {
+              const { BrowserWindow } = require('electron')
+              const mainWin = BrowserWindow.getAllWindows().find(w => w.webContents && !w.webContents.isDestroyed())
+              if (mainWin) targetWC = mainWin.webContents
+            } catch {}
           }
-          // 广播到所有其他窗口（如内置工具窗口、全景对话窗口）
-          try {
-            const { BrowserWindow } = require('electron')
-            BrowserWindow.getAllWindows().forEach(win => {
-              if (win.webContents && !win.webContents.isDestroyed() && win.webContents !== event.sender) {
-                win.webContents.send(`agent:v2-event`, { channel, data })
-              }
-            })
-          } catch (e) { /* 忽略广播异常 */ }
+          if (targetWC) {
+            targetWC.send(`agent:v2-event`, { channel, data })
+          }
+          // 仅对结构化事件广播到其他窗口（如内置工具窗口、全景对话窗口）
+          // 高频流式事件（streamChunk/streamDone）只发主窗口，避免 IPC 风暴
+          const BROADCAST_CHANNELS = new Set([
+            'agentStart', 'agentStep', 'agentStepResult', 'agentStatus', 'agentError',
+            'agentTodoUpdate', 'agentTodoClear', 'agentSearchResult', 'agentDebug',
+            'agentDataReport', 'conversationRound', 'conversationClear',
+            'conversationToolResult', 'conversationTaskDone',
+          ])
+          if (BROADCAST_CHANNELS.has(channel)) {
+            try {
+              const { BrowserWindow } = require('electron')
+              BrowserWindow.getAllWindows().forEach(win => {
+                if (win.webContents && !win.webContents.isDestroyed() && win.webContents !== event.sender) {
+                  win.webContents.send(`agent:v2-event`, { channel, data })
+                }
+              })
+            } catch (e) { /* 忽略广播异常 */ }
+          }
         }
 
         // 异步启动，不等待完成

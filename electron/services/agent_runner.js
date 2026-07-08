@@ -13,7 +13,7 @@
 //   8. checkPortConnected → isAborted() 检查
 //   9. PayloadStore 旧接口 → PayloadStoreAdapter 适配新 PayloadStore
 
-const { fetchWithTimeout } = require('./utils')
+const { fetchWithTimeout, safeJsonStringify } = require('./utils')
 const {
   shouldStoreToPayload,
   storeToPayload,
@@ -193,26 +193,29 @@ function normalizeDataRefs(raw) {
 // 流式输出阈值
 const STREAM_CHAR_THRESHOLD = 2000
 const STREAM_DELAY_MS = 15
+// 统一分段长度：无论长短都用分段批量发送，避免逐字符 IPC 风暴
+const STREAM_SEGMENT = 80
 
-/** 将文本流式发送到 UI；超长内容采用分段发送避免累计超时 */
+/** 将文本流式发送到 UI；统一采用分段批量发送，避免逐字符 IPC 风暴 */
 async function streamToUI(sendEvent, text) {
   if (!text) {
+    console.warn('[streamToUI] text 为空，仅发送 streamDone')
     sendEvent('streamDone', {})
     return
   }
-  if (text.length > STREAM_CHAR_THRESHOLD) {
-    const SEGMENT = 8000
-    for (let i = 0; i < text.length; i += SEGMENT) {
-      sendEvent('streamChunk', { content: text.slice(i, i + SEGMENT) })
-      await new Promise(r => setTimeout(r, 30))
-    }
-  } else {
-    for (const char of text) {
-      sendEvent('streamChunk', { content: char })
-      await new Promise(r => setTimeout(r, STREAM_DELAY_MS))
-    }
+  console.log(`[streamToUI] 开始流式输出: ${text.length} 字符`)
+  // 统一用分段批量发送：每段 STREAM_SEGMENT 字符，间隔 STREAM_DELAY_MS
+  // 超长内容用更大段，避免段数过多
+  const segment = text.length > STREAM_CHAR_THRESHOLD ? 8000 : STREAM_SEGMENT
+  let chunkCount = 0
+  for (let i = 0; i < text.length; i += segment) {
+    const chunk = text.slice(i, i + segment)
+    sendEvent('streamChunk', { content: chunk })
+    chunkCount++
+    await new Promise(r => setTimeout(r, STREAM_DELAY_MS))
   }
   sendEvent('streamDone', {})
+  console.log(`[streamToUI] 完成: 发送了 ${chunkCount} 个 chunk, 共 ${text.length} 字符`)
 }
 
 // ============================================================
@@ -750,6 +753,14 @@ class PayloadStoreAdapter {
     // 此处简化：仅更新 sessionId，不拷贝数据（agent_runner 中 payloadStore.entries 仍可访问旧数据）
     this._sessionId = newSessionId
   }
+
+  /**
+   * 清理当前会话数据（任务开始前调用，防止旧数据残留）
+   */
+  clearSessionData() {
+    this.entries = []
+    this._counter = 0
+  }
 }
 
 // ============================================================
@@ -864,6 +875,18 @@ async function runAgent(ctx) {
   let searchResults = []
   const executedTools = []
   const _injections = []
+
+  // ===== 预加载脚本索引到 searchResults =====
+  // 避免 AI 从系统提示文本中看到脚本但工具列表中没有对应工具定义
+  try {
+    const allScripts = await toolService.fetchAgentIndex()
+    if (allScripts.length > 0) {
+      searchResults = allScripts.slice(0, 20) // 预加载前20个脚本作为初始工具池
+      console.log(`[Agent] 预加载脚本索引: ${searchResults.length} 个脚本`)
+    }
+  } catch (e) {
+    console.warn('[Agent] 预加载脚本索引失败（非致命）:', e.message)
+  }
 
   // ===== ScratchpadService & OutputService 初始化 =====
   const scratchpadService = new ScratchpadService()
@@ -1209,6 +1232,10 @@ ${allData.length > 0 ? '全局存储:\n' + allData.join('\n') : ''}${payloadItem
   _debugLog('Agent配置', { maxRounds: effectiveMaxRounds, enableJudge, debug })
   _debugLog('系统提示词', systemMsg.content)
 
+  // ===== 预读取配置（避免主循环每轮重复 await StorageService） =====
+  const aiConfigCache = await configService.getAIConfig()
+  const authCache = await configService.getAppAuth()
+
   // ===== 主循环开始 =====
   while (aiRequestCount < effectiveMaxRounds) {
     // 检查是否被新任务中止
@@ -1311,17 +1338,19 @@ ${allData.length > 0 ? '全局存储:\n' + allData.join('\n') : ''}${payloadItem
       messages.push({ role: 'system', content: systemNudges.join('\n'), _temp: true })
     }
 
-    const config = await configService.getAIConfig()
-    const auth = await configService.getAppAuth()
+    // 配置读取移到循环外预读取（避免每轮重复 await StorageService）
+    // modelInfo 优先（UI 传入），否则用 config 兜底
+    const aiConfig = aiConfigCache
+    const auth = authCache
     // 优先使用 UI 传入的当前选中模型，避免异步保存时序问题导致用了旧配置
-    const effectiveModel = (modelInfo && modelInfo.modelId) ? modelInfo.modelId : config.model
-    console.log(`[Agent] LLM请求模型: effectiveModel=${effectiveModel}, modelInfo.modelId=${modelInfo?.modelId}, config.model=${config.model}`)
+    const effectiveModel = (modelInfo && modelInfo.modelId) ? modelInfo.modelId : aiConfig.model
+    console.log(`[Agent] LLM请求模型: effectiveModel=${effectiveModel}, modelInfo.modelId=${modelInfo?.modelId}, config.model=${aiConfig.model}`)
     const modelTemperature = (modelInfo && typeof modelInfo.temperature === 'number')
       ? modelInfo.temperature
-      : (config.temperature ?? 0.3)
+      : (aiConfig.temperature ?? 0.3)
     const modelMaxTokens = (modelInfo && modelInfo.maxTokens)
       ? modelInfo.maxTokens
-      : (config.maxTokens || 2048)
+      : (aiConfig.maxTokens || 2048)
     const messagesForAI = messages.map(({ _temp, ...rest }) => rest)
     const body = {
       model: effectiveModel, messages: messagesForAI,
@@ -1508,76 +1537,96 @@ ${allData.length > 0 ? '全局存储:\n' + allData.join('\n') : ''}${payloadItem
               postToUI(tabId, { type: 'agentTodoUpdate', data: { items: todoScheduler.parentTodo.items || [], progress: todoScheduler.getProgress(), currentTodoIndex: todoScheduler.currentTodoIndex, lastTool: 'finish_task', lastProgress: true } })
             }
 
-            // 处理 data_refs
+            // 处理 data_refs（try-catch 保护：任何异常都不能阻塞最终回复发送）
             let referencedDataContent = ''
-            let dataRefIds = normalizeDataRefs(funcArgs.data_refs)
+            let dataRefIds = []
             const reportDataItems = []
 
-            console.log(`[Agent] finish_task data_refs=${JSON.stringify(funcArgs.data_refs)}, payloadStore.entries.length=${payloadStore.entries.length}, entries=[${payloadStore.entries.map(e => e.id).join(',')}]`)
+            try {
+              dataRefIds = normalizeDataRefs(funcArgs.data_refs)
+              console.log(`[Agent] finish_task data_refs=${JSON.stringify(funcArgs.data_refs)}, payloadStore.entries.length=${payloadStore.entries.length}, entries=[${payloadStore.entries.map(e => e.id).join(',')}]`)
 
-            // 自动补全：如果 AI 没传 data_refs 但 payloadStore 中有数据，自动引用所有存储数据
-            if (dataRefIds.length === 0 && payloadStore.entries.length > 0) {
-              dataRefIds = payloadStore.entries.map(e => e.id)
-              console.log(`[Agent] finish_task 自动补全 data_refs: ${dataRefIds.join(', ')}`)
-              _debugLog('finish_task 自动补全 data_refs', { refs: dataRefIds })
-            }
+              // 自动补全：如果 AI 没传 data_refs 但 payloadStore 中有数据，自动引用所有存储数据
+              if (dataRefIds.length === 0 && payloadStore.entries.length > 0) {
+                dataRefIds = payloadStore.entries.map(e => e.id)
+                console.log(`[Agent] finish_task 自动补全 data_refs: ${dataRefIds.join(', ')}`)
+                _debugLog('finish_task 自动补全 data_refs', { refs: dataRefIds })
+              }
 
-            if (dataRefIds.length > 0) {
-              _debugLog('finish_task 数据引用', { refs: dataRefIds })
-              const storeData = await payloadStore.getDataByIds(dataRefIds)
-              console.log(`[Agent] getDataByIds 返回 keys: ${Object.keys(storeData).join(',')}`)
-              for (const refId of dataRefIds) {
-                const data = storeData[refId]
-                const entry = payloadStore.entries.find(e => e.id === refId)
-                console.log(`[Agent] refId=${refId}, data存在=${data !== undefined}, entry存在=${!!entry}`)
-                if (data !== undefined) {
-                  reportDataItems.push({
-                    id: refId,
-                    toolName: entry?.toolName || 'unknown',
-                    data: data,
-                    schema: entry?.metadata?.schema || null,
-                    count: entry?.metadata?.count || (Array.isArray(data) ? data.length : 1),
-                    renderType: entry?.metadata?.renderType || null,
-                    templateId: entry?.metadata?.template_id || null,
-                    fieldMapping: entry?.metadata?.field_mapping || null,
-                    reportTitle: entry?.metadata?.title || null,
-                  })
-                  const dataPreview = typeof data === 'string' ? data : JSON.stringify(data, null, 2)
-                  const MAX_REF_CHARS = 2000
-                  const truncated = dataPreview.length > MAX_REF_CHARS
-                    ? dataPreview.slice(0, MAX_REF_CHARS) + `\n...(完整数据见下方报告)`
-                    : dataPreview
-                  referencedDataContent += `\n\n=== 数据 ${refId} (${entry?.toolName || 'unknown'}) ===\n${truncated}`
+              if (dataRefIds.length > 0) {
+                _debugLog('finish_task 数据引用', { refs: dataRefIds })
+                const storeData = await payloadStore.getDataByIds(dataRefIds)
+                console.log(`[Agent] getDataByIds 返回 keys: ${Object.keys(storeData).join(',')}`)
+                for (const refId of dataRefIds) {
+                  const data = storeData[refId]
+                  const entry = payloadStore.entries.find(e => e.id === refId)
+                  console.log(`[Agent] refId=${refId}, data存在=${data !== undefined}, entry存在=${!!entry}`)
+                  if (data !== undefined) {
+                    reportDataItems.push({
+                      id: refId,
+                      toolName: entry?.toolName || 'unknown',
+                      data: data,
+                      schema: entry?.metadata?.schema || null,
+                      count: entry?.metadata?.count || (Array.isArray(data) ? data.length : 1),
+                      renderType: entry?.metadata?.renderType || null,
+                      templateId: entry?.metadata?.template_id || null,
+                      fieldMapping: entry?.metadata?.field_mapping || null,
+                      reportTitle: entry?.metadata?.title || null,
+                    })
+                    // 用 safeJsonStringify 避免循环引用抛错
+                    const dataPreview = typeof data === 'string' ? data : safeJsonStringify(data, null, 2)
+                    const MAX_REF_CHARS = 2000
+                    const truncated = dataPreview.length > MAX_REF_CHARS
+                      ? dataPreview.slice(0, MAX_REF_CHARS) + `\n...(完整数据见下方报告)`
+                      : dataPreview
+                    referencedDataContent += `\n\n=== 数据 ${refId} (${entry?.toolName || 'unknown'}) ===\n${truncated}`
+                  }
+                }
+                if (referencedDataContent) {
+                  referencedDataContent = '\n\n【引用数据摘要】' + referencedDataContent
                 }
               }
-              if (referencedDataContent) {
-                referencedDataContent = '\n\n【引用数据摘要】' + referencedDataContent
+            } catch (dataRefErr) {
+              console.error('[Agent] finish_task data_refs 处理失败（不阻塞最终回复）:', dataRefErr.message, dataRefErr.stack)
+              _debugLog('finish_task data_refs 处理失败', { error: dataRefErr.message })
+            }
+
+            try {
+              const payloadSummary = payloadStore.getSummaryForFinish()
+              if (payloadSummary) {
+                const summaryHint = `\n[存储数据汇总] 共${payloadSummary.count}条存储：${payloadSummary.items.map(e => `${e.id}(${e.toolName}:${e.count}条)`).join(', ')}。可在 finish_task 中通过 data_refs 引用完整数据。`
+                messages.push({ role: 'system', content: summaryHint })
               }
+            } catch (e) {
+              console.warn('[Agent] getSummaryForFinish 失败（非致命）:', e.message)
             }
 
-            const payloadSummary = payloadStore.getSummaryForFinish()
-            if (payloadSummary) {
-              const summaryHint = `\n[存储数据汇总] 共${payloadSummary.count}条存储：${payloadSummary.items.map(e => `${e.id}(${e.toolName}:${e.count}条)`).join(', ')}。可在 finish_task 中通过 data_refs 引用完整数据。`
-              messages.push({ role: 'system', content: summaryHint })
-            }
             const summary = funcArgs.summary || '任务已完成'
-            messages.push({ role: 'tool', tool_call_id: toolCall.id, content: JSON.stringify({ ok: true, summary }) })
+            try {
+              messages.push({ role: 'tool', tool_call_id: toolCall.id, content: JSON.stringify({ ok: true, summary }) })
+            } catch (e) {
+              messages.push({ role: 'tool', tool_call_id: toolCall.id, content: JSON.stringify({ ok: true, summary: summary.slice(0, 500) }) })
+            }
 
-            // 事后自评
+            // ★ 先发送最终回复（不被 runJudge 阻塞）—— 任何前置异常都已 try-catch，不会跳过这里
+            const finalOutput = summary + referencedDataContent
+            console.log(`[Agent] finish_task 即将发送最终回复: finalOutput=${finalOutput.length} 字符, summary=${summary.length} 字符, referencedData=${referencedDataContent.length} 字符`)
+            console.log(`[Agent] finish_task streamToUI 开始调用`)
+            await streamToUI(sendEvent, finalOutput)
+            console.log(`[Agent] finish_task streamToUI 已完成`)
+
+            // 事后自评（在 streamToUI 之后执行，不阻塞用户看到最终回复）
             let judgeResult = null
-            let finalOutput = summary + referencedDataContent
             if (enableJudge) {
               try {
                 judgeResult = await runJudge(configService, userMessage, summary, executedTools)
                 if (judgeResult) {
                   const judgeMsg = `\n\n---\n结果评估：${judgeResult.verdict === 'success' ? '✅ 任务完成' : judgeResult.verdict === 'partial' ? '⚠️ 部分完成' : '❌ 可能未完成'}\n${judgeResult.comment || ''}`
-                  finalOutput = summary + referencedDataContent + judgeMsg
+                  // 追加发送 judge 结果
+                  await streamToUI(sendEvent, judgeMsg)
                 }
               } catch (e) { console.warn('[Agent] 事后自评失败（非致命）:', e.message) }
             }
-
-            // 流式输出完整内容
-            await streamToUI(sendEvent, finalOutput)
 
             // 发送结构化数据报告
             console.log(`[Agent] reportDataItems.length=${reportDataItems.length}, 即将发送 agentDataReport 事件`)
@@ -1800,25 +1849,114 @@ ${allData.length > 0 ? '全局存储:\n' + allData.join('\n') : ''}${payloadItem
               }
               postToUI(tabId, { type: 'agentStep', step: totalToolCalls, toolName: funcName, toolArgs: { scriptId, scriptName: tool.name }, status: 'running' })
               const execStart = Date.now()
-              // Electron 版：toolService.executeTool 需要适配 BrowserView
-              // 传入 tabId，toolService 内部通过 tabManager 获取 BrowserView
-              const execResult = await toolService.executeTool(tool, tabId, funcArgs)
-              const execDuration = Date.now() - execStart
-              toolResult = JSON.stringify(execResult)
-              if (execResult?.ok && (tool.toolType === 'api' || tool.toolConfig?.apiEndpoint)) {
-                _injections.push(`脚本 ${tool.name} 已成功执行并返回完整结果，可直接基于这些数据继续后续步骤或 finish_task，无需再用其他工具重复获取。`)
+
+              // API 类型脚本：调用远程端点
+              if (tool.toolType === 'api' || tool.toolConfig?.apiEndpoint) {
+                const execResult = await toolService._executeApiScript(tool, funcArgs)
+                const execDuration = Date.now() - execStart
+                toolResult = JSON.stringify(execResult)
+                if (execResult?.ok) {
+                  _injections.push(`脚本 ${tool.name} 已成功执行并返回完整结果，可直接基于这些数据继续后续步骤或 finish_task，无需再用其他工具重复获取。`)
+                }
+                executedTools.push({ name: tool.name || funcName, result: execResult })
+                const memOk = execResult?.ok === true
+                let memSummary = ''
+                const innerResult = execResult?.result
+                if (typeof innerResult === 'string') memSummary = innerResult.slice(0, 200)
+                else if (innerResult && typeof innerResult === 'object') {
+                  if (Array.isArray(innerResult.data)) { memSummary = `${innerResult.data.length}条数据`; if (innerResult.total !== undefined) memSummary += ` (共${innerResult.total})`; memSummary = memSummary.slice(0, 200) }
+                  else if (Array.isArray(innerResult)) memSummary = `${innerResult.length}条结果`
+                  else memSummary = JSON.stringify(innerResult).slice(0, 200)
+                }
+                recordMemory(configService, scriptId, memOk, execDuration, memOk ? '' : (execResult?.error || ''), memSummary).catch(() => {})
+              } else {
+                // JS 类型脚本：获取代码后在 BrowserView 中执行
+                const injectData = await toolService.getInjectData(scriptId)
+                if (!injectData || !injectData.code) {
+                  toolResult = JSON.stringify({ ok: false, error: `获取脚本代码失败: scriptId=${scriptId}` })
+                  executedTools.push({ name: `${funcName}(代码获取失败)`, result: toolResult })
+                  postToUI(tabId, { type: 'agentStepResult', step: totalToolCalls, toolName: funcName, result: toolResult, success: false, done: false })
+                  messages.push({ role: 'tool', tool_call_id: toolCall.id, content: toolResult })
+                  continue
+                }
+
+                try {
+                  // 参考 generate_script 的执行逻辑，使用 AsyncFunction 并检查 return
+                  console.log(`[Agent] inject_script_${scriptId} 获取到代码长度: ${injectData.code.length} 字符`)
+
+                  // 将脚本代码序列化为字符串字面量，传入页面上下文后再用 new Function 执行
+                  // 避免直接在模板字面量中拼接 injectData.code（变量未在页面上下文定义）
+                  const codeJson = JSON.stringify(injectData.code)
+                  const argsJson = JSON.stringify(funcArgs)
+                  const scriptCode = `(async (userArgs, scriptCodeStr) => {
+                    try {
+                      // 注入参数（如果有）
+                      if (userArgs && typeof userArgs === 'object') {
+                        window.__SCRIPT_ARGS__ = userArgs;
+                      }
+                      // 执行脚本代码（脚本必须使用 return 返回标准化 envelope）
+                      const AsyncFunction = Object.getPrototypeOf(async function(){}).constructor;
+                      // 关键：脚本代码可能是 IIFE，需要用 return 捕获其执行结果
+                      const fn = new AsyncFunction('return (' + scriptCodeStr + ')');
+                      const r = await fn();
+                      console.log('[inject_script] 脚本执行完成，返回类型:', typeof r, 'ok:', r?.ok);
+                      if (r === undefined || r === null) {
+                        return { ok: false, error: '脚本未返回结果，请确保使用 return 语句返回标准化格式 {ok, data, count, hint, ...}' };
+                      }
+                      // 检查是否返回标准化 envelope 格式
+                      if (typeof r === 'object' && r.ok !== undefined) {
+                        return r; // 符合标准，直接返回
+                      }
+                      // 不符合标准格式，包装为 envelope
+                      return { ok: true, data: r, count: Array.isArray(r) ? r.length : 1, hint: '脚本返回非标准格式，已自动包装' };
+                    } catch (e) {
+                      console.error('[inject_script] 执行异常:', e.message);
+                      return { ok: false, error: e.message };
+                    }
+                  })(${argsJson}, ${codeJson})`
+
+                  const r = await targetTab.browserView.webContents.executeJavaScript(scriptCode)
+                  const execDuration = Date.now() - execStart
+                  console.log(`[Agent] inject_script_${scriptId} 执行耗时: ${execDuration}ms，结果: ok=${r?.ok}, error=${r?.error || '无'}`)
+
+                  // 处理标准化 envelope 格式：{ok, data, count, hint, error}
+                  if (r && r.ok === true) {
+                    // 提取 data 字段作为实际结果
+                    const actualData = r.data || r
+                    toolResult = JSON.stringify({ ok: true, result: actualData, count: r.count, hint: r.hint || '' })
+                  } else {
+                    const errMsg = r?.error || '脚本执行失败（未返回标准格式）'
+                    const hint = errMsg.includes('Content Security Policy') || errMsg.includes('unsafe-eval')
+                      ? ' [建议：页面 CSP 限制，脚本无法执行]'
+                      : ''
+                    toolResult = JSON.stringify({ ok: false, error: errMsg + hint })
+                  }
+
+                  executedTools.push({ name: tool.name || funcName, result: r })
+                  const memOk = r?.ok === true
+                  let memSummary = ''
+                  const innerResult = r?.data || r?.result
+                  if (typeof innerResult === 'string') memSummary = innerResult.slice(0, 200)
+                  else if (innerResult && typeof innerResult === 'object') {
+                    if (Array.isArray(innerResult.data)) { memSummary = `${innerResult.data.length}条数据`; if (innerResult.total !== undefined) memSummary += ` (共${innerResult.total})`; memSummary = memSummary.slice(0, 200) }
+                    else if (Array.isArray(innerResult)) memSummary = `${innerResult.length}条结果`
+                    else memSummary = JSON.stringify(innerResult).slice(0, 200)
+                  }
+                  recordMemory(configService, scriptId, memOk, execDuration, memOk ? '' : (r?.error || ''), memSummary).catch(() => {})
+                } catch (e) {
+                  const execDuration = Date.now() - execStart
+                  if (e.message?.includes('Cannot access a chrome:// URL') || e.message?.includes('Cannot access contents of url')) {
+                    toolResult = JSON.stringify({ ok: false, error: '当前页面为系统页面，无法执行脚本。' })
+                  } else {
+                    toolResult = JSON.stringify({ ok: false, error: `执行失败: ${e.message}` })
+                  }
+                  executedTools.push({ name: `${funcName}(执行异常)`, result: toolResult })
+                  postToUI(tabId, { type: 'agentStepResult', step: totalToolCalls, toolName: funcName, result: toolResult, success: false, done: false })
+                  messages.push({ role: 'tool', tool_call_id: toolCall.id, content: toolResult })
+                  recordMemory(configService, scriptId, false, execDuration, e.message, '').catch(() => {})
+                  continue
+                }
               }
-              executedTools.push({ name: tool.name || funcName, result: execResult })
-              const memOk = execResult?.ok === true
-              let memSummary = ''
-              const innerResult = execResult?.result
-              if (typeof innerResult === 'string') memSummary = innerResult.slice(0, 200)
-              else if (innerResult && typeof innerResult === 'object') {
-                if (Array.isArray(innerResult.data)) { memSummary = `${innerResult.data.length}条数据`; if (innerResult.total !== undefined) memSummary += ` (共${innerResult.total})`; memSummary = memSummary.slice(0, 200) }
-                else if (Array.isArray(innerResult)) memSummary = `${innerResult.length}条结果`
-                else memSummary = JSON.stringify(innerResult).slice(0, 200)
-              }
-              recordMemory(configService, scriptId, memOk, execDuration, memOk ? '' : (execResult?.error || ''), memSummary).catch(() => {})
             }
           } else if (funcName === 'fetch_url') {
             const fetchUrl = typeof funcArgs.url === 'string' ? funcArgs.url : ''
@@ -2198,13 +2336,19 @@ ${allData.length > 0 ? '全局存储:\n' + allData.join('\n') : ''}${payloadItem
           }
 
           // ===== 全景对话：收集工具执行结果 =====
-          _roundToolResults.push({
+          const toolResultEntry = {
             toolName: funcName,
             args: funcArgs,
             result: (toolResult || '').slice(0, 500),
             finalResult: (finalResult || '').slice(0, 500),
             ok: !toolResult?.includes('error') && !toolResult?.includes('skipped'),
-          })
+          }
+          _roundToolResults.push(toolResultEntry)
+
+          // 实时发送工具结果到全景窗口（追加到当前轮次）
+          try {
+            sendEvent('conversationToolResult', { round: aiRequestCount, toolResult: toolResultEntry })
+          } catch (e) { /* 忽略 */ }
 
           messages.push({ role: 'tool', tool_call_id: toolCall.id, content: finalResult })
 
@@ -2371,12 +2515,14 @@ ${allData.length > 0 ? '全局存储:\n' + allData.join('\n') : ''}${payloadItem
   // ===== 循环结束：达到最大轮次 =====
   const reachedRounds = aiRequestCount
   const reachedToolCalls = totalToolCalls
-  postToUI(tabId, { type: 'agentError', error: `Agent达到最大请求次数（已执行 ${reachedRounds}/${effectiveMaxRounds} 轮），请简化任务重试` })
   _debugLog('Agent终止: 达到最大轮次', { effectiveMaxRounds, maxRounds, aiRequestCount, executedToolsCount: executedTools.length })
   const capNote = effectiveMaxRounds < maxRounds
     ? `（后端配置 ${maxRounds} 轮，超过绝对硬上限 100，已收敛为 ${effectiveMaxRounds} 轮）`
     : ''
   const finalNote = `⚠️ Agent 已达到最大请求次数上限，任务可能未完成。\n实际执行：${reachedRounds}/${effectiveMaxRounds} 轮 AI 请求，${reachedToolCalls} 次工具调用${capNote}。\n建议：1) 拆分任务为更小子任务 2) 简化需求描述 3) 后端调高 agent_max_rounds 配置（当前=${maxRounds}）。`
+  // 确保最终消息通过流式发送到前端（而不是仅 agentError）
+  postToUI(tabId, { type: 'agentStatus', text: '任务达到最大轮次，正在生成总结...' })
+  await streamToUI(sendEvent, finalNote)
   const toolCallsSummary = executedTools.length > 0
     ? executedTools.filter(t => !t.name?.includes('search_tools') && !t.name?.includes('read_page_content')).slice(0, 15)
     : []

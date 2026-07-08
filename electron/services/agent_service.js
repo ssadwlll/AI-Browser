@@ -179,8 +179,9 @@ class AgentService {
     // 初始化 PayloadStore 会话
     this.payloadStoreAdapter.setSessionId(sessionId)
 
-    // 清理上一轮的全局数据存储
+    // 清理上一轮的全局数据存储（保留 PayloadStore 数据供跨对话引用）
     this.globalDataStore.clear()
+    this.payloadStoreAdapter.clearSessionData()
 
     // 启动工具录制
     if (this.toolRecordingService) {
@@ -241,6 +242,9 @@ class AgentService {
           console.warn('[AgentService] 续传快照停止失败（非致命）:', e.message)
         }
       }
+
+      // 刷盘 PayloadStore 残留脏数据
+      try { await this.payloadStore.flush() } catch (e) { /* 非致命 */ }
 
       console.log(`[AgentService] Agent 结束: tabId=${tabId}, 总轮次=${finalState?.totalRounds || 0}, 总工具调用=${finalState?.totalToolCalls || 0}`)
     }

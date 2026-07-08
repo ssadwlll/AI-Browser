@@ -583,27 +583,11 @@ function registerIpcHandlers() {
     }
   })
 
-  // --- 统一 AI 工具调用 ---
-  const SYSTEM_PROMPT_UNIFIED = `你是一个强大的AI浏览器助手。你可以通过调用工具来与浏览器页面交互，帮助用户完成各种任务。
-
-## 可用工具
-- collect_page_context: 收集当前页面的URL、标题、DOM结构
-- execute_js: 在页面中执行JavaScript代码（操作DOM、提取数据、注入脚本等）
-- get_network_requests: 获取页面捕获的网络请求数据
-- navigate_to: 导航浏览器到指定URL
-- extract_page_scripts: 提取页面加载的JavaScript脚本信息
-- get_page_html: 获取页面HTML源代码
-- screenshot: 对当前页面截图
-
-## 工作原则
-1. 根据用户需求自主决定调用哪些工具，可以连续多次调用
-2. 需要了解页面时，先调用 collect_page_context
-3. 需要操作页面或提取数据时，调用 execute_js
-4. 需要分析API接口时，调用 get_network_requests
-5. 每次执行JS后，根据结果决定是否需要继续操作
-6. 如果代码导致页面导航，系统会自动等待新页面加载
-7. 操作完成后给出清晰的总结
-8. 如果用户只是普通对话，不需要调用工具，直接回复即可`
+  // --- 普通对话模式系统提示词（与插件版一致，纯文本对话不带工具） ---
+  const SYSTEM_PROMPT_CHAT = `你是一个AI浏览器助手。你可以回答用户的各种问题，包括页面内容分析、信息搜索、文本处理等。
+系统会自动将当前页面的上下文信息拼接到用户消息中，你可以基于这些信息回答问题。
+如果用户需要复杂的页面操作或批量数据采集，建议切换到Agent模式。
+请用中文回答。`
 
   let unifiedAbortFlag = false
 
@@ -744,7 +728,7 @@ function registerIpcHandlers() {
           if (dataStr === '[DONE]') {
             if (Object.keys(toolCallsAccum).length > 0) {
               const toolCalls = Object.values(toolCallsAccum).sort((a, b) => (a.index || 0) - (b.index || 0))
-              yield { type: 'tool_calls', tool_calls }
+              yield { type: 'tool_calls', tool_calls: toolCalls }
             }
             return
           }
@@ -788,223 +772,140 @@ function registerIpcHandlers() {
       // 流结束但没收到 [DONE]，检查是否有累积的 tool_calls
       if (Object.keys(toolCallsAccum).length > 0) {
         const toolCalls = Object.values(toolCallsAccum).sort((a, b) => (a.index || 0) - (b.index || 0))
-        yield { type: 'tool_calls', tool_calls }
+        yield { type: 'tool_calls', tool_calls: toolCalls }
       }
     } finally {
       clearTimeout(timeoutId)
     }
   }
 
-  ipcMain.handle('ai:unified-chat', async (event, { messages, config, maxToolRounds }) => {
+  // ============ 普通对话模式（与插件版一致：纯文本流式对话，不带工具） ============
+  // 插件版普通模式：将页面上下文拼到消息中，单次 API 调用，流式输出
+  // 不使用 Function Calling，如需工具操作请切换到 Agent 模式
+
+  ipcMain.handle('ai:unified-chat', async (event, { messages, config }) => {
     try {
       unifiedAbortFlag = false
-      const maxRounds = maxToolRounds || 20
-      let currentMessages = [
-        { role: 'system', content: SYSTEM_PROMPT_UNIFIED },
-        ...messages,
+
+      // 自动注入当前页面上下文到最后一条用户消息
+      let enrichedMessages = await _enrichWithPageContext(messages)
+
+      const currentMessages = [
+        { role: 'system', content: SYSTEM_PROMPT_CHAT },
+        ...enrichedMessages,
       ]
 
       safeSend('unified:start', {})
 
-      // 从 config 中提取模型（UI 传入选中的模型）
       const chatOpts = {
         model: config?.model,
         temperature: config?.temperature,
         maxTokens: config?.maxTokens,
-        tools: TOOL_DEFINITIONS,
+        // 普通模式不带 tools，纯文本对话
       }
 
-      for (let round = 0; round < maxRounds; round++) {
-        if (unifiedAbortFlag) {
-          safeSend('unified:done', { success: false, summary: '已中止' })
-          return { success: false, summary: '已中止' }
-        }
-
-        const aiMessage = await proxyChat(currentMessages, chatOpts)
-
-        if (!aiMessage.tool_calls || aiMessage.tool_calls.length === 0) {
-          const content = aiMessage.content || ''
-          safeSend('unified:final-reply', { content })
-          safeSend('unified:done', { success: true, summary: content.substring(0, 200) })
-          return { success: true, content }
-        }
-
-        currentMessages.push(aiMessage)
-
-        for (const toolCall of aiMessage.tool_calls) {
-          if (unifiedAbortFlag) break
-
-          const toolName = toolCall.function.name
-          let toolArgs = {}
-          try { toolArgs = JSON.parse(toolCall.function.arguments || '{}') } catch (e) {}
-
-          safeSend('unified:tool-call', { round: round + 1, toolName, toolArgs, callId: toolCall.id })
-
-          const toolResult = await toolExecutor.execute(toolName, toolArgs, {
-            browserView: tabManager.getActiveBrowserView(),
-            analyzer,
-            actionExecutor,
-            tabManager: {
-              createTab: (url) => tabManager.createTab(url),
-              closeTab: (id) => tabManager.closeTab(id),
-              getActiveTabId: () => tabManager.activeTabId,
-            },
-          })
-
-          safeSend('unified:tool-result', {
-            round: round + 1, toolName, success: toolResult.success,
-            result: toolResult.result, error: toolResult.error,
-            description: toolResult.description, callId: toolCall.id,
-            loopWarning: toolResult.loopWarning || undefined,
-          })
-
-          // 将工具结果反馈给AI，包含循环检测警告
-          const toolContent = toolResult.success
-            ? JSON.stringify(toolResult.result)
-            : JSON.stringify({ error: toolResult.error })
-
-          currentMessages.push({
-            role: 'tool',
-            tool_call_id: toolCall.id,
-            content: toolResult.loopWarning
-              ? toolContent + '\n\n' + toolResult.loopWarning
-              : toolContent,
-          })
-        }
-      }
-
-      safeSend('unified:done', { success: false, summary: `已达到最大工具调用轮次 (${maxRounds})` })
-      return { success: false, summary: '达到最大轮次' }
+      const aiMessage = await proxyChat(currentMessages, chatOpts)
+      const content = aiMessage.content || ''
+      safeSend('unified:final-reply', { content })
+      safeSend('unified:done', { success: true, summary: content.substring(0, 200) })
+      return { success: true, content }
     } catch (e) {
       safeSend('unified:done', { success: false, summary: e.message, error: e.message })
       return { success: false, error: e.message }
     }
   })
 
-  ipcMain.handle('ai:unified-chat-stream', async (event, { messages, config, maxToolRounds }) => {
+  ipcMain.handle('ai:unified-chat-stream', async (event, { messages, config }) => {
     try {
       unifiedAbortFlag = false
-      const maxRounds = maxToolRounds || 20
-      let currentMessages = [
-        { role: 'system', content: SYSTEM_PROMPT_UNIFIED },
-        ...messages,
+
+      // 自动注入当前页面上下文到最后一条用户消息
+      let enrichedMessages = await _enrichWithPageContext(messages)
+
+      const currentMessages = [
+        { role: 'system', content: SYSTEM_PROMPT_CHAT },
+        ...enrichedMessages,
       ]
 
       safeSend('unified:start', {})
 
-      // 从 config 中提取模型（UI 传入选中的模型）
       const chatOpts = {
         model: config?.model,
         temperature: config?.temperature,
         maxTokens: config?.maxTokens,
-        tools: TOOL_DEFINITIONS,
+        // 普通模式不带 tools，纯文本对话
       }
 
-      for (let round = 0; round < maxRounds; round++) {
-        if (unifiedAbortFlag) {
-          safeSend('unified:done', { success: false, summary: '已中止' })
-          return { success: false, summary: '已中止' }
+      let fullContent = ''
+      safeSend('unified:thinking', { round: 1 })
+
+      const stream = proxyChatStream(currentMessages, chatOpts)
+      for await (const item of stream) {
+        if (unifiedAbortFlag) break
+        if (item.type === 'content') {
+          fullContent += item.content
+          safeSend('unified:stream-chunk', { chunk: item.content })
         }
-
-        let fullContent = ''
-        let toolCallsAccum = {}
-        let hasToolCalls = false
-
-        safeSend('unified:thinking', { round: round + 1 })
-
-        // 添加超时保护
-        const streamPromise = (async () => {
-          const stream = proxyChatStream(currentMessages, chatOpts)
-          for await (const item of stream) {
-            if (unifiedAbortFlag) break
-            if (item.type === 'content') {
-              fullContent += item.content
-              safeSend('unified:stream-chunk', { chunk: item.content })
-            } else if (item.type === 'tool_calls' || item.type === 'tool_call') {
-              hasToolCalls = true
-              const calls = item.tool_calls || [item.tool_call]
-              for (const tc of calls) {
-                const idx = tc.index ?? 0
-                toolCallsAccum[idx] = tc
-              }
-            }
-          }
-        })()
-
-        // 设置单轮超时（5分钟）
-        const timeoutPromise = new Promise((_, reject) => {
-          setTimeout(() => reject(new Error('AI响应超时（5分钟），请检查网络连接或API配置')), 300000)
-        })
-
-        try {
-          await Promise.race([streamPromise, timeoutPromise])
-        } catch (err) {
-          throw err
-        }
-
-        if (unifiedAbortFlag) {
-          safeSend('unified:done', { success: false, summary: '已中止' })
-          return { success: false, summary: '已中止' }
-        }
-
-        if (!hasToolCalls || Object.keys(toolCallsAccum).length === 0) {
-          safeSend('unified:final-reply', { content: fullContent })
-          safeSend('unified:done', { success: true, summary: fullContent.substring(0, 200) })
-          return { success: true, content: fullContent }
-        }
-
-        const assistantMsg = {
-          role: 'assistant',
-          content: fullContent || null,
-          tool_calls: Object.values(toolCallsAccum).sort((a, b) => (a.index ?? 0) - (b.index ?? 0)),
-        }
-        currentMessages.push(assistantMsg)
-
-        for (const toolCall of assistantMsg.tool_calls) {
-          if (unifiedAbortFlag) break
-
-          const toolName = toolCall.function.name
-          let toolArgs = {}
-          try { toolArgs = JSON.parse(toolCall.function.arguments || '{}') } catch (e) {}
-
-          safeSend('unified:tool-call', { round: round + 1, toolName, toolArgs, callId: toolCall.id })
-
-          const toolResult = await toolExecutor.execute(toolName, toolArgs, {
-            browserView: tabManager.getActiveBrowserView(),
-            analyzer,
-            actionExecutor,
-          })
-
-          safeSend('unified:tool-result', {
-            round: round + 1, toolName, success: toolResult.success,
-            result: toolResult.result, error: toolResult.error,
-            description: toolResult.description, callId: toolCall.id,
-            loopWarning: toolResult.loopWarning || undefined,
-          })
-
-          // 将工具结果反馈给AI，包含循环检测警告
-          const toolContent = toolResult.success
-            ? JSON.stringify(toolResult.result)
-            : JSON.stringify({ error: toolResult.error })
-
-          currentMessages.push({
-            role: 'tool',
-            tool_call_id: toolCall.id,
-            content: toolResult.loopWarning
-              ? toolContent + '\n\n' + toolResult.loopWarning
-              : toolContent,
-          })
-        }
+        // 忽略 tool_calls（普通模式不处理工具调用）
       }
 
-      safeSend('unified:done', { success: false, summary: `已达到最大工具调用轮次 (${maxRounds})` })
-      return { success: false, summary: '达到最大轮次' }
+      if (unifiedAbortFlag) {
+        safeSend('unified:done', { success: false, summary: '已中止' })
+        return { success: false, summary: '已中止' }
+      }
+
+      safeSend('unified:final-reply', { content: fullContent })
+      safeSend('unified:done', { success: true, summary: fullContent.substring(0, 200) })
+      return { success: true, content: fullContent }
     } catch (e) {
       console.error('AI调用错误:', e)
       safeSend('unified:done', { success: false, summary: e.message, error: e.message })
       return { success: false, error: e.message }
     }
   })
+
+  /**
+   * 将当前页面上下文拼接到最后一条用户消息中（与插件版一致）
+   * 插件版做法：`lastUserContent = text + (pageContext || '')`
+   */
+  async function _enrichWithPageContext(messages) {
+    const enriched = [...messages]
+    try {
+      const bv = tabManager.getActiveBrowserView()
+      if (bv && bv.webContents && !bv.webContents.isDestroyed()) {
+        const pageData = await bv.webContents.executeJavaScript(`(() => {
+          const getText = (el) => {
+            if (!el) return '';
+            const parts = [];
+            for (const node of el.querySelectorAll('h1,h2,h3,p,li,td,th,span,div,a,article,section')) {
+              const t = (node.innerText || node.textContent || '').trim();
+              if (t && t.length > 2) parts.push(t.slice(0, 200));
+            }
+            return parts.join(' ').slice(0, 3000);
+          };
+          return { title: document.title || '', url: location.href || '', content: getText(document.body) };
+        })()`)
+        if (pageData && pageData.content) {
+          const pageContext = `\n\n[当前页面] 标题: ${pageData.title || '无标题'} | URL: ${pageData.url || ''}\n页面内容: ${pageData.content}`
+          // 找到最后一条用户消息并追加页面上下文
+          for (let i = enriched.length - 1; i >= 0; i--) {
+            if (enriched[i].role === 'user') {
+              const origContent = typeof enriched[i].content === 'string'
+                ? enriched[i].content
+                : Array.isArray(enriched[i].content)
+                  ? enriched[i].content.find(c => c.type === 'text')?.text || ''
+                  : ''
+              enriched[i] = { ...enriched[i], content: origContent + pageContext }
+              break
+            }
+          }
+        }
+      }
+    } catch (e) {
+      // 页面内容获取失败不影响对话
+    }
+    return enriched
+  }
 
   ipcMain.handle('ai:unified-abort', async () => {
     unifiedAbortFlag = true
@@ -1459,6 +1360,37 @@ app.whenReady().then(() => {
   // 注册标签切换回调 → 重新设置BrowserView bounds
   tabManager.onTabSwitch(() => {
     resizeBrowserView()
+  })
+
+  // 划词/右键AI操作：从 BrowserView 接收操作，转发到面板
+  tabManager.onSelectionAction((action, text) => {
+    // 构造与 Chrome 扩展版一致的提示词
+    const pagePrompts = {
+      summarize: '总结当前页面内容',
+      translate: '翻译当前页面为中文',
+    }
+    const selectionPrompts = {
+      explain: '请解释以下内容：\n\n',
+      translate: '请将以下内容翻译为中文：\n\n',
+      rewrite: '请改写以下内容：\n\n',
+      summarize: '请总结以下内容要点：\n\n',
+    }
+    let fullMessage
+    if (!text && pagePrompts[action]) {
+      fullMessage = pagePrompts[action]
+    } else {
+      const prompt = selectionPrompts[action] || '请分析以下内容：\n\n'
+      fullMessage = prompt + text
+    }
+    // 发送到面板，面板监听 panel:external-message 事件后自动发送
+    safeSend('panel:external-message', { message: fullMessage })
+  })
+
+  // 接收 BrowserView 中划词工具栏的操作
+  ipcMain.on('browser:selection-action', (event, { action, text }) => {
+    if (tabManager._onSelectionActionCb) {
+      tabManager._onSelectionActionCb(action, text)
+    }
   })
 
   registerIpcHandlers()

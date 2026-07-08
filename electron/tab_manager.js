@@ -13,6 +13,7 @@ class TabManager {
     this.tabIdCounter = 0
     this.onPageLoadCallback = null  // 页面加载完成回调（用于自动注入）
     this.onTabSwitchCallback = null // 标签切换回调（用于重新设置bounds）
+    this._onSelectionActionCb = null   // 划词/右键AI操作回调
   }
 
   /**
@@ -85,6 +86,127 @@ class TabManager {
     }
   }
 
+  // ============ 划词/右键AI操作 ============
+
+  /**
+   * 注册划词/右键AI操作回调
+   * @param {Function} callback - (action, text) => void
+   */
+  onSelectionAction(callback) {
+    this._onSelectionActionCb = callback
+  }
+
+  _handleSelectionAction(action, text) {
+    if (this._onSelectionActionCb) {
+      this._onSelectionActionCb(action, text)
+    }
+  }
+
+  /**
+   * 向 BrowserView 注入划词工具栏脚本
+   * 通过 webContents.executeJavaScript 在页面上下文中执行
+   */
+  _injectSelectionToolbar(wc) {
+    const selectionToolbarCode = `
+      (function() {
+        if (window.__aiBrowserSelectionToolbar) return;
+        window.__aiBrowserSelectionToolbar = true;
+
+        const TOOLS = [
+          { id: 'explain', label: '解释', prompt: '请解释以下内容：\\n\\n' },
+          { id: 'translate', label: '翻译', prompt: '请将以下内容翻译为中文：\\n\\n' },
+          { id: 'rewrite', label: '改写', prompt: '请改写以下内容：\\n\\n' },
+          { id: 'summarize', label: '摘要', prompt: '请总结以下内容要点：\\n\\n' },
+        ];
+
+        let toolbar = null;
+
+        document.addEventListener('mouseup', function(e) {
+          setTimeout(function() {
+            try {
+              var selection = window.getSelection();
+              var text = selection ? selection.toString().trim() : '';
+              if (!text || text.length < 3) {
+                removeToolbar();
+                return;
+              }
+              if (!selection.rangeCount) {
+                removeToolbar();
+                return;
+              }
+              var range = selection.getRangeAt(0);
+              var rect = range.getBoundingClientRect();
+              if (!rect || rect.width === 0) {
+                removeToolbar();
+                return;
+              }
+              showToolbar(rect, text);
+            } catch (err) {
+              removeToolbar();
+            }
+          }, 100);
+        });
+
+        document.addEventListener('mousedown', function(e) {
+          if (toolbar && !toolbar.contains(e.target)) {
+            removeToolbar();
+          }
+        });
+
+        function showToolbar(rect, text) {
+          removeToolbar();
+          var host = document.createElement('div');
+          host.id = 'ai-browser-selection-host';
+          var shadow = host.attachShadow({ mode: 'closed' });
+
+          shadow.innerHTML = \`
+            <style>
+              .toolbar{position:fixed;z-index:2147483647;background:#fff;border:1px solid rgba(79,89,102,0.10);border-radius:10px;padding:6px;display:flex;gap:2px;box-shadow:0 4px 16px rgba(0,0,0,0.10),0 2px 8px rgba(0,0,0,0.04);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC',sans-serif;animation:toolbarIn .2s cubic-bezier(.4,0,.2,1)}
+              @keyframes toolbarIn{from{opacity:0;transform:translateY(4px) scale(.96)}to{opacity:1;transform:translateY(0) scale(1)}}
+              .toolbar button{background:none;border:none;padding:7px 12px;border-radius:7px;cursor:pointer;font-size:12px;font-weight:500;color:#1a1a2e;white-space:nowrap;transition:all .2s}
+              .toolbar button:hover{background:rgba(104,65,234,0.08);color:#6841ea}
+              .toolbar button:active{background:rgba(104,65,234,0.16);transform:scale(.95)}
+            </style>
+            <div class="toolbar">
+              \${TOOLS.map(function(t){ return '<button data-id="' + t.id + '">' + t.label + '</button>'; }).join('')}
+            </div>
+          \`;
+
+          var toolbarEl = shadow.querySelector('.toolbar');
+          toolbarEl.style.top = (rect.top + window.scrollY - 44) + 'px';
+          toolbarEl.style.left = (rect.left + window.scrollX + rect.width / 2 - 120) + 'px';
+
+          shadow.querySelectorAll('button').forEach(function(btn) {
+            btn.addEventListener('click', function(e) {
+              e.preventDefault();
+              var tool = TOOLS.find(function(t) { return t.id === btn.dataset.id; });
+              if (tool && window.browserAPI && window.browserAPI.selectionAction) {
+                window.browserAPI.selectionAction(tool.id, text);
+              }
+              removeToolbar();
+            });
+          });
+
+          document.body.appendChild(host);
+          toolbar = host;
+        }
+
+        function removeToolbar() {
+          if (toolbar) {
+            toolbar.remove();
+            toolbar = null;
+          }
+        }
+      })();
+    `
+
+    try {
+      wc.executeJavaScript(selectionToolbarCode)
+    } catch (e) {
+      console.warn('[TabManager] 注入划词工具栏失败:', e.message)
+    }
+  }
+
   // ============ 上下文菜单 ============
 
   buildContextMenu(tab, params) {
@@ -112,6 +234,19 @@ class TabManager {
 
     if (hasSelection) {
       menuItems.push({ label: '复制', role: 'copy', accelerator: 'Ctrl+C' })
+      menuItems.push({ type: 'separator' })
+      // AI 划词操作
+      menuItems.push({ label: 'AI 解释选中文字', click: () => this._handleSelectionAction('explain', params.selectionText) })
+      menuItems.push({ label: 'AI 翻译选中文字', click: () => this._handleSelectionAction('translate', params.selectionText) })
+      menuItems.push({ label: 'AI 改写选中文字', click: () => this._handleSelectionAction('rewrite', params.selectionText) })
+      menuItems.push({ label: 'AI 总结选中文字', click: () => this._handleSelectionAction('summarize', params.selectionText) })
+      menuItems.push({ type: 'separator' })
+    }
+
+    // AI 页面级操作（无选中文本时也可用）
+    if (!hasSelection) {
+      menuItems.push({ label: 'AI 总结此页面', click: () => this._handleSelectionAction('summarize', '') })
+      menuItems.push({ label: 'AI 翻译此页面', click: () => this._handleSelectionAction('translate', '') })
       menuItems.push({ type: 'separator' })
     }
 
@@ -180,10 +315,14 @@ class TabManager {
         tab.loading = false
         self._sendTabUpdated(tab)
         self._sendNavStateUpdated(tab)
+        const currentUrl = tab.browserView.webContents.getURL()
         // 触发页面加载完成回调（用于自动注入脚本）
         if (self.onPageLoadCallback) {
-          const url = tab.browserView.webContents.getURL()
-          self.onPageLoadCallback(tab.browserView, url)
+          self.onPageLoadCallback(tab.browserView, currentUrl)
+        }
+        // 注入划词工具栏（仅对 http/https 页面）
+        if (currentUrl && (currentUrl.startsWith('http://') || currentUrl.startsWith('https://'))) {
+          self._injectSelectionToolbar(tab.browserView.webContents)
         }
       },
       onFaviconUpdated: (event, favicons) => {

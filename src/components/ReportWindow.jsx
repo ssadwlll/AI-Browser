@@ -247,7 +247,7 @@ function HtmlReportIframe({ htmlContent }) {
       <iframe
         ref={iframeRef}
         className="rw-html-iframe"
-        sandbox="allow-same-origin"
+        sandbox="allow-same-origin allow-popups allow-top-navigation"
         srcDoc={wrappedHtml}
         onLoad={handleLoad}
         title="html-report"
@@ -311,7 +311,7 @@ function TemplateReportIframe({ template, mappedData }) {
       <iframe
         ref={iframeRef}
         className="rw-html-iframe"
-        sandbox="allow-same-origin"
+        sandbox="allow-same-origin allow-popups allow-top-navigation"
         srcDoc={wrappedHtml}
         onLoad={handleLoad}
         title="template-report"
@@ -485,8 +485,25 @@ export default function ReportWindow() {
     return () => { if (unsubData) unsubData() }
   }, [])
 
-  const handleClose = () => {
-    window.api?.reportWindow?.close()
+  const handleClose = async () => {
+    console.log('[ReportWindow] handleClose 被调用')
+
+    // 多层兜底：IPC → window.close()
+    try {
+      if (window.api?.closeReportWindow) {
+        await window.api.closeReportWindow()
+      } else if (window.api?.reportWindow?.close) {
+        await window.api.reportWindow.close()
+      }
+    } catch (e) {
+      console.error('[ReportWindow] IPC 关闭失败:', e)
+    }
+
+    // IPC 仍未关闭则直接调用 window.close()
+    if (!window.closed) {
+      console.log('[ReportWindow] 兜底调用 window.close()')
+      window.close()
+    }
   }
 
   const items = reportData?.items || []

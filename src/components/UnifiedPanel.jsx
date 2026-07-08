@@ -1078,11 +1078,15 @@ export default function UnifiedPanel({ config }) {
           // 流式追加文本（Agent v2 流式回复）
           const chunk = data?.content || ''
           if (!agentStreamIdRef.current) {
-            const id = addMessage({ role: 'assistant', type: 'reply', content: '' })
+            const id = addMessage({ role: 'assistant', type: 'reply', content: chunk })
             agentStreamIdRef.current = id
+            break
           }
+          // ★ 关键修复：用局部变量捕获 id，避免 React 18 批处理时
+          // streamDone 同步重置 agentStreamIdRef.current = null 导致更新函数找不到目标消息
+          const targetId = agentStreamIdRef.current
           setMessages(prev => prev.map(m => {
-            if (m.id !== agentStreamIdRef.current) return m
+            if (m.id !== targetId) return m
             return { ...m, content: (m.content || '') + chunk }
           }))
           break
@@ -1090,8 +1094,10 @@ export default function UnifiedPanel({ config }) {
         case 'streamDone': {
           // 流式完成：将回复加入对话历史，重置流式引用
           if (agentStreamIdRef.current) {
+            // ★ 用局部变量捕获 id，避免 React 批处理时 ref 已被重置
+            const doneId = agentStreamIdRef.current
             setMessages(prev => {
-              const msg = prev.find(m => m.id === agentStreamIdRef.current)
+              const msg = prev.find(m => m.id === doneId)
               if (msg?.content) {
                 chatHistoryRef.current.push({ role: 'assistant', content: msg.content })
               }
@@ -1138,6 +1144,104 @@ export default function UnifiedPanel({ config }) {
       if (typeof unsubscribeDone === 'function') unsubscribeDone()
     }
   }, [addMessage, updateMessage, insertMessageBefore])
+
+  // ============ 监听外部消息（划词/右键AI操作）============
+  useEffect(() => {
+    if (!window.api?.onExternalMessage) return
+
+    const unsubscribe = window.api.onExternalMessage((data) => {
+      const msg = data?.message
+      if (!msg || loading) return
+      // 设置输入框内容并自动发送
+      setInput('')
+      addMessage({ role: 'user', content: msg })
+      chatHistoryRef.current.push({ role: 'user', content: msg })
+      // 直接触发发送（避免 loading 状态干扰）
+      handleSendExternal(msg)
+    })
+
+    return () => {
+      if (typeof unsubscribe === 'function') unsubscribe()
+    }
+  }, [addMessage, loading])
+
+  // 外部消息发送（不依赖 input 状态，直接使用传入的消息文本）
+  const handleSendExternal = async (msg) => {
+    if (!msg || loading) return
+
+    if (!activeSessionId) {
+      setActiveSessionId(createSessionId())
+    }
+
+    setLoading(true)
+
+    if (agentMode) {
+      agentStatusIdRef.current = null
+      agentThinkingIdRef.current = null
+      agentStepIdsRef.current = {}
+      agentStreamIdRef.current = null
+      agentUserMessageRef.current = msg
+
+      try {
+        const modelInfo = currentModelInfo ? {
+          modelId: currentModelInfo.modelId,
+          temperature: currentModelInfo.temperature,
+          contextWindow: currentModelInfo.contextWindow,
+          maxTokens: currentModelInfo.maxTokens,
+          supportsTools: currentModelInfo.supportsTools,
+          supportsVision: currentModelInfo.supportsVision,
+        } : { temperature: 0.7, maxTokens: 4096 }
+
+        const startRes = await window.api.agent2.start({
+          tabId: null,
+          userMessage: msg,
+          chatHistory: chatHistoryRef.current,
+          modelInfo,
+        })
+        if (startRes && startRes.success === false) {
+          addMessage({
+            role: 'assistant', type: 'error',
+            content: `Agent 启动失败: ${startRes.error || '未知错误'}`,
+          })
+          if (chatHistoryRef.current[chatHistoryRef.current.length - 1]?.content === msg) {
+            chatHistoryRef.current.pop()
+          }
+          setLoading(false)
+        }
+      } catch (e) {
+        addMessage({ role: 'assistant', type: 'error', content: `Agent 异常: ${e.message || '请求失败'}` })
+        if (chatHistoryRef.current[chatHistoryRef.current.length - 1]?.content === msg) {
+          chatHistoryRef.current.pop()
+        }
+        setLoading(false)
+      }
+      return
+    }
+
+    // 普通模式
+    try {
+      const mergedConfig = {
+        ...config,
+        model: currentModelInfo?.modelId || config.model,
+      }
+      const result = await window.api.unified.chatStream(
+        chatHistoryRef.current,
+        mergedConfig,
+        config.maxToolRounds || 20,
+      )
+      if (result && result.success === false) {
+        addMessage({
+          role: 'assistant',
+          type: 'error',
+          content: `错误: ${result.error || result.summary || '未知错误'}`
+        })
+      }
+    } catch (e) {
+      addMessage({ role: 'assistant', type: 'error', content: `错误: ${e.message || '请求失败'}` })
+    } finally {
+      setLoading(false)
+    }
+  }
 
   // ============ 发送消息 ============
 

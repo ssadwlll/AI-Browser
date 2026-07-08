@@ -50,6 +50,8 @@ contextBridge.exposeInMainWorld('api', {
       return () => ipcRenderer.removeListener('report:data', handler)
     },
   },
+  // 备用关闭方法（直接调用 IPC）
+  closeReportWindow: () => ipcRenderer.invoke('report-window:close'),
   // 标签页管理
   tabs: {
     create: (url) => ipcRenderer.invoke('tabs:create', { url }),
@@ -312,5 +314,11 @@ contextBridge.exposeInMainWorld('api', {
     clear: () => ipcRenderer.invoke('task-archive:clear'),
     search: (query) => ipcRenderer.invoke('task-archive:search', { query }),
     findSimilar: (archiveId) => ipcRenderer.invoke('task-archive:find-similar', { archiveId }),
+  },
+  // 外部消息监听（划词/右键AI操作）
+  onExternalMessage: (callback) => {
+    const handler = (e, data) => callback(data)
+    ipcRenderer.on('panel:external-message', handler)
+    return () => ipcRenderer.removeListener('panel:external-message', handler)
   },
 })

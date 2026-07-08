@@ -85,11 +85,16 @@ function _getTemplateList() {
  */
 function filterScripts(searchResults, currentPageUrl, scriptService, filteredScriptsCache, domainMismatchLogged) {
   if (!searchResults || searchResults.length === 0) return []
+  console.log(`[filterScripts] 输入 ${searchResults.length} 个脚本, 当前URL: ${currentPageUrl?.slice(0, 60) || '无'}`)
   const result = []
   for (const s of searchResults.slice(0, 12)) {
+    if (!s) continue // 过滤 null/undefined 元素
     if (result.length >= 6) break
-    if (s.urlPattern && s.urlPattern !== '*' && currentPageUrl) {
-      if (!scriptService.matchUrl(s.urlPattern, currentPageUrl)) {
+    // 如果 scriptService 不可用，跳过 urlPattern 匹配（降级为全部接受）
+    if (s.urlPattern && s.urlPattern !== '*' && currentPageUrl && scriptService?.matchUrl) {
+      const matched = scriptService.matchUrl(s.urlPattern, currentPageUrl)
+      console.log(`[filterScripts] 脚本${s.id} "${s.name}" urlPattern="${s.urlPattern}" matched=${matched}`)
+      if (!matched) {
         const msgKey = `${s.id}_${currentPageUrl || '__no_url__'}`
         if (!domainMismatchLogged.has(msgKey)) {
           domainMismatchLogged.add(msgKey)
@@ -98,8 +103,10 @@ function filterScripts(searchResults, currentPageUrl, scriptService, filteredScr
         continue
       }
     }
+    console.log(`[filterScripts] 脚本${s.id} "${s.name}" 已通过过滤`)
     result.push(s)
   }
+  console.log(`[filterScripts] 输出 ${result.length} 个脚本: ${result.map(s => `inject_script_${s.id}`).join(', ')}`)
   return result
 }
 

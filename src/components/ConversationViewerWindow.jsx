@@ -366,13 +366,24 @@ export default function ConversationViewerWindow() {
     }
   }, [showToast])
 
-  // 事件监听：conversationRound / conversationClear / conversationTaskDone
+  // 事件监听：conversationRound / conversationToolResult / conversationClear / conversationTaskDone
   useEffect(() => {
     if (!window.api?.agent2?.onEvent) return
     const handleEvent = (channel, data) => {
       switch (channel) {
         case 'conversationRound':
           setRounds((prev) => [...prev, data])
+          break
+        case 'conversationToolResult':
+          // 实时追加工具结果到对应轮次
+          setRounds((prev) => {
+            const roundIndex = prev.findIndex(r => r.round === data.round)
+            if (roundIndex === -1) return prev // 未找到对应轮次，忽略
+            const round = prev[roundIndex]
+            const updatedToolResults = [...(round.toolResults || []), data.toolResult]
+            const updatedRound = { ...round, toolResults: updatedToolResults }
+            return [...prev.slice(0, roundIndex), updatedRound, ...prev.slice(roundIndex + 1)]
+          })
           break
         case 'conversationClear':
           setRounds([])

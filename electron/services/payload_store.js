@@ -33,6 +33,9 @@ class PayloadStore {
     this._sessionId = null
     // 最大条目数
     this._maxEntries = 200
+    // 延迟持久化：避免每次 add() 都写文件
+    this._persistTimer = null
+    this._dirty = false
   }
 
   // ===== Session 管理 =====
@@ -73,15 +76,40 @@ class PayloadStore {
   }
 
   /**
-   * 持久化到 StorageService
+   * 持久化到 StorageService（立即执行）
    * Map 转为 [key, entry] 数组以支持 JSON 序列化
    */
-  async _persist() {
+  async _persistNow() {
     const data = { sessions: {}, usedChars: this._usedChars }
     for (const sessionId of Object.keys(this.sessions)) {
       data.sessions[sessionId] = Array.from(this.sessions[sessionId].entries())
     }
     await StorageService.set(STORAGE_KEY, data)
+  }
+
+  /**
+   * 延迟持久化：标记脏位，2秒后批量写入（避免每次 add() 都写文件）
+   */
+  _persist() {
+    this._dirty = true
+    if (this._persistTimer) clearTimeout(this._persistTimer)
+    this._persistTimer = setTimeout(async () => {
+      if (this._dirty) {
+        this._dirty = false
+        try { await this._persistNow() } catch (e) { console.warn('[PayloadStore] 延迟持久化失败:', e.message) }
+      }
+    }, 2000)
+  }
+
+  /**
+   * 强制刷盘（任务结束时调用）
+   */
+  async flush() {
+    if (this._persistTimer) { clearTimeout(this._persistTimer); this._persistTimer = null }
+    if (this._dirty) {
+      this._dirty = false
+      await this._persistNow()
+    }
   }
 
   /**
@@ -194,7 +222,7 @@ class PayloadStore {
     }
     map.clear()
     delete this.sessions[sessionId]
-    await this._persist()
+    await this._persistNow()
   }
 
   /**
@@ -204,6 +232,60 @@ class PayloadStore {
     this.sessions = {}
     this._usedChars = 0
     await StorageService.remove(STORAGE_KEY)
+  }
+
+  /**
+   * 清理旧会话数据（保留最近 maxSessions 个 session）
+   * 用于防止跨对话数据累积过多
+   * @param {number} maxSessions - 最多保留的会话数，默认 2
+   */
+  cleanupOldSessions(maxSessions = 2) {
+    // 收集所有 sessionId（从 entries 中提取）
+    const sessionIds = new Set(this.entries.map(e => e.sessionId))
+    if (sessionIds.size <= maxSessions) return
+
+    // 按时间戳排序，保留最新的 maxSessions 个
+    const sessionTimestamps = {}
+    for (const entry of this.entries) {
+      if (!sessionTimestamps[entry.sessionId]) {
+        sessionTimestamps[entry.sessionId] = entry.timestamp
+      } else {
+        sessionTimestamps[entry.sessionId] = Math.max(sessionTimestamps[entry.sessionId], entry.timestamp)
+      }
+    }
+
+    const sortedSessions = Object.entries(sessionTimestamps)
+      .sort((a, b) => b[1] - a[1])
+      .map(([sid]) => sid)
+
+    const toRemove = sortedSessions.slice(maxSessions)
+    if (toRemove.length === 0) return
+
+    // 清理旧 session 的 entries 和 _dataCache
+    const removeIds = new Set(toRemove)
+    const newEntries = []
+    const newDataCache = {}
+    let removedChars = 0
+
+    for (const entry of this.entries) {
+      if (removeIds.has(entry.sessionId)) {
+        removedChars += entry._dataChars || 0
+      } else {
+        newEntries.push(entry)
+      }
+    }
+
+    for (const [id, data] of Object.entries(this._dataCache)) {
+      const entry = this.entries.find(e => e.id === id)
+      if (entry && !removeIds.has(entry.sessionId)) {
+        newDataCache[id] = data
+      }
+    }
+
+    this.entries = newEntries
+    this._dataCache = newDataCache
+    this._usedChars = Math.max(0, this._usedChars - removedChars)
+    console.log(`[PayloadStore] 已清理 ${toRemove.length} 个旧会话: ${toRemove.join(', ')}，释放 ${removedChars} 字符`)
   }
 
   /**
