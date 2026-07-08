@@ -1924,6 +1924,9 @@ export default function UnifiedPanel({ config }) {
           <button className="toolbar-btn" onClick={() => window.api.scriptCenterWindow?.open()} title="打开脚本中心（独立窗口，浏览/下载/注入后台脚本）">
             脚本中心
           </button>
+          <button className="toolbar-btn" onClick={() => window.api.reverseWindow?.open()} title="打开逆向分析工具（网络捕获/JS分析/请求重放/AI逆向）">
+            逆向分析
+          </button>
           {/* Agent v2 模式切换按钮（激活态品牌紫色） */}
           <button
             className={`toolbar-btn agent-mode-btn ${agentMode ? 'active' : ''}`}

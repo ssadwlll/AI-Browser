@@ -64,6 +64,34 @@ contextBridge.exposeInMainWorld('api', {
     open: () => ipcRenderer.invoke('history-window:open'),
     close: () => ipcRenderer.invoke('history-window:close'),
   },
+  // 逆向分析窗口
+  reverseWindow: {
+    open: () => ipcRenderer.invoke('reverse-window:open'),
+    close: () => ipcRenderer.invoke('reverse-window:close'),
+  },
+  // 逆向分析 API
+  reverse: {
+    // 网络捕获
+    startCapture: () => ipcRenderer.invoke('reverse:start-capture'),
+    stopCapture: () => ipcRenderer.invoke('reverse:stop-capture'),
+    clearRequests: () => ipcRenderer.invoke('reverse:clear-requests'),
+    getRequests: (filter) => ipcRenderer.invoke('reverse:get-requests', filter || {}),
+    getRequestDetail: (requestId) => ipcRenderer.invoke('reverse:get-request-detail', { requestId }),
+    // 脚本抓取
+    extractScripts: () => ipcRenderer.invoke('reverse:extract-scripts'),
+    fetchScriptSource: (url) => ipcRenderer.invoke('reverse:fetch-script-source', { url }),
+    // 请求重放
+    replayRequest: (params) => ipcRenderer.invoke('reverse:replay-request', params),
+    // AI 分析
+    startAnalysis: (params) => ipcRenderer.invoke('reverse:start-analysis', params),
+    abortAnalysis: () => ipcRenderer.invoke('reverse:abort-analysis'),
+    // 事件监听（流式回复、步骤等）
+    onEvent: (callback) => {
+      const handler = (_e, { channel, data }) => callback(channel, data)
+      ipcRenderer.on('reverse:event', handler)
+      return () => ipcRenderer.removeListener('reverse:event', handler)
+    },
+  },
   // 数据报告窗口
   reportWindow: {
     show: (data) => ipcRenderer.invoke('report-window:show', data),

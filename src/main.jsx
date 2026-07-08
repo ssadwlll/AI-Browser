@@ -7,6 +7,7 @@ import ReportWindow from './components/ReportWindow.jsx'
 import SidebarWindow from './components/SidebarWindow.jsx'
 import HistoryWindow from './components/HistoryWindow.jsx'
 import ScriptCenterWindow from './components/ScriptCenterWindow.jsx'
+import ReverseWindow from './components/ReverseWindow.jsx'
 import './styles/main.css'
 
 // 根据 URL query 参数判断渲染哪个根组件
@@ -16,6 +17,7 @@ import './styles/main.css'
 // ?window=sidebar → 侧边栏分离窗口
 // ?window=history → 历史记录管理窗口
 // ?window=script-center → 脚本中心窗口
+// ?window=reverse → 逆向分析窗口
 // 其他 → 主应用
 const params = new URLSearchParams(window.location.search)
 const windowType = params.get('window')
@@ -54,6 +56,12 @@ if (windowType === 'feature-panels') {
   ReactDOM.createRoot(document.getElementById('root')).render(
     <React.StrictMode>
       <ScriptCenterWindow />
+    </React.StrictMode>
+  )
+} else if (windowType === 'reverse') {
+  ReactDOM.createRoot(document.getElementById('root')).render(
+    <React.StrictMode>
+      <ReverseWindow />
     </React.StrictMode>
   )
 } else {

@@ -601,6 +601,210 @@ function registerIpcHandlers() {
     return { success: true }
   })
 
+  // --- 逆向分析窗口（独立 BrowserWindow） ---
+  let reverseWindow = null
+  ipcMain.handle('reverse-window:open', async () => {
+    if (reverseWindow && !reverseWindow.isDestroyed()) {
+      if (reverseWindow.isMinimized()) reverseWindow.restore()
+      reverseWindow.focus()
+      return { success: true }
+    }
+    const [parentW, parentH] = mainWindow.getContentSize()
+    const [parentX, parentY] = mainWindow.getPosition()
+    const wWidth = 1000
+    const wHeight = 680
+    const wX = parentX + Math.floor((parentW - wWidth) / 2)
+    const wY = parentY + Math.floor((parentH - wHeight) / 2)
+
+    reverseWindow = new BrowserWindow({
+      width: wWidth, height: wHeight,
+      x: wX, y: wY,
+      parent: mainWindow,
+      frame: false,
+      resizable: true,
+      minimizable: false,
+      maximizable: false,
+      fullscreenable: false,
+      skipTaskbar: true,
+      alwaysOnTop: true,
+      backgroundColor: '#1a1a2e',
+      webPreferences: {
+        nodeIntegration: false,
+        contextIsolation: true,
+        preload: path.join(__dirname, 'preload.js'),
+      },
+    })
+
+    if (process.env.NODE_ENV === 'development') {
+      reverseWindow.loadURL('http://localhost:5173/?window=reverse')
+    } else {
+      reverseWindow.loadFile(path.join(__dirname, '../dist/index.html'), { query: { window: 'reverse' } })
+    }
+
+    reverseWindow.on('closed', () => { reverseWindow = null })
+    return { success: true }
+  })
+
+  ipcMain.handle('reverse-window:close', async () => {
+    if (reverseWindow && !reverseWindow.isDestroyed()) {
+      reverseWindow.close()
+      reverseWindow = null
+    }
+    return { success: true }
+  })
+
+  // --- 逆向分析 IPC ---
+  const networkCapture = require('./services/network_capture')
+  const { runReverseAnalysis } = require('./services/reverse_runner')
+  const PayloadStore = require('./services/payload_store')
+  let reversePayloadStore = null
+  let reverseRunnerState = null
+
+  // 发送事件到逆向窗口的辅助函数
+  const sendReverseEvent = (channel, data) => {
+    if (reverseWindow && !reverseWindow.isDestroyed()) {
+      reverseWindow.webContents.send('reverse:event', { channel, data })
+    }
+  }
+
+  ipcMain.handle('reverse:start-capture', async () => {
+    const bv = tabManager.getActiveBrowserView()
+    if (!bv) return { success: false, error: '无可用标签页' }
+    return await networkCapture.start(bv.webContents)
+  })
+
+  ipcMain.handle('reverse:stop-capture', async () => {
+    const bv = tabManager.getActiveBrowserView()
+    if (!bv) return { success: false, error: '无可用标签页' }
+    return await networkCapture.stop(bv.webContents)
+  })
+
+  ipcMain.handle('reverse:clear-requests', async () => {
+    const bv = tabManager.getActiveBrowserView()
+    if (!bv) return { success: false, error: '无可用标签页' }
+    return networkCapture.reset(bv.webContents)
+  })
+
+  ipcMain.handle('reverse:get-requests', async (event, filter) => {
+    const bv = tabManager.getActiveBrowserView()
+    if (!bv) return { success: false, error: '无可用标签页', requests: [] }
+    return networkCapture.getRequests(bv.webContents, filter || {})
+  })
+
+  ipcMain.handle('reverse:get-request-detail', async (event, { requestId }) => {
+    const bv = tabManager.getActiveBrowserView()
+    if (!bv) return { success: false, error: '无可用标签页' }
+    return networkCapture.getRequestDetail(bv.webContents, requestId)
+  })
+
+  ipcMain.handle('reverse:extract-scripts', async () => {
+    const bv = tabManager.getActiveBrowserView()
+    if (!bv) return { success: false, error: '无可用标签页' }
+    try {
+      const scripts = await bv.webContents.executeJavaScript(`
+        Array.from(document.querySelectorAll('script')).map(s => ({
+          src: s.src || '(inline)',
+          type: s.type || 'text/javascript',
+          content: s.src ? null : (s.textContent || '').substring(0, 5000),
+        }))
+      `)
+      return { success: true, scripts }
+    } catch (e) {
+      return { success: false, error: e.message }
+    }
+  })
+
+  ipcMain.handle('reverse:fetch-script-source', async (event, { url }) => {
+    if (!url) return { success: false, error: '缺少 url' }
+    const { fetchWithTimeout } = require('./services/utils')
+    try {
+      const response = await fetchWithTimeout(url, { method: 'GET' }, 30000)
+      const text = await response.text()
+      return { success: true, code: text.length > 50000 ? text.slice(0, 50000) : text, length: text.length, truncated: text.length > 50000 }
+    } catch (e) {
+      return { success: false, error: e.message }
+    }
+  })
+
+  ipcMain.handle('reverse:replay-request', async (event, params) => {
+    const { url, method, headers = {}, body, timeout = 30000 } = params
+    if (!url || !method) return { success: false, error: '缺少 url 或 method' }
+    const { fetchWithTimeout } = require('./services/utils')
+    try {
+      const options = { method: method.toUpperCase(), headers, timeout }
+      if (body && ['POST', 'PUT', 'PATCH'].includes(method.toUpperCase())) {
+        options.body = body
+      }
+      const response = await fetchWithTimeout(url, options, timeout)
+      const respText = await response.text()
+      const respHeaders = {}
+      response.headers.forEach((v, k) => { respHeaders[k] = v })
+      return {
+        success: true,
+        ok: true,
+        status: response.status,
+        statusText: response.statusText,
+        respHeaders,
+        body: respText.length > 20000 ? respText.slice(0, 20000) + '...[截断]' : respText,
+        bodyLength: respText.length,
+      }
+    } catch (e) {
+      return { success: false, error: e.message, ok: false }
+    }
+  })
+
+  ipcMain.handle('reverse:start-analysis', async (event, { userMessage, chatHistory }) => {
+    const bv = tabManager.getActiveBrowserView()
+    if (!bv) return { success: false, error: '无可用标签页' }
+
+    // 初始化 PayloadStore（懒加载）
+    if (!reversePayloadStore) {
+      reversePayloadStore = new PayloadStore()
+      await reversePayloadStore.init()
+    }
+
+    // 获取配置服务
+    const configService = require('./services/config_service')
+
+    // 获取当前选中模型
+    let modelInfo = {}
+    try {
+      const aiConfig = await configService.getAIConfig()
+      modelInfo = { modelId: aiConfig.model, temperature: aiConfig.temperature, maxTokens: aiConfig.maxTokens }
+    } catch {}
+
+    // 中止状态
+    reverseRunnerState = { _aborted: false }
+
+    // 异步启动分析
+    runReverseAnalysis({
+      webContents: bv.webContents,
+      tabId: tabManager.activeTabId,
+      userMessage,
+      chatHistory: chatHistory || [],
+      modelInfo,
+      configService,
+      payloadStore: reversePayloadStore,
+      sendEvent: sendReverseEvent,
+      _aborted: false,
+    }).then(result => {
+      console.log('[Reverse] 分析完成:', result)
+      sendReverseEvent('agentDone', result || {})
+    }).catch(err => {
+      console.error('[Reverse] 分析失败:', err)
+      sendReverseEvent('agentError', { error: err.message })
+    })
+
+    return { success: true }
+  })
+
+  ipcMain.handle('reverse:abort-analysis', async () => {
+    if (reverseRunnerState) {
+      reverseRunnerState._aborted = true
+    }
+    return { success: true }
+  })
+
   // --- 数据报告窗口（独立 BrowserWindow，Agent 完成时自动弹出） ---
   let reportWindow = null
   // 缓存最新的报告数据，供报告窗口加载时读取
