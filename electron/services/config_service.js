@@ -33,6 +33,7 @@ const DEFAULT_AGENT_CONFIG = {
   enableJudge: true,
   enablePlanning: true,
   debug: false,
+  fullDataMode: false,
 }
 
 // ============ ConfigService 对象 ============

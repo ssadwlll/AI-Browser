@@ -78,6 +78,7 @@ export default function SettingsPanel({ config, setConfig }) {
     debug: false,
     enableJudge: true,
     conversationViewer: false,
+    fullDataMode: false,
   })
 
   // ===== 保存提示 =====
@@ -136,6 +137,7 @@ export default function SettingsPanel({ config, setConfig }) {
           debug: d.debug === true,
           enableJudge: d.enableJudge !== false, // 默认开启
           conversationViewer: d.conversationViewer === true,
+          fullDataMode: d.fullDataMode === true,
         })
       }
       // 划词工具开关（默认开启）
@@ -202,6 +204,7 @@ export default function SettingsPanel({ config, setConfig }) {
         debug: agent.debug,
         enableJudge: agent.enableJudge,
         conversationViewer: agent.conversationViewer,
+        fullDataMode: agent.fullDataMode,
       })
       // 4. 保存后刷新应用设置与模型列表（用户可能刚填好 appKey/appSecret）
       try {
@@ -515,6 +518,18 @@ export default function SettingsPanel({ config, setConfig }) {
               if (v) window.api?.conversationWindow?.open()
               else window.api?.conversationWindow?.close()
             }}
+          />
+        </div>
+
+        {/* 全量数据模式 */}
+        <div className="toggle-row">
+          <span className="toggle-row-label">
+            全量数据模式
+            <span className="settings-hint-inline">开启后工具返回的全量数据直接发送给 AI，对话历史保存完整工具结果（消耗更多 Token）</span>
+          </span>
+          <Toggle
+            on={agent.fullDataMode}
+            onChange={(v) => setAgent({ ...agent, fullDataMode: v })}
           />
         </div>
       </div>

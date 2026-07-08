@@ -91,8 +91,9 @@ async function runJudge(configService, userMessage, agentSummary, executedTools)
  * @param {string} content - 助手回复内容
  * @param {Array} toolCalls - 工具调用列表 [{name, result}]
  */
-async function saveToChatHistoryStorage(content, toolCalls) {
+async function saveToChatHistoryStorage(content, toolCalls, options = {}) {
   try {
+    const { fullDataMode = false } = options
     const history = await StorageService.getChatHistory()
     const lastMsg = history[history.length - 1]
     if (lastMsg && lastMsg.role === 'assistant' && lastMsg.content === content) {
@@ -103,14 +104,22 @@ async function saveToChatHistoryStorage(content, toolCalls) {
     if (toolCalls && toolCalls.length > 0) {
       record.toolCalls = toolCalls.map(t => ({
         name: t.name,
-        summary: String(t.result || '').slice(0, 200),
+        // 全量模式：保存完整工具结果；摘要模式：仅 200 字符摘要
+        summary: fullDataMode
+          ? String(t.result || '').slice(0, 50000)
+          : String(t.result || '').slice(0, 200),
       }))
     }
     history.push(record)
     // 委托 StorageService.saveChatHistory 做条数(50)/字符(8000)双重截断
+    // 全量模式下放宽字符上限以保留完整工具结果
     // 带 attachments 的消息会被强制保留
-    await StorageService.saveChatHistory(history)
-    console.log('[Agent] chatHistory 已写入 storage, 长度:', content.length)
+    if (fullDataMode) {
+      await StorageService.saveChatHistory(history, { maxChars: 100000, maxItems: 50 })
+    } else {
+      await StorageService.saveChatHistory(history)
+    }
+    console.log(`[Agent] chatHistory 已写入 storage, 长度: ${content.length}, fullDataMode: ${fullDataMode}`)
   } catch (e) {
     console.error('[Agent] chatHistory 写入失败:', e)
   }

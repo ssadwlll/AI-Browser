@@ -138,9 +138,9 @@ async function getChatHistory() {
  * 中文约 1 字符 ≈ 1.5 token，目标控制在 ~8000 字符以内
  * 带 attachments（图片/PDF）的消息强制保留，不受字符截断影响
  */
-async function saveChatHistory(history) {
-  const MAX_CHARS = 8000
-  const MAX_ITEMS = 50
+async function saveChatHistory(history, options = {}) {
+  const MAX_CHARS = options.maxChars || 8000
+  const MAX_ITEMS = options.maxItems || 50
 
   return serialize(() => {
     const data = load()
@@ -152,6 +152,7 @@ async function saveChatHistory(history) {
     for (let i = trimmed.length - 1; i >= 0; i--) {
       const msg = trimmed[i]
       const charLen = (msg.content || '').length + (msg.role || '').length
+        + (msg.toolCalls ? JSON.stringify(msg.toolCalls).length : 0)
       totalChars += charLen
 
       // 带 attachments 的消息强制保留，不受字符截断影响

@@ -834,11 +834,13 @@ async function runAgent(ctx) {
   let maxRounds = backendMaxRounds
   let enableJudge = true
   let debug = false
+  let fullDataMode = false
   try {
     const agentCfg = await configService.getAgentConfig()
     if (!appSettings && agentCfg?.maxRounds >= 5) maxRounds = agentCfg.maxRounds
     enableJudge = agentCfg?.enableJudge !== false
     debug = agentCfg?.debug === true
+    fullDataMode = agentCfg?.fullDataMode === true
   } catch {}
 
   const _debugLog = (label, detail) => {
@@ -992,7 +994,62 @@ async function runAgent(ctx) {
 - 这些数据可供你参考和使用，无需重新执行页面操作
 - 完整数据可通过 finish_task(data_refs) 在最终输出中引用`
 
-  const systemPrompt = backendSystemPrompt || DEFAULT_SYSTEM_PROMPT
+  // 全量数据模式提示词
+  const FULL_DATA_MODE_PROMPT = `你是AI Browser智能体，一个能操作网页、调用脚本、整理数据的自主助手。
+
+=== 工作流程 ===
+1. 了解当前页面：使用 get_interactive_elements / read_page_content 获取页面概览（系统可能已自动注入页面内容，如有则直接使用）
+2. 规划任务：复杂任务调用 create_todo 创建待办列表；简单任务（1-2步可完成）直接执行，无需创建待办
+3. 按待办顺序执行工具操作，系统自动追踪进度
+4. 所有待办完成 → 调用 finish_task 汇报结果
+
+=== 工具使用策略 ===
+- DOM工具（extract_content、click_element等）：用于页面探索、简单数据提取、交互操作
+- inject_script_N：用于批量处理、深度数据采集（N是search_tools查到的脚本ID）
+- generate_script：动态生成代码执行任意JS逻辑（DOM操作/数据处理/同源fetch等）。代码运行在 async 函数体中，可直接 await；必须用 return 返回结果。受页面 CSP 限制（严格 CSP 站点会报 unsafe-eval 错误，此时改用 inject_script_N 或 DOM 工具）。返回 HTML 字符串时自动渲染为可视化报告
+- fetch_url：在主进程发起网络请求，突破 CORS 限制。跨域 fetch 用此工具，不要用 generate_script 中的 fetch
+- search_tools：搜索脚本库，查找可用的远程脚本
+- finish_task：完成所有任务后输出最终结果
+
+=== 脚本选择优先级（必须遵守） ===
+1. 优先查看系统注入的"当前可用脚本库"清单，按 urlPattern 匹配当前页面选择 inject_script_N
+2. 清单未明确匹配时，主动调用 search_tools 用任务关键词搜索脚本库
+3. 以上都无匹配时，使用 DOM 工具组合完成（navigate_to + extract_content + click_element）
+严禁：脚本库已有可用脚本却跳过，造成重复造轮子
+
+=== 数据流转机制（全量数据模式） ===
+当前已开启全量数据模式：工具返回的所有数据将完整地发送给你，不做摘要截断。
+- 你直接收到工具的完整返回结果，可直接分析和处理
+- 大数据仍会同步存入 payloadStore，可通过 data_refs 在 finish_task 中引用以渲染可视化报告
+- generate_script(data_refs=["p1","p2"]) 仍可用于跨工具数据整合处理
+
+=== finish_task 数据报告（重要） ===
+当任务涉及数据采集/提取/生成时，finish_task 必须通过 data_refs 参数引用所有已存储的数据，系统会自动渲染结构化数据报告（表格/卡片/HTML）。
+- 查看系统注入的"[存储数据汇总]"获取可用 data_refs ID（格式如 p1, p2, store_xxx）
+- 示例：finish_task(summary="采集完成，共获取20条数据", data_refs=["p1","p2"])
+- 如果任务不涉及数据（如页面操作、导航等），可省略 data_refs
+- data_refs 引用的数据将以可视化报告形式展示给用户，而非纯文本
+
+=== 任务边界处理 ===
+当用户请求超出当前可用工具能力时，请：
+1. 直接调用 finish_task 说明情况并提供替代方案
+2. 不要反复尝试无法完成的操作，避免陷入循环
+
+当连续5次工具调用都无法推进任务时，请调用 finish_task 汇报当前已有结果。
+
+=== 输出规范 ===
+- 自然语言总结结果，不输出原始JSON
+- 错误时分析原因并在finish_task中告知
+
+=== 对话上下文 ===
+你正在与用户进行连续对话。如果上下文中存在"上轮任务数据"或"历史存储数据"，表示之前已执行过任务并产生了结果。
+- 这些数据可供你参考和使用，无需重新执行页面操作
+- 完整数据可通过 finish_task(data_refs) 在最终输出中引用`
+
+  // 优先级：后端配置 > 全量模式提示词(若开启) > 默认提示词
+  const systemPrompt = backendSystemPrompt
+    ? backendSystemPrompt
+    : (fullDataMode ? FULL_DATA_MODE_PROMPT : DEFAULT_SYSTEM_PROMPT)
   const systemMsg = { role: 'system', content: systemPrompt }
 
   // ===== 自动读取页面内容 =====
@@ -1667,7 +1724,11 @@ ${allData.length > 0 ? '全局存储:\n' + allData.join('\n') : ''}${payloadItem
             }
 
             // 保存到 chatHistory
-            await saveToChatHistoryStorage(finalOutput, executedTools.map(t => ({ name: t.name, result: typeof t.result === 'string' ? t.result : JSON.stringify(t.result || '') })))
+            await saveToChatHistoryStorage(
+              finalOutput,
+              executedTools.map(t => ({ name: t.name, result: typeof t.result === 'string' ? t.result : JSON.stringify(t.result || '') })),
+              { fullDataMode }
+            )
 
             // Feature 4: finish_task 录制
             if (toolRecordingService) {
@@ -2197,7 +2258,24 @@ ${allData.length > 0 ? '全局存储:\n' + allData.join('\n') : ''}${payloadItem
           const returnMode = funcArgs.return_mode || 'summary'
           const dataTools = ['extract_content', 'get_interactive_elements', 'get_element_info']
 
-          if (dataTools.includes(funcName) && returnMode === 'full') {
+          if (fullDataMode && funcName !== 'render_report') {
+            // 全量数据模式：所有工具结果直接全量发送给 AI，不做摘要截断
+            // render_report 仍走特殊逻辑（涉及模板渲染）
+            finalResult = typeof toolResult === 'string' ? toolResult : safeJsonStringify(toolResult)
+            // 同时存入 payloadStore 供 finish_task/data_refs 引用
+            try {
+              if (shouldStoreToPayload(toolResult, funcName)) {
+                const envelope = normalizePayload(toolResult, funcName)
+                const storeId = await payloadStore.add(funcName, envelope.items || toolResult, '', envelope)
+                if (storeId) {
+                  workingMemory.addDataRef(funcName, storeId, envelope.count, `${funcName} 全量数据`)
+                  console.log(`[Agent] fullDataMode: ${funcName} 存入 payloadStore（ID:${storeId}），同时全量发送给 AI`)
+                }
+              }
+            } catch (e) {
+              console.warn('[Agent] fullDataMode payloadStore 存储失败（非致命）:', e.message)
+            }
+          } else if (dataTools.includes(funcName) && returnMode === 'full') {
             const envelope = normalizePayload(toolResult, funcName)
             const storeId = await payloadStore.add(funcName, envelope.items, formatSchemaSummary('?', funcName, envelope),
               { count: envelope.count, schema: envelope.schema, sample: envelope.sample })
@@ -2526,7 +2604,7 @@ ${allData.length > 0 ? '全局存储:\n' + allData.join('\n') : ''}${payloadItem
   const toolCallsSummary = executedTools.length > 0
     ? executedTools.filter(t => !t.name?.includes('search_tools') && !t.name?.includes('read_page_content')).slice(0, 15)
     : []
-  await saveToChatHistoryStorage(finalNote, toolCallsSummary)
+  await saveToChatHistoryStorage(finalNote, toolCallsSummary, { fullDataMode })
 }
 
 module.exports = { runAgent, PayloadStoreAdapter }
