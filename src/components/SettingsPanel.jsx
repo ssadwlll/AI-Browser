@@ -7,6 +7,7 @@ const THEMES = [
   { id: 'dark-black', label: '午夜黑', primary: '#0d0d0d', secondary: '#1a1a1a', accent: '#5b9aff' },
   { id: 'light-cream', label: '米白', primary: '#faf8f5', secondary: '#f0ece5', accent: '#4a90d9' },
   { id: 'light-blue', label: '清新蓝', primary: '#f0f4f8', secondary: '#e3eaf2', accent: '#1976d2' },
+  { id: 'light-gray', label: '雅致灰', primary: '#ffffff', secondary: '#f5f5f7', accent: '#5856d6' },
 ]
 
 function ThemeSelector() {

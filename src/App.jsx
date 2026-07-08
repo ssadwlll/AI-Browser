@@ -277,6 +277,29 @@ export default function App() {
     window.api.browser.togglePanel(newVisible)
   }
 
+  // 分离侧边栏：打开独立窗口，隐藏主窗口侧边栏
+  const handleDetachSidebar = async () => {
+    try {
+      await window.api.sidebarWindow.open()
+      // 主进程会发送 'sidebar-window:opened' 事件，在其中隐藏侧边栏 UI
+      // 这里也立即隐藏，避免等待 IPC 往返的视觉延迟
+      setSidebarVisible(false)
+    } catch (e) {
+      console.error('分离侧边栏失败:', e)
+    }
+  }
+
+  // 监听侧边栏分离窗口的打开/关闭事件，同步主窗口 UI
+  useEffect(() => {
+    const unsubOpened = window.api.sidebarWindow.onOpened(() => {
+      setSidebarVisible(false)
+    })
+    const unsubClosed = window.api.sidebarWindow.onClosed(() => {
+      setSidebarVisible(true)
+    })
+    return () => { unsubOpened(); unsubClosed() }
+  }, [])
+
   const handleSetPanelPosition = (pos) => {
     setPanelPosition(pos)
     window.api.browser.resize(1 - sidebarRatio) // 同步比例
@@ -459,6 +482,7 @@ export default function App() {
               <div className="sidebar-tabs">
                 <div className={`tab ${activeTab === 'assistant' ? 'active' : ''}`} onClick={() => setActiveTab('assistant')}>AI 助手</div>
                 <div className={`tab ${activeTab === 'settings' ? 'active' : ''}`} onClick={() => setActiveTab('settings')}>设置</div>
+                <button className="sidebar-detach-btn" onClick={handleDetachSidebar} title="分离为独立窗口">📌</button>
               </div>
               <div style={{ display: activeTab === 'assistant' ? 'flex' : 'none', flex: 1, flexDirection: 'column', overflow: 'hidden' }}>
                 <UnifiedPanel config={config} />
@@ -483,6 +507,7 @@ export default function App() {
               <div className="sidebar-tabs">
                 <div className={`tab ${activeTab === 'assistant' ? 'active' : ''}`} onClick={() => setActiveTab('assistant')}>AI 助手</div>
                 <div className={`tab ${activeTab === 'settings' ? 'active' : ''}`} onClick={() => setActiveTab('settings')}>设置</div>
+                <button className="sidebar-detach-btn" onClick={handleDetachSidebar} title="分离为独立窗口">📌</button>
               </div>
               <div style={{ display: activeTab === 'assistant' ? 'flex' : 'none', flex: 1, flexDirection: 'column', overflow: 'hidden' }}>
                 <UnifiedPanel config={config} />
@@ -502,6 +527,7 @@ export default function App() {
               <div className="sidebar-tabs">
                 <div className={`tab ${activeTab === 'assistant' ? 'active' : ''}`} onClick={() => setActiveTab('assistant')}>AI 助手</div>
                 <div className={`tab ${activeTab === 'settings' ? 'active' : ''}`} onClick={() => setActiveTab('settings')}>设置</div>
+                <button className="sidebar-detach-btn" onClick={handleDetachSidebar} title="分离为独立窗口">📌</button>
               </div>
               <div style={{ display: activeTab === 'assistant' ? 'flex' : 'none', flex: 1, flexDirection: 'column', overflow: 'hidden' }}>
                 <UnifiedPanel config={config} />

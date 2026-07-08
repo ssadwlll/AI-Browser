@@ -413,6 +413,72 @@ function registerIpcHandlers() {
     return { success: true }
   })
 
+  // --- 侧边栏分离窗口（独立 BrowserWindow，从主窗口分离出 AI 助手侧边栏） ---
+  // 打开后主窗口侧边栏隐藏、BrowserView 占满全屏；关闭后主窗口侧边栏恢复
+  let sidebarWindow = null
+  ipcMain.handle('sidebar-window:open', async () => {
+    // 如果窗口已存在，聚焦它
+    if (sidebarWindow && !sidebarWindow.isDestroyed()) {
+      if (sidebarWindow.isMinimized()) sidebarWindow.restore()
+      sidebarWindow.focus()
+      return { success: true }
+    }
+
+    sidebarWindow = new BrowserWindow({
+      width: 420,
+      height: 700,
+      minWidth: 320,
+      parent: mainWindow,
+      frame: false,          // 无边框，自定义标题栏实现拖拽
+      resizable: true,
+      minimizable: true,
+      maximizable: false,
+      fullscreenable: false,
+      skipTaskbar: false,    // 显示在任务栏（独立窗口）
+      alwaysOnTop: false,
+      backgroundColor: '#1a1a2e',
+      title: 'AI 助手',
+      webPreferences: {
+        nodeIntegration: false,
+        contextIsolation: true,
+        preload: path.join(__dirname, 'preload.js'),
+      },
+    })
+
+    // 开发环境加载 Vite 开发服务器，生产环境加载打包文件
+    // 用 query 参数 ?window=sidebar 标识侧边栏分离窗口
+    if (process.env.NODE_ENV === 'development') {
+      sidebarWindow.loadURL('http://localhost:5173/?window=sidebar')
+    } else {
+      sidebarWindow.loadFile(path.join(__dirname, '../dist/index.html'), { query: { window: 'sidebar' } })
+    }
+
+    // 隐藏主窗口侧边栏，BrowserView 占满全屏
+    panelVisible = false
+    resizeBrowserView()
+    // 通知主窗口渲染进程隐藏侧边栏 UI
+    safeSend('sidebar-window:opened', {})
+
+    // 窗口关闭时恢复主窗口侧边栏显示
+    sidebarWindow.on('closed', () => {
+      sidebarWindow = null
+      panelVisible = true
+      resizeBrowserView()
+      // 通知主窗口渲染进程恢复侧边栏 UI
+      safeSend('sidebar-window:closed', {})
+    })
+
+    return { success: true }
+  })
+
+  ipcMain.handle('sidebar-window:close', async () => {
+    if (sidebarWindow && !sidebarWindow.isDestroyed()) {
+      sidebarWindow.close()
+      // 'closed' 事件会清理 sidebarWindow 并恢复主窗口侧边栏
+    }
+    return { success: true }
+  })
+
   // --- 数据报告窗口（独立 BrowserWindow，Agent 完成时自动弹出） ---
   let reportWindow = null
   // 缓存最新的报告数据，供报告窗口加载时读取
@@ -1224,7 +1290,7 @@ function registerIpcHandlers() {
   }
 
   // 上传脚本到管理后台（multipart/form-data 文件上传）
-  ipcMain.handle('admin:upload-script', async (event, { serverUrl, token, name, code, description, categoryId }) => {
+  ipcMain.handle('admin:upload-script', async (event, { serverUrl, token, name, code, description, categoryId, urlPattern, toolType, toolConfig, metadata }) => {
     try {
       if (!serverUrl || !token) {
         return { success: false, error: '请先在设置中配置管理后台地址和 Token' }
@@ -1237,13 +1303,19 @@ function registerIpcHandlers() {
       fs.writeFileSync(tmpFile, code, 'utf-8')
 
       try {
-        const result = await multipartUpload(serverUrl, '/api/scripts', token, tmpFile, {
+        const uploadFields = {
           name: name || safeName,
           description: description || '',
           category_id: String(categoryId || 1),
           version: '1.0.0',
-          url_pattern: '*',
-        })
+          url_pattern: urlPattern || '*',
+          tool_type: toolType || 'js',
+        }
+        // 可选字段
+        if (toolConfig) uploadFields.tool_config = typeof toolConfig === 'string' ? toolConfig : JSON.stringify(toolConfig)
+        if (metadata) uploadFields.metadata = typeof metadata === 'string' ? metadata : JSON.stringify(metadata)
+
+        const result = await multipartUpload(serverUrl, '/api/scripts', token, tmpFile, uploadFields)
         return { success: result.data?.success || false, data: result.data }
       } finally {
         // 清理临时文件

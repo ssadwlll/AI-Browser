@@ -296,6 +296,123 @@ function DataReportSection({ item, defaultExpanded }) {
           </div>
         </div>
       )}
+
+      {/* 历史会话管理模态弹窗 */}
+      {showHistoryModal && (
+        <div className="modal-overlay" onClick={() => setShowHistoryModal(false)}>
+          <div className="modal-content modal-content-wide" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <span className="modal-title">历史会话管理 ({sessions.length})</span>
+              <button className="modal-close" onClick={() => setShowHistoryModal(false)}>✕</button>
+            </div>
+            <div className="modal-body modal-body-scroll">
+              {sessions.length === 0 && (
+                <div className="session-empty">暂无历史会话</div>
+              )}
+              {sessions.map(s => (
+                <div
+                  key={s.id}
+                  className={`session-item ${s.id === activeSessionId ? 'active' : ''}`}
+                  onClick={() => { handleSwitchSession(s); setShowHistoryModal(false) }}
+                >
+                  <div className="session-item-title">{s.title}</div>
+                  <div className="session-item-meta">
+                    <span>{new Date(s.updatedAt).toLocaleString()}</span>
+                    <span>{s.messageCount || 0} 条消息</span>
+                  </div>
+                  <button
+                    className="session-delete-btn"
+                    onClick={(e) => { e.stopPropagation(); handleDeleteSession(s.id, e) }}
+                    title="删除会话"
+                  >✗</button>
+                </div>
+              ))}
+            </div>
+            <div className="modal-footer">
+              <button className="modal-btn modal-btn-cancel" onClick={() => setShowHistoryModal(false)}>关闭</button>
+              <button className="modal-btn modal-btn-confirm" onClick={handleNewSession}>新建会话</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 脚本中心模态弹窗 */}
+      {showScriptCenterModal && (
+        <div className="modal-overlay" onClick={() => setShowScriptCenterModal(false)}>
+          <div className="modal-content modal-content-wide" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <span className="modal-title">脚本中心</span>
+              <button className="modal-close" onClick={() => setShowScriptCenterModal(false)}>✕</button>
+            </div>
+            <div className="modal-body">
+              {/* 搜索栏 */}
+              <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+                <input
+                  className="modal-input"
+                  type="text"
+                  style={{ flex: 1 }}
+                  placeholder="输入关键词搜索脚本..."
+                  value={scriptCenterSearch}
+                  onChange={(e) => setScriptCenterSearch(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') loadScriptCenter(1, e.target.value) }}
+                />
+                <button className="modal-btn modal-btn-confirm" onClick={() => loadScriptCenter(1, scriptCenterSearch)}>搜索</button>
+                <button className="modal-btn modal-btn-cancel" onClick={() => loadScriptCenter(1)}>刷新</button>
+              </div>
+              {/* 脚本列表 */}
+              <div className="modal-body-scroll">
+                {scriptCenterLoading && <div className="session-empty">加载中...</div>}
+                {!scriptCenterLoading && scriptCenterList.length === 0 && (
+                  <div className="session-empty">暂无远程脚本，请确保管理后台已启动且有脚本数据</div>
+                )}
+                {!scriptCenterLoading && scriptCenterList.map(script => (
+                  <div key={script.id} className="session-item script-item">
+                    <div className="session-item-title">{script.name}</div>
+                    {script.description && (
+                      <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 2 }}>{script.description}</div>
+                    )}
+                    <div className="session-item-meta">
+                      <span>{script.category_name || '未分类'}</span>
+                      <span>v{script.version || '1.0.0'}</span>
+                      <span>下载 {script.download_count || 0} 次</span>
+                      {script.tool_type && script.tool_type !== 'js' && <span style={{ color: 'var(--accent)' }}>{script.tool_type}</span>}
+                    </div>
+                    <div style={{ display: 'flex', gap: '4px', marginTop: 6 }}>
+                      <button
+                        style={{ background: '#10b981', color: '#fff', fontSize: 11, padding: '4px 10px', borderRadius: 6, border: 'none', cursor: 'pointer' }}
+                        onClick={() => handleDownloadFromCenter(script)}
+                        title="下载到本地脚本库"
+                      >下载到本地</button>
+                      <button
+                        style={{ background: 'var(--accent)', color: '#fff', fontSize: 11, padding: '4px 10px', borderRadius: 6, border: 'none', cursor: 'pointer' }}
+                        onClick={async () => {
+                          const detail = await window.api.admin.getScriptDetail({ serverUrl: config.adminServerUrl, token: config.adminToken, id: script.id })
+                          if (detail.success) {
+                            const code = detail.data?.data?.code || detail.data?.code || ''
+                            if (code) { await window.api.action.execute(code) }
+                          }
+                        }}
+                        title="注入到当前页面"
+                      >注入页面</button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              {/* 分页 */}
+              {!scriptCenterLoading && scriptCenterList.length > 0 && (
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, padding: '8px 0', fontSize: 12, color: 'var(--text-secondary)' }}>
+                  <button className="modal-btn modal-btn-cancel" onClick={() => loadScriptCenter(scriptCenterPage - 1)} disabled={scriptCenterPage <= 1}>上一页</button>
+                  <span>第 {scriptCenterPage} 页</span>
+                  <button className="modal-btn modal-btn-cancel" onClick={() => loadScriptCenter(scriptCenterPage + 1)}>下一页</button>
+                </div>
+              )}
+            </div>
+            <div className="modal-footer">
+              <button className="modal-btn modal-btn-cancel" onClick={() => setShowScriptCenterModal(false)}>关闭</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -593,9 +710,12 @@ export default function UnifiedPanel({ config }) {
   const [scriptCenterList, setScriptCenterList] = useState([])
   const [scriptCenterLoading, setScriptCenterLoading] = useState(false)
   const [scriptCenterPage, setScriptCenterPage] = useState(1)
+  const [scriptCenterSearch, setScriptCenterSearch] = useState('')
   const [autoInjectScripts, setAutoInjectScripts] = useState([])
   const [showAutoInject, setShowAutoInject] = useState(false)
   const [modal, setModal] = useState(null) // {title, message, defaultValue, placeholder, resolve}
+  const [showHistoryModal, setShowHistoryModal] = useState(false)
+  const [showScriptCenterModal, setShowScriptCenterModal] = useState(false)
   const messagesEndRef = useRef(null)
   const nextIdRef = useRef(1)
   const chatHistoryRef = useRef([]) // 发送给AI的对话历史
@@ -1471,6 +1591,8 @@ export default function UnifiedPanel({ config }) {
         title: '上传脚本到管理后台',
         nameValue: defaultName,
         descValue: defaultDesc || '',
+        urlPatternValue: '*',
+        toolTypeValue: 'js',
         resolve,
       })
     })
@@ -1529,19 +1651,23 @@ export default function UnifiedPanel({ config }) {
       return
     }
 
-    let name, description
+    let name, description, urlPattern, toolType
     if (scriptName) {
       name = scriptName
       description = scriptDescription || ''
+      urlPattern = '*'
+      toolType = 'js'
     } else {
       const result = await showUploadModal(jsCode.trim().substring(0, 40).replace(/\n/g, ' '), '')
       if (!result) return
       name = result.name
       description = result.description || ''
+      urlPattern = result.urlPattern || '*'
+      toolType = result.toolType || 'js'
     }
 
     setLoading(true)
-    addMessage({ role: 'system', type: 'tool_call', content: `正在上传脚本到管理后台: ${name}` })
+    addMessage({ role: 'system', type: 'tool_call', content: `正在上传脚本到管理后台: ${name} (类型: ${toolType}, 匹配: ${urlPattern})` })
 
     try {
       const result = await window.api.admin.uploadScript({
@@ -1549,11 +1675,13 @@ export default function UnifiedPanel({ config }) {
         code: jsCode,
         description: description || '从 AI Browser 客户端上传',
         categoryId: 1,
+        urlPattern,
+        toolType,
       })
       if (result.success) {
         addMessage({
           role: 'assistant', type: 'tool_execute',
-          content: `脚本 "${name}" 已成功上传到管理后台脚本中心！`,
+          content: `脚本 "${name}" 已成功上传到管理后台脚本中心！\n\n- 类型: ${toolType}\n- URL匹配: ${urlPattern}\n- 描述: ${description || '无'}`,
           jsCode,
         })
       } else {
@@ -1624,7 +1752,7 @@ export default function UnifiedPanel({ config }) {
   }
 
   // ============ 脚本中心 ============
-  const loadScriptCenter = async (page) => {
+  const loadScriptCenter = async (page, keyword) => {
     const serverUrl = config.adminServerUrl || ''
     const tk = config.adminToken || ''
     if (!serverUrl || !tk) {
@@ -1634,7 +1762,8 @@ export default function UnifiedPanel({ config }) {
     setScriptCenterLoading(true)
     setScriptCenterPage(page || 1)
     try {
-      const result = await window.api.admin.getScripts({ serverUrl, token: tk, page: page || 1 })
+      const searchKw = keyword !== undefined ? keyword : scriptCenterSearch
+      const result = await window.api.admin.getScripts({ serverUrl, token: tk, page: page || 1, keyword: searchKw })
       if (result.success && result.data) {
         setScriptCenterList(Array.isArray(result.data) ? result.data : [])
       } else {
@@ -1795,7 +1924,9 @@ export default function UnifiedPanel({ config }) {
     if (msg.role === 'user') {
       return (
         <div key={msg.id} className="msg-user">
+          <div className="msg-role-label">用户</div>
           <div className="msg-content">{msg.content}</div>
+          {msg.timestamp && <div className="msg-timestamp">{new Date(msg.timestamp).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}</div>}
         </div>
       )
     }
@@ -1904,8 +2035,10 @@ export default function UnifiedPanel({ config }) {
       }
       return (
         <div key={msg.id} className="msg-assistant">
+          <div className="msg-avatar">AI</div>
           <div className="msg-markdown">
             <ReactMarkdown components={codeComponents}>{msg.content}</ReactMarkdown>
+            {msg.timestamp && <div className="msg-timestamp">{new Date(msg.timestamp).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}</div>}
           </div>
         </div>
       )
@@ -1913,8 +2046,10 @@ export default function UnifiedPanel({ config }) {
 
     return (
       <div key={msg.id} className="msg-assistant">
+        <div className="msg-avatar">AI</div>
         <div className="msg-markdown">
           <ReactMarkdown>{msg.content || ''}</ReactMarkdown>
+          {msg.timestamp && <div className="msg-timestamp">{new Date(msg.timestamp).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}</div>}
         </div>
       </div>
     )
@@ -1928,13 +2063,13 @@ export default function UnifiedPanel({ config }) {
           <button className="toolbar-btn" onClick={handleNewSession} title="新建会话">
             + 新会话
           </button>
-          <button className="toolbar-btn" onClick={() => setShowSessionList(!showSessionList)} title="历史会话">
+          <button className="toolbar-btn" onClick={() => setShowHistoryModal(true)} title="历史会话">
             历史 ({sessions.length})
           </button>
           <button className="toolbar-btn" onClick={() => setShowSavedScripts(!showSavedScripts)} title="已保存的脚本">
             脚本 ({savedScripts.length})
           </button>
-          <button className="toolbar-btn" onClick={() => { setShowScriptCenter(!showScriptCenter); if (!showScriptCenter) loadScriptCenter(1) }} title="从后台脚本中心浏览和下载脚本">
+          <button className="toolbar-btn" onClick={() => { setShowScriptCenterModal(true); loadScriptCenter(1) }} title="从后台脚本中心浏览和下载脚本">
             脚本中心
           </button>
           <button className="toolbar-btn" onClick={() => setShowAutoInject(!showAutoInject)} title="自动注入脚本（页面刷新后自动执行）">
@@ -1961,34 +2096,7 @@ export default function UnifiedPanel({ config }) {
         </div>
       </div>
 
-      {/* 会话列表 */}
-      {showSessionList && (
-        <div className="session-list">
-          {sessions.length === 0 && (
-            <div className="session-empty">暂无历史会话</div>
-          )}
-          {sessions.map(s => (
-            <div
-              key={s.id}
-              className={`session-item ${s.id === activeSessionId ? 'active' : ''}`}
-              onClick={() => handleSwitchSession(s)}
-            >
-              <div className="session-item-title">{s.title}</div>
-              <div className="session-item-meta">
-                <span>{new Date(s.updatedAt).toLocaleString()}</span>
-                <span>{s.messageCount || 0} 条消息</span>
-              </div>
-              <button
-                className="session-delete-btn"
-                onClick={(e) => handleDeleteSession(s.id, e)}
-                title="删除会话"
-              >
-                ✗
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
+      {/* 会话列表 - 已移至模态弹窗 */}
 
       {/* 已保存的脚本列表 */}
       {showSavedScripts && (
@@ -2037,59 +2145,7 @@ export default function UnifiedPanel({ config }) {
         </div>
       )}
 
-      {/* 脚本中心 */}
-      {showScriptCenter && (
-        <div className="session-list">
-          <div className="session-list-header">
-            <span>脚本中心（来自管理后台）</span>
-            <button style={{ fontSize: 11, padding: '2px 8px', border: '1px solid var(--border)', borderRadius: 4, background: 'transparent', color: 'var(--text-secondary)', cursor: 'pointer' }} onClick={() => loadScriptCenter(scriptCenterPage)}>
-              刷新
-            </button>
-          </div>
-          <div style={{ fontSize: 11, color: 'var(--text-secondary)', padding: '0 12px 8px' }}>
-            从管理后台下载脚本到本地使用
-          </div>
-          {scriptCenterLoading && (
-            <div className="session-empty">加载中...</div>
-          )}
-          {!scriptCenterLoading && scriptCenterList.length === 0 && (
-            <div className="session-empty">暂无远程脚本，请确保管理后台已启动且有脚本数据</div>
-          )}
-          {!scriptCenterLoading && scriptCenterList.map(script => (
-            <div key={script.id} className="session-item script-item">
-              <div className="session-item-title">{script.name}</div>
-              {script.description && (
-                <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 2 }}>{script.description}</div>
-              )}
-              <div className="session-item-meta">
-                <span>{script.category_name || '未分类'}</span>
-                <span>v{script.version || '1.0.0'}</span>
-                <span>下载 {script.download_count || 0} 次</span>
-              </div>
-              <div style={{ display: 'flex', gap: '4px', marginTop: 4 }}>
-                <button
-                  style={{ background: '#10b981', color: '#fff', fontSize: 11, padding: '3px 8px', borderRadius: 4, border: 'none', cursor: 'pointer' }}
-                  onClick={() => handleDownloadFromCenter(script)}
-                  title="下载到本地脚本库"
-                >
-                  下载到本地
-                </button>
-              </div>
-            </div>
-          ))}
-          {!scriptCenterLoading && scriptCenterList.length > 0 && (
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, padding: '8px 12px', fontSize: 12, color: 'var(--text-secondary)' }}>
-              <button style={{ padding: '4px 12px', border: '1px solid var(--border)', borderRadius: 4, background: 'transparent', cursor: 'pointer', fontSize: 12 }} onClick={() => loadScriptCenter(scriptCenterPage - 1)} disabled={scriptCenterPage <= 1}>
-                上一页
-              </button>
-              <span>第 {scriptCenterPage} 页</span>
-              <button style={{ padding: '4px 12px', border: '1px solid var(--border)', borderRadius: 4, background: 'transparent', cursor: 'pointer', fontSize: 12 }} onClick={() => loadScriptCenter(scriptCenterPage + 1)}>
-                下一页
-              </button>
-            </div>
-          )}
-        </div>
-      )}
+      {/* 脚本中心 - 已移至模态弹窗 */}
 
       {/* 自动注入脚本列表 */}
       {showAutoInject && (
@@ -2334,24 +2390,53 @@ export default function UnifiedPanel({ config }) {
                       placeholder="请输入脚本名称"
                     />
                   </div>
-                  <div>
+                  <div style={{ marginBottom: 12 }}>
                     <label style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 4, display: 'block' }}>脚本描述（可选）</label>
                     <input
                       className="modal-input"
                       type="text"
                       value={modal.descValue}
                       onChange={(e) => setModal({ ...modal, descValue: e.target.value })}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') { modal.resolve({ name: modal.nameValue, description: modal.descValue }); setModal(null) }
-                        if (e.key === 'Escape') { modal.resolve(null); setModal(null) }
-                      }}
                       placeholder="请输入脚本描述"
                     />
                   </div>
+                  {modal.type === 'upload' && (
+                    <>
+                      <div style={{ marginBottom: 12 }}>
+                        <label style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 4, display: 'block' }}>URL 匹配模式</label>
+                        <input
+                          className="modal-input"
+                          type="text"
+                          value={modal.urlPatternValue || '*'}
+                          onChange={(e) => setModal({ ...modal, urlPatternValue: e.target.value })}
+                          placeholder="* 匹配所有页面，如 *example.com*"
+                        />
+                      </div>
+                      <div style={{ marginBottom: 12 }}>
+                        <label style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 4, display: 'block' }}>工具类型</label>
+                        <select
+                          className="modal-input"
+                          value={modal.toolTypeValue || 'js'}
+                          onChange={(e) => setModal({ ...modal, toolTypeValue: e.target.value })}
+                          style={{ cursor: 'pointer' }}
+                        >
+                          <option value="js">JS 脚本（页面注入执行）</option>
+                          <option value="api">API 脚本（后端接口调用）</option>
+                        </select>
+                      </div>
+                    </>
+                  )}
                 </div>
                 <div className="modal-footer">
                   <button className="modal-btn modal-btn-cancel" onClick={() => { modal.resolve(null); setModal(null) }}>取消</button>
-                  <button className="modal-btn modal-btn-confirm" onClick={() => { modal.resolve({ name: modal.nameValue, description: modal.descValue }); setModal(null) }}>
+                  <button className="modal-btn modal-btn-confirm" onClick={() => {
+                    if (modal.type === 'upload') {
+                      modal.resolve({ name: modal.nameValue, description: modal.descValue, urlPattern: modal.urlPatternValue, toolType: modal.toolTypeValue })
+                    } else {
+                      modal.resolve({ name: modal.nameValue, description: modal.descValue })
+                    }
+                    setModal(null)
+                  }}>
                     {modal.type === 'save' ? '保存' : '上传'}
                   </button>
                 </div>

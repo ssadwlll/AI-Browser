@@ -39,6 +39,21 @@ contextBridge.exposeInMainWorld('api', {
     open: () => ipcRenderer.invoke('conversation-window:open'),
     close: () => ipcRenderer.invoke('conversation-window:close'),
   },
+  // 侧边栏分离窗口
+  sidebarWindow: {
+    open: () => ipcRenderer.invoke('sidebar-window:open'),
+    close: () => ipcRenderer.invoke('sidebar-window:close'),
+    onOpened: (callback) => {
+      const handler = (e, data) => callback(data)
+      ipcRenderer.on('sidebar-window:opened', handler)
+      return () => ipcRenderer.removeListener('sidebar-window:opened', handler)
+    },
+    onClosed: (callback) => {
+      const handler = (e, data) => callback(data)
+      ipcRenderer.on('sidebar-window:closed', handler)
+      return () => ipcRenderer.removeListener('sidebar-window:closed', handler)
+    },
+  },
   // 数据报告窗口
   reportWindow: {
     show: (data) => ipcRenderer.invoke('report-window:show', data),
@@ -164,8 +179,8 @@ contextBridge.exposeInMainWorld('api', {
   },
   // 管理后台 API
   admin: {
-    uploadScript: ({ serverUrl, token, name, code, description, categoryId }) =>
-      ipcRenderer.invoke('admin:upload-script', { serverUrl, token, name, code, description, categoryId }),
+    uploadScript: ({ serverUrl, token, name, code, description, categoryId, urlPattern, toolType, toolConfig, metadata }) =>
+      ipcRenderer.invoke('admin:upload-script', { serverUrl, token, name, code, description, categoryId, urlPattern, toolType, toolConfig, metadata }),
     getScripts: ({ serverUrl, token, page, keyword, category }) =>
       ipcRenderer.invoke('admin:get-scripts', { serverUrl, token, page, keyword, category }),
     getScriptDetail: ({ serverUrl, token, id }) =>
