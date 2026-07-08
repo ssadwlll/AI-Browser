@@ -8,7 +8,6 @@ const MAX_BODY_CHARS = 500 * 1024 // 单条响应体上限 500KB，超出截断
 class NetworkCapture {
   constructor() {
     this.attached = new Map() // webContentsId -> { requests: Map, responses: Map, order: [] }
-    this._onMessage = this._onMessage.bind(this)
   }
 
   /**
@@ -27,6 +26,7 @@ class NetworkCapture {
       bodies: new Map(),     // requestId -> 响应体（含 base64Encoded 标记）
       order: [],             // 请求顺序（requestId 数组）
       finishedIds: new Set(), // 已完成的 requestId
+      onMessage: null,       // 保存事件回调引用，便于 removeListener
     }
     this.attached.set(wcId, state)
 
@@ -34,7 +34,13 @@ class NetworkCapture {
       webContents.debugger.attach('1.3')
       await webContents.debugger.sendCommand('Network.enable')
       await webContents.debugger.sendCommand('Network.setCacheDisabled', { cacheDisabled: true })
-      webContents.debugger.on('message', this._onMessage)
+
+      // 用闭包绑定 state，避免在回调里查找（event 参数不是 ipcMain 的 Event，没有 sender）
+      state.onMessage = (_event, method, params) => {
+        this._handleMessage(state, method, params)
+      }
+      webContents.debugger.on('message', state.onMessage)
+
       console.log(`[NetworkCapture] 已附加 CDP，wcId=${wcId}`)
       return { success: true, wcId }
     } catch (e) {
@@ -52,7 +58,9 @@ class NetworkCapture {
     const state = this.attached.get(wcId)
     if (!state) return { success: false, error: '未在捕获状态' }
     try {
-      webContents.debugger.removeListener('message', this._onMessage)
+      if (state.onMessage) {
+        webContents.debugger.removeListener('message', state.onMessage)
+      }
       if (webContents.debugger.isAttached()) {
         webContents.debugger.detach()
       }
@@ -87,30 +95,9 @@ class NetworkCapture {
   }
 
   /**
-   * CDP 消息处理
+   * CDP 消息处理（由闭包回调直接传入 state，不再需要查找）
    */
-  _onMessage(event, method, params) {
-    // 找到对应的 state（通过 webContents 匹配）
-    let state = null
-    for (const s of this.attached.values()) {
-      if (s.webContents.debugger === event.sender) {
-        state = s
-        break
-      }
-    }
-    // event 实际就是 webContents 对象本身（Electron debugger API 的特性）
-    // 修正：on('message', (event, method, params)) 中 event 是 webContents
-    if (!state) {
-      // 通过 event 的 id 查找
-      for (const [wcId, s] of this.attached) {
-        if (s.webContents.id === event.id || s.webContents === event) {
-          state = s
-          break
-        }
-      }
-    }
-    if (!state) return
-
+  _handleMessage(state, method, params) {
     try {
       switch (method) {
         case 'Network.requestWillBeSent':
@@ -127,7 +114,7 @@ class NetworkCapture {
           break
       }
     } catch (e) {
-      // 单条消息处理失败不影响整体捕获
+      console.warn('[NetworkCapture] 消息处理失败:', method, e.message)
     }
   }
 
@@ -137,6 +124,8 @@ class NetworkCapture {
     const resourceType = type || request?.type
     const url = request?.url || ''
     if (url.includes('favicon.ico') || url.startsWith('data:')) return
+
+    console.log(`[NetworkCapture] 请求: ${request?.method || 'GET'} ${url.substring(0, 80)}`)
 
     state.requests.set(requestId, {
       requestId,
