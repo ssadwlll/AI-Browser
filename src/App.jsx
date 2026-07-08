@@ -4,8 +4,16 @@ import SettingsPanel from './components/SettingsPanel.jsx'
 
 const STORAGE_KEY = 'ai-browser-config'
 const BOOKMARKS_KEY = 'ai-browser-bookmarks'
+const THEME_KEY = 'ai-browser-theme'
 
 export default function App() {
+  // 主题
+  const [theme, setTheme] = useState(() => localStorage.getItem(THEME_KEY) || 'dark-blue')
+
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme)
+    localStorage.setItem(THEME_KEY, theme)
+  }, [theme])
   const [url, setUrl] = useState('')
   const [pageTitle, setPageTitle] = useState('')
   const [isLoading, setIsLoading] = useState(false)
@@ -281,27 +289,38 @@ export default function App() {
 
   useEffect(() => {
     if (!dragging) return
+    let lastResizeTime = 0
+    const RESIZE_THROTTLE_MS = 30 // 限制 BrowserView resize 频率，避免拖拽卡顿
     const handleMouseMove = (e) => {
       const windowWidth = window.innerWidth
       const windowHeight = window.innerHeight
+      let newRatio = sidebarRatio
       if (panelPosition === 'right') {
         const sidebarWidth = windowWidth - e.clientX
-        const ratio = Math.max(0.2, Math.min(0.6, sidebarWidth / windowWidth))
-        setSidebarRatio(ratio)
+        newRatio = Math.max(0.2, Math.min(0.6, sidebarWidth / windowWidth))
       } else if (panelPosition === 'left') {
         const sidebarWidth = e.clientX
-        const ratio = Math.max(0.2, Math.min(0.6, sidebarWidth / windowWidth))
-        setSidebarRatio(ratio)
+        newRatio = Math.max(0.2, Math.min(0.6, sidebarWidth / windowWidth))
       } else if (panelPosition === 'bottom') {
         const navbarHeight = 72
         const sidebarHeight = windowHeight - e.clientY
-        const ratio = Math.max(0.15, Math.min(0.6, sidebarHeight / (windowHeight - navbarHeight)))
-        setSidebarRatio(ratio)
+        newRatio = Math.max(0.15, Math.min(0.6, sidebarHeight / (windowHeight - navbarHeight)))
+      }
+      setSidebarRatio(newRatio)
+      // 实时同步 BrowserView 大小（节流，避免 IPC 风暴）
+      const now = Date.now()
+      if (now - lastResizeTime >= RESIZE_THROTTLE_MS) {
+        lastResizeTime = now
+        window.api.browser.resize(1 - newRatio)
       }
     }
     const handleMouseUp = () => {
       setDragging(false)
-      window.api.browser.resize(1 - sidebarRatio)
+      // 最终精确同步（使用 setState 回调获取最新值）
+      setSidebarRatio(r => {
+        window.api.browser.resize(1 - r)
+        return r
+      })
     }
     document.addEventListener('mousemove', handleMouseMove)
     document.addEventListener('mouseup', handleMouseUp)

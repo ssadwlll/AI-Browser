@@ -1,4 +1,8 @@
-:root {
+/* ============ 主题定义 ============ */
+
+/* 深邃蓝（默认） */
+:root,
+[data-theme="dark-blue"] {
   --bg-primary: #1a1a2e;
   --bg-secondary: #16213e;
   --bg-tertiary: #0f3460;
@@ -11,6 +15,66 @@
   --success: #4caf50;
   --warning: #ff9800;
   --error: #f44336;
+  --shadow: rgba(0,0,0,0.3);
+  --scrollbar-track: #1a1a2e;
+  --scrollbar-thumb: #2a2a4a;
+}
+
+/* 午夜黑 */
+[data-theme="dark-black"] {
+  --bg-primary: #0d0d0d;
+  --bg-secondary: #1a1a1a;
+  --bg-tertiary: #2a2a2a;
+  --bg-input: #1e1e1e;
+  --text-primary: #e8e8e8;
+  --text-secondary: #999999;
+  --accent: #5b9aff;
+  --accent-hover: #4a8aee;
+  --border: #333333;
+  --success: #4caf50;
+  --warning: #ff9800;
+  --error: #f44336;
+  --shadow: rgba(0,0,0,0.5);
+  --scrollbar-track: #0d0d0d;
+  --scrollbar-thumb: #333333;
+}
+
+/* 米白色（暖光） */
+[data-theme="light-cream"] {
+  --bg-primary: #faf8f5;
+  --bg-secondary: #f0ece5;
+  --bg-tertiary: #e8e2d8;
+  --bg-input: #ffffff;
+  --text-primary: #2c2c2c;
+  --text-secondary: #6b6b6b;
+  --accent: #4a90d9;
+  --accent-hover: #3a7bc8;
+  --border: #d9d3c7;
+  --success: #43a047;
+  --warning: #f57c00;
+  --error: #d32f2f;
+  --shadow: rgba(0,0,0,0.08);
+  --scrollbar-track: #f0ece5;
+  --scrollbar-thumb: #d9d3c7;
+}
+
+/* 清新蓝（浅色） */
+[data-theme="light-blue"] {
+  --bg-primary: #f0f4f8;
+  --bg-secondary: #e3eaf2;
+  --bg-tertiary: #d0dae8;
+  --bg-input: #ffffff;
+  --text-primary: #1a2a3a;
+  --text-secondary: #5a6a7a;
+  --accent: #1976d2;
+  --accent-hover: #1565c0;
+  --border: #c5d3e0;
+  --success: #388e3c;
+  --warning: #f57c00;
+  --error: #d32f2f;
+  --shadow: rgba(0,0,0,0.06);
+  --scrollbar-track: #e3eaf2;
+  --scrollbar-thumb: #c5d3e0;
 }
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -365,7 +429,7 @@ body {
 .main-layout.layout-left { flex-direction: row; }
 .main-layout.layout-bottom { flex-direction: column; }
 
-.browser-container { flex: 0 0 65%; position: relative; background: white; }
+.browser-container { flex: 0 0 65%; position: relative; background: var(--bg-input); }
 .layout-bottom .browser-container { flex: 1; }
 
 .sidebar-resizer {
@@ -3850,4 +3914,127 @@ input[type='range']:disabled::-moz-range-thumb {
 .rw-copy-btn:hover {
   color: var(--text-primary);
   background: var(--border);
+}
+
+/* ============ 主题切换过渡 ============ */
+body,
+.navbar,
+.sidebar,
+.tab-bar,
+.browser-container,
+.chat-input-area,
+.settings-section {
+  transition: background-color 0.3s ease, color 0.3s ease, border-color 0.3s ease;
+}
+
+/* ============ 浅色主题适配 ============ */
+[data-theme="light-cream"] .rw-html-iframe,
+[data-theme="light-blue"] .rw-html-iframe {
+  background: #fff;
+}
+
+/* 浅色主题下数据报告弹窗背景 */
+[data-theme="light-cream"] .data-report-section,
+[data-theme="light-blue"] .data-report-section {
+  background: var(--bg-input);
+  border-color: var(--border);
+}
+
+/* 浅色主题下代码块 */
+[data-theme="light-cream"] .code-block-inline,
+[data-theme="light-blue"] .code-block-inline {
+  background: var(--bg-tertiary);
+  border-color: var(--border);
+}
+
+/* 浅色主题下 Agent 步骤卡片 */
+[data-theme="light-cream"] .agent-step-card,
+[data-theme="light-blue"] .agent-step-card {
+  background: var(--bg-input);
+  border-color: var(--border);
+}
+
+/* 浅色主题阴影适配 */
+[data-theme="light-cream"] .bookmarks-dropdown,
+[data-theme="light-blue"] .bookmarks-dropdown {
+  box-shadow: 0 4px 16px var(--shadow);
+}
+
+[data-theme="light-cream"] .sidebar-resizer:hover,
+[data-theme="light-cream"] .sidebar-resizer.dragging,
+[data-theme="light-blue"] .sidebar-resizer:hover,
+[data-theme="light-blue"] .sidebar-resizer.dragging {
+  box-shadow: 0 0 4px var(--accent);
+}
+
+/* ============ 主题选择器 ============ */
+.theme-selector {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 8px 0;
+}
+
+.theme-option {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  padding: 8px;
+  border-radius: 8px;
+  border: 2px solid transparent;
+  transition: all 0.2s;
+  min-width: 72px;
+}
+
+.theme-option:hover {
+  background: var(--bg-tertiary);
+}
+
+.theme-option.active {
+  border-color: var(--accent);
+  background: var(--bg-tertiary);
+}
+
+.theme-swatch {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 2px solid var(--border);
+  position: relative;
+  overflow: hidden;
+}
+
+.theme-swatch-inner {
+  position: absolute;
+  inset: 0;
+}
+
+.theme-swatch-half {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 50%;
+}
+
+.theme-swatch-half-left {
+  left: 0;
+  border-radius: 18px 0 0 18px;
+}
+
+.theme-swatch-half-right {
+  right: 0;
+  border-radius: 0 18px 18px 0;
+}
+
+.theme-label {
+  font-size: 11px;
+  color: var(--text-secondary);
+  text-align: center;
+  line-height: 1.2;
+}
+
+.theme-option.active .theme-label {
+  color: var(--accent);
 }

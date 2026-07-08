@@ -1,5 +1,43 @@
 import React, { useState, useEffect, useCallback } from 'react'
 
+const THEME_KEY = 'ai-browser-theme'
+
+const THEMES = [
+  { id: 'dark-blue', label: '深邃蓝', primary: '#1a1a2e', secondary: '#16213e', accent: '#00d4ff' },
+  { id: 'dark-black', label: '午夜黑', primary: '#0d0d0d', secondary: '#1a1a1a', accent: '#5b9aff' },
+  { id: 'light-cream', label: '米白', primary: '#faf8f5', secondary: '#f0ece5', accent: '#4a90d9' },
+  { id: 'light-blue', label: '清新蓝', primary: '#f0f4f8', secondary: '#e3eaf2', accent: '#1976d2' },
+]
+
+function ThemeSelector() {
+  const [current, setCurrent] = useState(() => localStorage.getItem(THEME_KEY) || 'dark-blue')
+
+  const handleChange = (id) => {
+    setCurrent(id)
+    document.documentElement.setAttribute('data-theme', id)
+    localStorage.setItem(THEME_KEY, id)
+  }
+
+  return (
+    <div className="theme-selector">
+      {THEMES.map(t => (
+        <div
+          key={t.id}
+          className={`theme-option ${current === t.id ? 'active' : ''}`}
+          onClick={() => handleChange(t.id)}
+          title={t.label}
+        >
+          <div className="theme-swatch">
+            <div className="theme-swatch-half theme-swatch-half-left" style={{ background: t.primary }} />
+            <div className="theme-swatch-half theme-swatch-half-right" style={{ background: t.secondary }} />
+          </div>
+          <span className="theme-label">{t.label}</span>
+        </div>
+      ))}
+    </div>
+  )
+}
+
 /**
  * 设置面板（对齐 chrome-extension 的设置视图）
  *
@@ -281,6 +319,12 @@ export default function SettingsPanel({ config, setConfig }) {
 
   return (
     <div className="settings-panel">
+      {/* ========== 主题设置 ========== */}
+      <div className="settings-section">
+        <h3 className="settings-section-title">外观主题</h3>
+        <ThemeSelector />
+      </div>
+
       {/* ========== 分区1：服务端连接 ========== */}
       <div className="settings-section">
         <h3 className="settings-section-title">服务端连接</h3>
