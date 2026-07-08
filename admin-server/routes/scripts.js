@@ -14,6 +14,7 @@ router.get('/:id/userjs', ctrl.userjs)   // 油猴脚本格式（无需登录，
 router.get('/:id/inject', appAuth, ctrl.injectData)   // AppKey签名：扩展端注入脚本
 router.get('/:id', auth, ctrl.detail)
 router.post('/', auth, upload.single('script'), ctrl.create)
+router.post('/app-upload', appAuth, upload.single('script'), ctrl.create)  // AppKey签名：扩展端上传脚本
 router.put('/:id', auth, ctrl.update)
 router.delete('/:id', auth, ctrl.remove)
 router.get('/:id/download', auth, ctrl.download)

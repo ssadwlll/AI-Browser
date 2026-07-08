@@ -206,6 +206,8 @@ contextBridge.exposeInMainWorld('api', {
       ipcRenderer.invoke('scripts:search', { serverUrl, appKey, appSecret, keyword }),
     getDetail: ({ serverUrl, appKey, appSecret, id }) =>
       ipcRenderer.invoke('scripts:get-detail', { serverUrl, appKey, appSecret, id }),
+    upload: ({ serverUrl, appKey, appSecret, name, code, description, categoryId, urlPattern, toolType, toolConfig, metadata }) =>
+      ipcRenderer.invoke('scripts:upload', { serverUrl, appKey, appSecret, name, code, description, categoryId, urlPattern, toolType, toolConfig, metadata }),
   },
   // 智能体
   agent: {

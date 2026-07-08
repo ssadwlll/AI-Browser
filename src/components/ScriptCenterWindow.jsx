@@ -25,26 +25,24 @@ const THEME_KEY = 'ai-browser-theme'
 function defaultConfig() {
   return {
     adminServerUrl: 'http://localhost:3001',
-    adminToken: '',
     appKey: '',
     appSecret: '',
   }
 }
 
-function loadConfig() {
+// 通过 IPC 从主进程读取 syncConfig（AppKey/AppSecret 存在主进程 storage.json 中）
+async function loadConfigFromMain() {
   try {
-    const saved = localStorage.getItem(CONFIG_KEY)
-    if (!saved) return defaultConfig()
-    const parsed = JSON.parse(saved)
-    return {
-      adminServerUrl: parsed.adminServerUrl || defaultConfig().adminServerUrl,
-      adminToken: parsed.adminToken || '',
-      appKey: parsed.appKey || '',
-      appSecret: parsed.appSecret || '',
+    const result = await window.api.config.getSync()
+    if (result?.success && result.data) {
+      return {
+        adminServerUrl: result.data.serverUrl || defaultConfig().adminServerUrl,
+        appKey: result.data.appKey || '',
+        appSecret: result.data.appSecret || '',
+      }
     }
-  } catch {
-    return defaultConfig()
-  }
+  } catch { /* 忽略 */ }
+  return defaultConfig()
 }
 
 function loadSavedScripts() {
@@ -74,7 +72,7 @@ function formatTime(ts) {
 
 export default function ScriptCenterWindow() {
   const [theme, setTheme] = useState(() => localStorage.getItem(THEME_KEY) || 'dark-blue')
-  const [config, setConfig] = useState(() => loadConfig())
+  const [config, setConfig] = useState(() => defaultConfig())
 
   const [activeTab, setActiveTab] = useState('remote')
 
@@ -107,12 +105,9 @@ export default function ScriptCenterWindow() {
     document.documentElement.setAttribute('data-theme', theme)
   }, [theme])
 
-  // 监听 localStorage 变化：主窗口修改 config/theme/本地脚本时同步
+  // 监听 localStorage 变化：主窗口修改 theme/本地脚本时同步
   useEffect(() => {
     const handleStorage = (e) => {
-      if (e.key === CONFIG_KEY && e.newValue) {
-        try { setConfig(loadConfig()) } catch { /* 忽略 */ }
-      }
       if (e.key === THEME_KEY && e.newValue) {
         setTheme(e.newValue)
       }
@@ -124,17 +119,15 @@ export default function ScriptCenterWindow() {
     return () => window.removeEventListener('storage', handleStorage)
   }, [])
 
-  // 定期同步 config（兜底：storage 事件在某些场景不可靠）
+  // 定期通过 IPC 从主进程同步 config（AppKey/AppSecret 可能被主窗口修改）
   useEffect(() => {
-    const interval = setInterval(() => {
-      try {
-        const newConfig = loadConfig()
-        setConfig(prev => {
-          if (JSON.stringify(prev) !== JSON.stringify(newConfig)) return newConfig
-          return prev
-        })
-      } catch { /* 忽略 */ }
-    }, 1500)
+    const interval = setInterval(async () => {
+      const cfg = await loadConfigFromMain()
+      setConfig(prev => {
+        if (JSON.stringify(prev) !== JSON.stringify(cfg)) return cfg
+        return prev
+      })
+    }, 3000)
     return () => clearInterval(interval)
   }, [])
 
@@ -181,13 +174,17 @@ export default function ScriptCenterWindow() {
     }
   }, [config, searchKeyword])
 
-  // 首次加载远程脚本（配置就绪后）
+  // 首次加载：通过 IPC 从主进程读取 syncConfig，然后加载远程脚本
   useEffect(() => {
-    if (config.adminServerUrl && config.appKey && config.appSecret) {
-      loadRemoteScripts(1, '')
-    }
+    (async () => {
+      const cfg = await loadConfigFromMain()
+      setConfig(cfg)
+      if (cfg.adminServerUrl && cfg.appKey && cfg.appSecret) {
+        loadRemoteScripts(1, '')
+      }
+    })()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [config.adminServerUrl, config.appKey, config.appSecret])
+  }, [])
 
   const handleSearch = () => {
     setSearchKeyword(searchInput)
@@ -311,15 +308,16 @@ export default function ScriptCenterWindow() {
     const { script, name, description, urlPattern, toolType } = uploadModal
     if (!name || !name.trim()) { showToast('error', '请输入脚本名称'); return }
     const serverUrl = config.adminServerUrl || ''
-    const token = config.adminToken || ''
-    if (!serverUrl || !token) {
-      showToast('error', '请先在主窗口设置中配置管理后台地址和 Token')
+    const appKey = config.appKey || ''
+    const appSecret = config.appSecret || ''
+    if (!serverUrl || !appKey || !appSecret) {
+      showToast('error', '请先在主窗口设置中配置服务器地址和 AppKey/AppSecret')
       return
     }
     setUploadModal(prev => ({ ...prev, loading: true }))
     try {
-      const result = await window.api.admin.uploadScript({
-        serverUrl, token,
+      const result = await window.api.scripts.upload({
+        serverUrl, appKey, appSecret,
         name: name.trim(),
         code: script.code,
         description: description || '',
@@ -396,7 +394,7 @@ export default function ScriptCenterWindow() {
         {/* 配置提示 */}
         {!configReady && (
           <div className="scw-hint scw-hint-warning">
-            请先在主窗口「设置」中配置管理后台地址和 Token，然后重新打开本窗口。
+            请先在主窗口「设置」中配置服务器地址和 AppKey/AppSecret，然后重新打开本窗口。
           </div>
         )}
 

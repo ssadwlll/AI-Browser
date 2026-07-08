@@ -1354,7 +1354,7 @@ function registerIpcHandlers() {
   }
 
   // 通用 HTTP 请求辅助函数（multipart/form-data 文件上传）
-  function multipartUpload(serverUrl, apiPath, token, filePath, fields = {}) {
+  function multipartUpload(serverUrl, apiPath, token, filePath, fields = {}, extraHeaders = {}) {
     return new Promise((resolve, reject) => {
       const fullUrl = serverUrl + apiPath
       const parsedUrl = new URL(fullUrl)
@@ -1389,6 +1389,7 @@ function registerIpcHandlers() {
           'Content-Type': `multipart/form-data; boundary=${boundary}`,
           'Content-Length': body.length,
           ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          ...extraHeaders,
         },
       }
 
@@ -1553,8 +1554,40 @@ function registerIpcHandlers() {
     }
   })
 
-  // 上传脚本（仍用 JWT Token，因为 POST /api/scripts 需要 auth 中间件）
-  // 保留原有 admin:upload-script handler
+  // 上传脚本（AppKey 签名，使用 /api/scripts/app-upload 接口）
+  ipcMain.handle('scripts:upload', async (event, { serverUrl, appKey, appSecret, name, code, description, categoryId, urlPattern, toolType, toolConfig, metadata }) => {
+    try {
+      if (!serverUrl || !appKey || !appSecret) {
+        return { success: false, error: '请先配置服务器地址和 AppKey/AppSecret' }
+      }
+
+      const tmpDir = os.tmpdir()
+      const safeName = (name || 'script').replace(/[^a-zA-Z0-9\u4e00-\u9fa5_-]/g, '_')
+      const tmpFile = path.join(tmpDir, `ai-browser-script-${Date.now()}-${safeName}.js`)
+      fs.writeFileSync(tmpFile, code, 'utf-8')
+
+      try {
+        const uploadFields = {
+          name: name || safeName,
+          description: description || '',
+          category_id: String(categoryId || 1),
+          version: '1.0.0',
+          url_pattern: urlPattern || '*',
+          tool_type: toolType || 'js',
+        }
+        if (toolConfig) uploadFields.tool_config = typeof toolConfig === 'string' ? toolConfig : JSON.stringify(toolConfig)
+        if (metadata) uploadFields.metadata = typeof metadata === 'string' ? metadata : JSON.stringify(metadata)
+
+        const authHeaders = generateAppAuthHeaders(appKey, appSecret)
+        const result = await multipartUpload(serverUrl, '/api/scripts/app-upload', null, tmpFile, uploadFields, authHeaders)
+        return { success: result.data?.success || false, data: result.data }
+      } finally {
+        try { fs.unlinkSync(tmpFile) } catch {}
+      }
+    } catch (e) {
+      return { success: false, error: e.message }
+    }
+  })
 
   // 登录管理后台
   ipcMain.handle('admin:login', async (event, { serverUrl, username, password }) => {
