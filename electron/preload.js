@@ -202,8 +202,8 @@ contextBridge.exposeInMainWorld('api', {
   },
   // 脚本 API（AppKey 签名认证，扩展端使用）
   scripts: {
-    search: ({ serverUrl, appKey, appSecret, keyword }) =>
-      ipcRenderer.invoke('scripts:search', { serverUrl, appKey, appSecret, keyword }),
+    search: ({ serverUrl, appKey, appSecret, keyword, page, limit }) =>
+      ipcRenderer.invoke('scripts:search', { serverUrl, appKey, appSecret, keyword, page, limit }),
     getDetail: ({ serverUrl, appKey, appSecret, id }) =>
       ipcRenderer.invoke('scripts:get-detail', { serverUrl, appKey, appSecret, id }),
     upload: ({ serverUrl, appKey, appSecret, name, code, description, categoryId, urlPattern, toolType, toolConfig, metadata }) =>

@@ -1517,18 +1517,22 @@ function registerIpcHandlers() {
     }
   }
 
-  // 获取脚本列表（AppKey 签名，使用 agent-index 接口）
-  ipcMain.handle('scripts:search', async (event, { serverUrl, appKey, appSecret, keyword }) => {
+  // 获取脚本列表（AppKey 签名，支持分页）
+  ipcMain.handle('scripts:search', async (event, { serverUrl, appKey, appSecret, keyword, page, limit }) => {
     try {
       if (!serverUrl || !appKey || !appSecret) {
         return { success: false, error: '请先在设置中配置服务器地址和 AppKey/AppSecret' }
       }
       const baseUrl = serverUrl.replace(/\/+$/, '')
       const headers = generateAppAuthHeaders(appKey, appSecret)
-      // 有关键词用 search 接口，无关键词用 agent-index 接口
+      // 构造分页参数
+      const pg = page || 1
+      const lm = limit || 20
+      const offset = (pg - 1) * lm
+      // 有关键词用 search 接口（语义搜索），无关键词用 agent-index 接口（分页）
       const url = keyword
-        ? `${baseUrl}/api/scripts/search?q=${encodeURIComponent(keyword)}`
-        : `${baseUrl}/api/scripts/agent-index`
+        ? `${baseUrl}/api/scripts/search?q=${encodeURIComponent(keyword)}&limit=${lm}`
+        : `${baseUrl}/api/scripts/agent-index?page=${pg}&limit=${lm}&offset=${offset}`
       const res = await fetchWithTimeout(url, { headers }, 15000)
       if (!res.ok) return { success: false, error: `HTTP ${res.status}` }
       const data = await res.json()

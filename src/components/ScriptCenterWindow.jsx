@@ -159,7 +159,7 @@ export default function ScriptCenterWindow() {
     try {
       const kw = keyword !== undefined ? keyword : searchKeyword
       const result = await window.api.scripts.search({
-        serverUrl, appKey, appSecret, keyword: kw,
+        serverUrl, appKey, appSecret, keyword: kw, page: usePage, limit: 20,
       })
       if (result.success && result.data) {
         // 兼容多种返回结构：数组 / { data: [...] } / { list: [...] }

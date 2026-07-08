@@ -702,8 +702,15 @@ exports.injectList = async (req, res) => {
 // 与 injectList 区别：本接口需要 appAuth 鉴权，且返回 description
 exports.indexForAgent = async (req, res) => {
   try {
+    // 支持分页参数（默认返回全部）
+    const { page, limit, offset } = req.query
+    const pg = parseInt(page) || 1
+    const lm = parseInt(limit) || 1000  // 默认返回全部
+    const off = parseInt(offset) || (pg - 1) * lm
+
     const [rows] = await pool.query(
-      "SELECT id, name, description, url_pattern, tool_type FROM scripts WHERE status = 'published' ORDER BY id DESC"
+      "SELECT id, name, description, url_pattern, tool_type FROM scripts WHERE status = 'published' ORDER BY id DESC LIMIT ? OFFSET ?",
+      [lm, off]
     )
     // 精简描述（避免注入过长）
     const list = rows.map(r => ({
