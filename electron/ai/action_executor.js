@@ -245,8 +245,10 @@ ${JSON.stringify(pageContext?.domSummary || [], null, 2)}`
       // 清除上次结果
       await webContents.executeJavaScript('delete window.__actionResult')
 
-      // 执行代码
-      await webContents.executeJavaScript(jsCode)
+      // 执行代码（使用 new Function 包装，与 Chrome 扩展 injectToolboxScript 一致）
+      // 这样顶层 return 语句不会报 SyntaxError，且代码在函数作用域中执行
+      const wrappedCode = `try { new Function(${JSON.stringify(jsCode)})() } catch(e) { window.__actionResult = { success: false, message: e.message, stack: e.stack } }`
+      await webContents.executeJavaScript(wrappedCode)
 
       // 检查是否发生了导航
       const urlAfter = webContents.getURL()

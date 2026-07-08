@@ -35,14 +35,18 @@ async function loadConfigFromMain() {
   try {
     const result = await window.api.config.getSync()
     if (result?.success && result.data) {
-      return {
+      const cfg = {
         adminServerUrl: result.data.serverUrl || defaultConfig().adminServerUrl,
         appKey: result.data.appKey || '',
         appSecret: result.data.appSecret || '',
       }
+      return cfg
     }
-  } catch { /* 忽略 */ }
-  return defaultConfig()
+    return null
+  } catch (e) {
+    console.warn('[ScriptCenter] loadConfigFromMain error:', e)
+    return null
+  }
 }
 
 function loadSavedScripts() {
@@ -123,10 +127,12 @@ export default function ScriptCenterWindow() {
   useEffect(() => {
     const interval = setInterval(async () => {
       const cfg = await loadConfigFromMain()
-      setConfig(prev => {
-        if (JSON.stringify(prev) !== JSON.stringify(cfg)) return cfg
-        return prev
-      })
+      if (cfg) {
+        setConfig(prev => {
+          if (JSON.stringify(prev) !== JSON.stringify(cfg)) return cfg
+          return prev
+        })
+      }
     }, 3000)
     return () => clearInterval(interval)
   }, [])
@@ -174,17 +180,26 @@ export default function ScriptCenterWindow() {
     }
   }, [config, searchKeyword])
 
-  // 首次加载：通过 IPC 从主进程读取 syncConfig，然后加载远程脚本
+  // 首次加载：通过 IPC 从主进程读取 syncConfig
+  const [configLoaded, setConfigLoaded] = useState(false)
   useEffect(() => {
     (async () => {
       const cfg = await loadConfigFromMain()
-      setConfig(cfg)
-      if (cfg.adminServerUrl && cfg.appKey && cfg.appSecret) {
-        loadRemoteScripts(1, '')
+      if (cfg) {
+        setConfig(cfg)
       }
+      setConfigLoaded(true)
     })()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // config 加载完成后自动加载远程脚本
+  useEffect(() => {
+    if (configLoaded && config.adminServerUrl && config.appKey && config.appSecret) {
+      loadRemoteScripts(1, '')
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [configLoaded, config.adminServerUrl, config.appKey, config.appSecret])
 
   const handleSearch = () => {
     setSearchKeyword(searchInput)
