@@ -3,18 +3,20 @@
  *
  * 原理（已实测验证 2026-07-10）：
  * - x-s-common 通过 xs-common-node.js 动态生成（从 vendor-dynamic.8cd1891c.js 逆向）
- * - feed API 的 x-s 可跨 note_id 静态复用（不绑定请求体）
- * - x-s-common 动态生成不绑定 note_id，可批量使用
+ * - x-s 通过 webmsxyw-node.js 动态生成（XYW_ 格式，每次请求唯一签名）
+ * - 双动态签名：每次 feed 请求都生成唯一的 x-s + x-s-common，避免静态复用被检测
+ * - 搜索 API 仍使用静态 XYS_ 签名（请求量低，3次/关键词）
  * - 需要从搜索结果中获取 noteId + xsec_token
  *
  * 流程（每关键词独立）：
  *   1. 搜索关键词获取笔记列表（含 xsec_token）
- *   2. 逐条采集笔记详情（动态 x-s-common）
+ *   2. 逐条采集笔记详情（动态 x-s + 动态 x-s-common）
  *   3. 保存到独立 JSON 文件并输出结果
  *   4. 进入下一关键词
  *
  * 使用方法：
  *   node xhs-feed-collect.js
+ *   set START_INDEX=5 && node xhs-feed-collect.js  （断点续采）
  */
 
 'use strict';
@@ -25,6 +27,7 @@ const path = require('path');
 const zlib = require('zlib');
 const crypto = require('crypto');
 const { generateXsCommon } = require('./xs-common-node');
+const { init: initWebmsxyw, sign: signWebmsxyw } = require('./webmsxyw-node');
 
 // ======================= 配置 =======================
 
@@ -32,7 +35,7 @@ const OUTPUT_DIR = path.join(__dirname, 'data');
 const FEED_DIR = path.join(OUTPUT_DIR, 'feed');
 if (!fs.existsSync(FEED_DIR)) fs.mkdirSync(FEED_DIR, { recursive: true });
 
-// Cookie（err.json 2026-07-10 最新更新）
+// Cookie（用户最新提供 2026-07-10）
 const COMMON_COOKIES = {
   abRequestId: '51b7063a-c933-567e-ab79-0b722391e05d',
   a1: '19c8eaa1ff3spyelsj2p2752b30l5wnu5a2iv9kfb50000150045',
@@ -43,24 +46,24 @@ const COMMON_COOKIES = {
   'x-rednote-datactry': 'CN',
   'x-rednote-holderctry': 'CN',
   webBuild: '6.31.2',
-  websectiga: 'f47eda31ec99545da40c2f731f0630efd2b0959e1dd10d5fedac3dce0bd1e04d',
-  sec_poison_id: 'f39f49d3-1c96-4876-8db3-796f031a3dc0',
+  websectiga: '2845367ec3848418062e761c09db7caf0e8b79d132ccdd1a4f8e64a11d0cac0d',
+  sec_poison_id: 'c3b96c51-a0e6-4950-a37f-9ea86486e9a1',
   loadts: '1783600265006',
   unread: '{%22ub%22:%2263f6bb200000000027010748%22%2C%22ue%22:%22640745c5000000001303ed88%22%2C%22uc%22:13}',
-  web_session: '040069b8c9d7189e86b4a8dc7a384be8270a74',
-  id_token: 'VjEAAHrHkdJRYgusy2J/qh4zmeQwLq6eb5OPExos3UDrNjxy90fYs+tqCrq/Bf+N8CL5be6nPGLvRKfaubZm3obtZfKBg8T4QGkP2V9DfsE51Kp8LHu/hjBYR9VMyAUnpP2nxQvX',
+  web_session: '040069b8c68c0d98c54467f67a384bbf7553bd',
+  id_token: 'VjEAANhwLOxSoDzPXeRVDhHelhhunlYN+dguETDo8/MplQYvOS6o8+ARuz+oPXhk1++ArPEHn0mTGMJj+yDDSu0yXVZUpELj22z+HblhCgKsW0eCHjLP/81oXGXkkst/Qf7BZIav',
 };
 
-const SEARCH_ACW_TC = '0ad5824917835991233158528ecdef7e72b9deb45464b8525c7c94912e1ec4';
+const SEARCH_ACW_TC = '0ad6226c17836108952176343e3ad47211aef67a8af1abf13f3b33afdd42ac';
 const FEED_ACW_TC = '0ad526c017835991173548419e19e9286dd6f92597046eff63a01078089887';
 
-// Search v2 API 签名（err.json 最新）
-const SEARCH_X_S = 'XYS_2UQhPsHCH0c1PUh7HjIj2erjwjQhyoPTqBPT49pjHjIj2eHjwjQgynEDJ74AHjIj2ePjwjQTJdPIPAZlg94aGLTl4/clG7pIq9+IPoSb4emk8rQ/4BktPd+awepnLf4x2bSxGFDUyfEl+9DF8rhhGM4zzFMFygW6LgSI+rl/znRhGFRS4B4O408E4LYD8rzH20Qh4Bzl2bq9cL+jJL8ycAbnzeQYP0mwGdqI8BWF8AmmPrkHaMY/admPzp49PsT+c9EIqMQCLDkcpnbLP9I7JFT/Jd4nnSk0yLLIaSQQyAmOarEaLSz+qDTIwr8i/0pPzFhMPBQOJni7GUVIcaHVHdWFH0ijJ9Qx8n+FHdF=';
-const SEARCH_X_S_COMMON = '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';
-const SEARCH_RAP_PARAM = 'ByQBBQAAAAEAAAAUAAAB9OS6Cu4AACg9AAAAWwAAAAAAAAAAYnR5YTmRgQzEEdDHolc9of5S9mocAAAAEJCtqtFAtxDyaK41SnxqryqcO/hGDxX4gvjSZ397WyctvQwOAly2WqI5TNziShRiwof7o49UoCwBjdWWgoACeaadAvVdYISz8lOaAcqj6qzGK59p5eqhfpZ3ig4pYp2itSWMK3W+Cqrfvnbm9ZXnxU/E9O4/r9+L/Wos708kU8UUSmKJbXxuFrtDuzETMh7YNeL3oK5wzFz+05wp2inrHUYH4cSwUv0FdEsAebIkya7gL4pI5PnmdYIKXR6TA4LRkNvrK6CiwpNZSRzeFlFUtCTaeq6DkLUTKGUyUvggjIuzb46JmQWyT1aA/5xlo9l/u4rz7FjTexAMdr6CNQbjOu/5HcF7KmTVfKI/cMAqHbY71ktpTGoP4srpC19T9jn4r4Zuv4lkePAh3vG+Wr3U37zXnqP3bygD7vZhj531Ap1fTQ81MvZevwBKfNY4wI7Rdez46Lgy3yDJ+uZk/bOpXVig//43Y8GMNlnvSsrrZUTXqSKr7WJIqSTRrkR6uns/0LrgFogspudb7x07nGOCuxkAo3PlaWNBbxOyXzkwpytmxiNyUjXlEv+zkRRQmrTH8UX0Fj7SMXz4YNHcqsNlA2rfmn2Aa+gMQgz62tcC6zyyojeMiHXN5LyGtTiuCwk+wOw3Bo1ozYl5UAMr7H/xIQAAAAHo';
+// Search v2 API 签名（用户最新提供，静态复用，请求量低 3次/关键词）
+const SEARCH_X_S = 'XYS_2UQhPsHCH0c1PUh7HjIj2erjwjQhyoPTqBPT49pjHjIj2eHjwjQgynEDJ74AHjIj2ePjwjQTJdPIPAZlg94aGLTlGMS1JBp0nLVFPokb4emk8rQ/4BktPd+awepnGDVA2bSxGFDUy0by+7iF8o+8aobsJsTBcLpGLgSI+rl/znRhGFRS4B4O408E4LYD8rzH20Qh4Bzl2bq9cL+jJL8ycAbnzeQYP0mwGdqI8BWF8AmmPrkHaMY/admPzp49PsT+c9EIqMQCLDkcpnbLP9lt/LT/Jd4nnSk0yLLIaSQQyAmOarEaLSz+G9TNP0mPGSSO/LlizFuIqBknpAmOPaHVHdWFH0ijJ9Qx8n+FHdF=';
+const SEARCH_X_S_COMMON = '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';
+const SEARCH_RAP_PARAM = 'ByQBBgAAAAEAAAAUAAADBA7uh+kAACg9AAAAgQAAAAAAAAAAbGRtMHVm5gMEVov0bE2bhYIUoxcvswAAABDyKyKT8gzcsIEgeUuuY+mLJM3hRAR2zwWLFnZaozYrRNMADvYhVlZ51inm+dSfGW1hgAl2Q2pSmO/DJEDC54YwffgGkMMDZZfS62iXlc21Z3dr/8aBEU0hTjLjDgSTaS/fq5+e28qVfzfiT5r00Lktsg0VgbajLO2janG9WdgEjjnY49JF1hsbtJuUCJoE3FVPfMDGYPO+k5GSAR0nIuBeSnLOhelKZmzBuQ+HIWSDQfM+CmDsTkcfcv7zpPqA1t0vFX13BER/BN/4CHrC11l5cZOe3N5FveNVRBBI3sTBSdwVV3KGke7XN3PtwY3TU3iRd96OVQPDlD7sIUNzL9JBJjCDOyzGjWESctHmyLbPXDoZ4sIO0QNyv57ZDxeDWaJcL39mt5R6djFVw4G5SmJhWkVL75EEdeAVDn/146q+qvVUiQB1sN0+jxZlQLNeTvLLwbM/Dw8sUgWi6FO9mJEoLbaK0bgF+IjDyNcTELccJSbs9GoM8DunTs4CQAWFDTn9GAvTeYYohTcUUch9wyVtT90Z4IZW+H/kSTfFQ3pttBQ7U38XwylGtsiMruBpHHgLFM/2FNyZOIEmr7SviDPJ+ceUGKU9GGYJSE0YoovwW0O4MhtMHyVHkmBhKmTzjaILOs2OV+sGBX5o9AHgbTsotRldy1Nocpmn9s5S0YrknsdKQKK7q+Vbf4rI0DXKUAVzqzXKupOQzMBPndBwwKDiZA5zf8KeTH+FhPtsWdQn1AZ+Ql7NT9AP3E1hBaKYL9k9uZCKUogpxa8NCV5gTnwTo1wTM7s5Rnatb5Jw3g6xGHqUjDKzjQ88X4Ga4je0iL/e5ZKhC2k4VSeblyNT8YE6WTX/lwv+NBB6uq+l+SCcZU9PQg68qbdSaJdh+BWb4wno61FuJvUKGrgLg4ylFwF1iTBvpLS+HB4EFh0FbSI8eu9XpcPmHYrrRz1ida+ZZwwojEk44wRvRqltZrc3fYdVi+F4GJ2EaSv9K7YRdrRzlDsO1bbd8zBEh7hd/q4lTpoAAAL8';
 
-// Feed API 签名（err.json 最新，x-s 可跨 note_id 静态复用）
-const FEED_X_S = 'XYS_2UQhPsHCH0c1PUh7HjIj2erjwjQhyoPTqBPT49pjHjIj2eHjwjQgynEDJ74AHjIj2ePjwjQTJdPIPAZlg94aGLTlLnkyq0SNafzrPoSb4emk8rQ/4BktPd+awepnLsRx2bSxGFDUy0bA+FDF8eYB4043P74LJ0G6LgSI+rl/znRhGFRS4B4O408E4LYD8rzH20Qh4Bzl2bq9cL+jJL8ycAbnzeQYP0mwGdqI8BWF8AmmPrkHaMY/admPzp49PsT+c9EIqMQCLDkcpnbLP9II4DT/Jd4nnSk0yLLIaSQQyAmOarEaLSz+G0Y+PgzF2/47qn4HN7PFzfTSPgkNLsHVHdWFH0ijJ9Qx8n+FHdF=';
+// Feed API x-rap-param（静态复用，webmsxyw 不生成此字段）
+// x-s 和 x-s-common 改为每次请求动态生成（见 fetchFeed）
 const FEED_RAP_PARAM = 'ByQBBAAAAAEAAAAUAAACBOsMpU8AACg9AAAAWQAAAAAAAAAAcml4MyvJPwHgP2jn0gq16EBy9aIAAAAQDEEmGkLCeWXD8u+orGeQxznZqvBugRo6CpWDktlqsJ5Ebl19XyGrFRx8qMk7Xwlu7fZQbYkNppIdK/JwugOheNA/2jN8OJq9q+6fLH6CwNeTC8qF3pHkq+0AjPX7Pi30dNRN2rtiQ/V9ziwKZnG/ZC3Ttm8WkHW1XbwhIvBvFbTCZbGUD8aP5EEM9L6dLKZhUgpoE0sf3e5Vbkjz3IM+6USLr17NqJo8bfYdaHWU80zbPD6Dymw2ao6MvYqxiH56mtO5ROhzp9d1niWexlJiOnbVUkxPkhjazKrZP+1f+NOaO0VBtsDTj8ztlPAzEfwaH+RTr1sFpIOvTNE/LWCm/xUS4UI1ZSyhbWMo8e1pCR5AThFIAgNSOqfRzi9tzHQa9zOyyio8iHWQWthlGYq89tVTjvkENmWjJC8EIjCCZ98Y630t+l/uAHXG42Qxi0yBKUeEBLMoW7IcAbKgZjJVJvkWP2dO+8O9NgqvW9bRaoBB+RgeujtI90uBhmdQ+AOS0jNoApEg9CmOOh4g9v8yFsIidbu+i/gwshsfRhBmm3PpROlRFy3Mj9EkSCdYeGkuzElWafMdPuR2kw7L0cy3gVPVxRryjmtQI5GXyyoHSBIdavEdDnP4tUK2XOecbtTzQoGr1rgPZfU7d8Qf2NG8vn2P15XeKp+pAkj4/gQMqDMAAAIA';
 
 const KEYWORDS = [
@@ -76,14 +79,18 @@ const START_FROM_INDEX = process.env.START_INDEX ? parseInt(process.env.START_IN
 const PAGES_PER_KEYWORD = 3;
 const PAGE_SIZE = 20;
 const SEARCH_DELAY = 1000;
-const FEED_DELAY = 3500;          // 详情采集间隔（增大避免限流）
-const FEED_RETRY_DELAY = 8000;    // 限流重试等待
-const KEYWORD_PAUSE = 5000;       // 关键词间暂停
+const FEED_DELAY_MIN = 4000;      // 详情采集最小间隔
+const FEED_DELAY_MAX = 7000;      // 详情采集最大间隔（随机抖动）
+const FEED_RETRY_DELAY = 10000;   // 限流重试等待
+const KEYWORD_PAUSE_MIN = 15000;  // 关键词间最小暂停
+const KEYWORD_PAUSE_MAX = 30000;  // 关键词间最大暂停（随机抖动）
+const MAX_KEYWORDS_PER_SESSION = 5; // 单次最多采集关键词数（防风控）
 
 // ======================= 工具函数 =======================
 
 function log(msg) { console.log(`[${new Date().toLocaleTimeString('zh-CN')}] ${msg}`); }
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+function randomDelay(min, max) { return Math.floor(min + Math.random() * (max - min)); }
 function randomHex(len) { return crypto.randomBytes(len).toString('hex'); }
 function randomId(len = 21) {
   const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
@@ -157,7 +164,8 @@ function fetchSearch(keyword, page) {
 
 // ======================= Feed 详情 API =======================
 
-let feedSigCount = 0;
+// sigCount 模拟真实浏览器的签名计数（保持在低值，避免被风控检测）
+let feedSigCount = Math.floor(Math.random() * 5) + 1; // 起始 1-5
 
 function fetchFeed(noteId, xsecToken) {
   const body = {
@@ -168,7 +176,24 @@ function fetchFeed(noteId, xsecToken) {
     xsec_token: xsecToken,
   };
 
+  const bodyStr = JSON.stringify(body);
+
+  // sigCount 递增但不无限增长（模拟真实浏览器，偶尔重置）
   feedSigCount++;
+  if (feedSigCount > 30) feedSigCount = Math.floor(Math.random() * 5) + 1; // 到30后重置
+
+  // 动态生成 x-s（XYW_ 格式，每次请求唯一，绑定 API 路径 + 请求体）
+  let dynamicXs, dynamicXt;
+  try {
+    const signResult = signWebmsxyw('/api/sns/web/v1/feed', bodyStr);
+    dynamicXs = signResult['X-s'];
+    dynamicXt = signResult['X-t'];
+  } catch (e) {
+    log(`  [签名] webmsxyw 生成失败: ${e.message}`);
+    return Promise.resolve({ code: -996, msg: '签名生成失败: ' + e.message });
+  }
+
+  // 动态生成 x-s-common（纯 Node.js 算法，每次请求唯一）
   const dynamicXsc = generateXsCommon({
     platform: 'PC',
     url: '/api/sns/web/v1/feed',
@@ -193,11 +218,11 @@ function fetchFeed(noteId, xsecToken) {
     'sec-fetch-dest': 'empty', 'sec-fetch-mode': 'cors', 'sec-fetch-site': 'same-site',
     'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36',
     'x-b3-traceid': randomHex(8), 'x-rap-param': FEED_RAP_PARAM,
-    'x-s': FEED_X_S,
+    'x-s': dynamicXs,
     'x-s-common': dynamicXsc,
-    'x-t': String(Date.now()), 'x-xray-traceid': randomHex(16),
+    'x-t': dynamicXt || String(Date.now()), 'x-xray-traceid': randomHex(16),
     'xy-direction': '18',
-  }, JSON.stringify(body));
+  }, bodyStr);
 }
 
 // ======================= 详情提取 =======================
@@ -247,7 +272,7 @@ async function collectKeyword(keyword, keywordIndex) {
     if (resp.code !== 0) {
       log(`  [搜索] page ${page} 错误: code=${resp.code} msg=${resp.msg || ''}`);
       if (resp.code === -100) { log(`  ⛔ Cookie被标记！`); return { notes: [], details: [], stopped: true }; }
-      await sleep(SEARCH_DELAY * 2);
+      await sleep(randomDelay(2000, 4000));
       continue;
     }
     const items = resp.data?.items || [];
@@ -260,7 +285,7 @@ async function collectKeyword(keyword, keywordIndex) {
       }
     }
     log(`  [搜索] page ${page}: ${items.length} 条，有效 ${notes.length} 条`);
-    await sleep(SEARCH_DELAY);
+    await sleep(randomDelay(1000, 2000));
   }
   log(`  [搜索] 完成，共 ${notes.length} 条有效笔记`);
 
@@ -305,6 +330,10 @@ async function collectKeyword(keyword, keywordIndex) {
     } else if (resp.code === -100) {
       log(`  ⛔ Cookie被标记！停止采集`);
       return { notes, details, failures, stopped: true };
+    } else if (resp.code === 300011 && resp.msg && resp.msg.includes('账号异常')) {
+      // 300011 + "账号异常" = 账号被风控，必须停止
+      log(`  ⛔ 账号被风控（账号异常）！停止采集`);
+      return { notes, details, failures, stopped: true };
     } else if (resp.code === -510000 || resp.code === 300031) {
       // 笔记不存在或已下架
       fail++;
@@ -315,7 +344,7 @@ async function collectKeyword(keyword, keywordIndex) {
       failures.push({ noteId: note.noteId, xsecToken: note.xsecToken, code: resp.code, msg: resp.msg || '未知错误' });
     }
 
-    await sleep(FEED_DELAY);
+    await sleep(randomDelay(FEED_DELAY_MIN, FEED_DELAY_MAX));
   }
 
   // Step 3: 保存到独立文件
@@ -356,22 +385,41 @@ async function collectKeyword(keyword, keywordIndex) {
 // ======================= 主流程 =======================
 
 async function main() {
+  // 初始化 webmsxyw（加载 ds.js + sign.js，设置浏览器环境）
+  log('初始化 webmsxyw 签名引擎...');
+  const cookieStr = buildCookieString(SEARCH_ACW_TC);
+  try {
+    await initWebmsxyw({ cookie: cookieStr });
+  } catch (e) {
+    log(`⛔ webmsxyw 初始化失败: ${e.message}`);
+    log('  请检查 ds.js / sign.js 是否存在，或网络连接是否正常');
+    process.exit(1);
+  }
+
   log('====================================');
   log('小红书笔记详情批量采集（按关键词）');
-  log(`搜索API: so.xiaohongshu.com v2`);
-  log(`详情API: edith.xiaohongshu.com feed`);
-  log(`x-s-common: 动态生成 (xs-common-node.js)`);
-  log(`详情间隔: ${FEED_DELAY}ms | 关键词间暂停: ${KEYWORD_PAUSE}ms`);
-  log(`关键词数量: ${KEYWORDS.length}`);
+  log(`搜索API: so.xiaohongshu.com v2 (静态 XYS_ 签名)`);
+  log(`详情API: edith.xiaohongshu.com feed (动态 XYW_ 签名)`);
+  log(`x-s: 动态生成 (webmsxyw-node.js) | x-s-common: 动态生成 (xs-common-node.js)`);
+  log(`详情间隔: ${FEED_DELAY_MIN}-${FEED_DELAY_MAX}ms (随机) | 关键词间: ${KEYWORD_PAUSE_MIN}-${KEYWORD_PAUSE_MAX}ms (随机)`);
+  log(`单次最多: ${MAX_KEYWORDS_PER_SESSION} 个关键词`);
   if (START_FROM_INDEX > 0) {
     log(`从第 ${START_FROM_INDEX + 1} 个关键词继续采集: "${KEYWORDS[START_FROM_INDEX]}"`);
   }
   log('====================================');
 
   const summary = [];
+  let sessionCount = 0;
 
   for (let i = START_FROM_INDEX; i < KEYWORDS.length; i++) {
+    if (sessionCount >= MAX_KEYWORDS_PER_SESSION) {
+      log(`\n⚠️ 已达到单次最多 ${MAX_KEYWORDS_PER_SESSION} 个关键词限制，停止采集`);
+      log(`   下次运行: set START_INDEX=${i} && node xhs-feed-collect.js`);
+      break;
+    }
+
     const result = await collectKeyword(KEYWORDS[i], i);
+    sessionCount++;
     summary.push({
       keyword: KEYWORDS[i],
       notes: result.notes.length,
@@ -381,13 +429,15 @@ async function main() {
     });
 
     if (result.stopped) {
-      log(`\n⛔ 采集被中断（Cookie标记或签名失效），已完成 ${i + 1}/${KEYWORDS.length} 个关键词`);
+      log(`\n⛔ 采集被中断，已完成 ${i + 1}/${KEYWORDS.length} 个关键词`);
+      log(`   下次运行（换新cookie后）: set START_INDEX=${i} && node xhs-feed-collect.js`);
       break;
     }
 
-    if (i < KEYWORDS.length - 1) {
-      log(`\n  关键词间暂停 ${KEYWORD_PAUSE}ms...`);
-      await sleep(KEYWORD_PAUSE);
+    if (i < KEYWORDS.length - 1 && sessionCount < MAX_KEYWORDS_PER_SESSION) {
+      const pauseMs = randomDelay(KEYWORD_PAUSE_MIN, KEYWORD_PAUSE_MAX);
+      log(`\n  关键词间暂停 ${pauseMs}ms...`);
+      await sleep(pauseMs);
     }
   }
 

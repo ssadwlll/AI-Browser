@@ -866,12 +866,12 @@ async function runAgent(ctx) {
   }
 
   // ===== 上限策略 =====
-  const ABSOLUTE_MAX_ROUNDS = 100
+  const ABSOLUTE_MAX_ROUNDS = 500
   const effectiveMaxRounds = Math.min(maxRounds, ABSOLUTE_MAX_ROUNDS)
   if (effectiveMaxRounds !== maxRounds) {
     console.warn(`[Agent] maxRounds ${maxRounds} 超过绝对硬上限 ${ABSOLUTE_MAX_ROUNDS}，自动收敛`)
   }
-  const MAX_TOOL_CALLS = Math.min(300, Math.max(30, effectiveMaxRounds * 3))
+  const MAX_TOOL_CALLS = Math.min(1500, Math.max(30, effectiveMaxRounds * 3))
   let aiRequestCount = 0
   let totalToolCalls = 0
   let searchResults = []
@@ -2595,7 +2595,7 @@ ${allData.length > 0 ? '全局存储:\n' + allData.join('\n') : ''}${payloadItem
   const reachedToolCalls = totalToolCalls
   _debugLog('Agent终止: 达到最大轮次', { effectiveMaxRounds, maxRounds, aiRequestCount, executedToolsCount: executedTools.length })
   const capNote = effectiveMaxRounds < maxRounds
-    ? `（后端配置 ${maxRounds} 轮，超过绝对硬上限 100，已收敛为 ${effectiveMaxRounds} 轮）`
+    ? `（后端配置 ${maxRounds} 轮，超过绝对硬上限 500，已收敛为 ${effectiveMaxRounds} 轮）`
     : ''
   const finalNote = `⚠️ Agent 已达到最大请求次数上限，任务可能未完成。\n实际执行：${reachedRounds}/${effectiveMaxRounds} 轮 AI 请求，${reachedToolCalls} 次工具调用${capNote}。\n建议：1) 拆分任务为更小子任务 2) 简化需求描述 3) 后端调高 agent_max_rounds 配置（当前=${maxRounds}）。`
   // 确保最终消息通过流式发送到前端（而不是仅 agentError）

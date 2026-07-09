@@ -809,8 +809,8 @@ function registerIpcHandlers() {
     // 中止状态
     reverseRunnerState = { _aborted: false }
 
-    // 解析最大轮次：前端传入优先，否则使用默认值 20
-    const effectiveMaxRounds = Math.max(1, Math.min(100, Number(maxRounds) || 20))
+    // 解析最大轮次：前端传入优先，否则使用默认值 20（上限 500，信任后端配置）
+    const effectiveMaxRounds = Math.max(1, Math.min(500, Number(maxRounds) || 20))
 
     // 异步启动分析
     runReverseAnalysis({

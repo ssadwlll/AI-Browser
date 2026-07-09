@@ -163,16 +163,36 @@ async function runReverseAnalysis(opts) {
   }))
 
   // ===== 主循环 =====
+  let wasAborted = false  // 中止标志（用于循环后生成总结）
   while (aiRequestCount < maxRounds) {
     // 检查中止
     if (opts._aborted) {
-      sendEvent('agentStatus', { text: '任务已中止' })
+      wasAborted = true
+      sendEvent('agentStatus', { text: '任务已中止，正在生成当前进度总结...' })
       break
     }
 
     aiRequestCount++
     sendEvent('agentStatus', { text: `第${aiRequestCount}轮分析中...` })
     console.log(`[Reverse] 第${aiRequestCount}轮开始`)
+
+    // 收敛提示：80% 预算时提醒，最后一轮强制总结
+    if (maxRounds >= 10 && aiRequestCount === Math.floor(maxRounds * 0.8)) {
+      messages.push({
+        role: 'system',
+        content: `⏱️ 预算提醒：已使用 ${aiRequestCount}/${maxRounds} 轮（80%）。剩余 ${maxRounds - aiRequestCount} 轮，请加快推进核心分析，准备总结已有发现。`,
+        _temp: true,
+      })
+      console.log(`[Reverse] 注入 80% 收敛提示`)
+    }
+    if (maxRounds >= 5 && aiRequestCount === maxRounds - 1) {
+      messages.push({
+        role: 'system',
+        content: `⚠️ 最后一轮！这是第 ${aiRequestCount}/${maxRounds} 轮。请立即调用 finish_task 工具，总结当前所有分析结果。即使分析未完成，也必须输出总结报告，包括：已确认的发现、加密算法、关键函数位置、验证状态、未完成步骤、后续建议。`,
+        _temp: true,
+      })
+      console.log(`[Reverse] 注入最后一轮强制总结提示`)
+    }
 
     // 构建请求体
     const effectiveModel = modelInfo.modelId || aiConfig.model
@@ -408,11 +428,66 @@ async function runReverseAnalysis(opts) {
     }
   }
 
-  // 达到最大轮次
-  if (aiRequestCount >= maxRounds) {
-    const finalNote = `⚠️ 逆向分析已达到最大轮次(${maxRounds})。\n已执行：${aiRequestCount} 轮分析，${totalToolCalls} 次工具调用。\n建议：1) 缩小分析范围 2) 手动查看捕获的请求 3) 分步骤分析 4) 在逆向窗口顶部调大「最大轮次」设置`
-    sendEvent('agentStatus', { text: '达到最大轮次，生成总结...' })
-    await streamToUI(sendEvent, finalNote)
+  // ===== 循环结束：生成最终总结 =====
+  // 无论是达到最大轮次还是被中止，都通过 LLM 生成总结（而非静态文本）
+  // 这样即使分析中断，已有发现也能被总结保存
+  const needSummary = wasAborted ? (aiRequestCount > 2) : (aiRequestCount >= maxRounds)
+  if (needSummary) {
+    const reason = wasAborted ? '用户中止' : `达到最大轮次(${maxRounds})`
+    sendEvent('agentStatus', { text: `${reason}，生成总结报告...` })
+    console.log(`[Reverse] ${reason}，调用 LLM 生成最终总结`)
+
+    // 注入总结提示（不包含 tools，强制输出文本）
+    messages.push({
+      role: 'system',
+      content: `分析已${reason}。已执行 ${aiRequestCount} 轮分析，${totalToolCalls} 次工具调用。\n请基于以上所有分析内容，输出完整的逆向分析总结报告。格式：\n## 分析目标\n（简述本次分析的目标）\n## 已确认发现\n（列出已确认的加密算法、关键函数、参数结构等）\n## 关键函数位置\n（函数名、所在文件、行号）\n## 验证状态\n（哪些已验证、哪些待验证）\n## 未完成步骤\n（列出尚未完成的分析步骤）\n## 后续建议\n（下一步分析方向）`,
+      _temp: true,
+    })
+
+    try {
+      const messagesForSummary = messages.map(({ _temp, ...rest }) => rest)
+      const summaryBody = {
+        model: modelInfo.modelId || aiConfig.model,
+        messages: messagesForSummary,
+        temperature: 0.3,
+        max_tokens: Math.min(Math.max((modelInfo.maxTokens || aiConfig.maxTokens || 4096), 2048), 8192),
+        // 不传 tools，强制输出文本总结
+      }
+
+      const url = await configService.getAIProxyUrl()
+      const headers = await configService.generateAuthHeaders(auth.appKey, auth.appSecret)
+      const controller = new AbortController()
+      const timeoutId = setTimeout(() => controller.abort(), API_TIMEOUT_MS)
+      const res = await fetch(url, {
+        method: 'POST', headers,
+        body: JSON.stringify(summaryBody),
+        signal: controller.signal,
+      })
+      clearTimeout(timeoutId)
+
+      if (res.ok) {
+        const summaryResp = await res.json()
+        const summaryText = summaryResp.choices?.[0]?.message?.content || ''
+        if (summaryText && summaryText.trim()) {
+          console.log(`[Reverse] 总结生成成功: ${summaryText.length} 字符`)
+          await streamToUI(sendEvent, summaryText)
+          sendEvent('conversationTaskDone', {
+            summary: summaryText,
+            totalRounds: aiRequestCount,
+            totalToolCalls,
+            aborted: wasAborted,
+          })
+        } else {
+          throw new Error('总结内容为空')
+        }
+      } else {
+        throw new Error(`API ${res.status}`)
+      }
+    } catch (e) {
+      console.error('[Reverse] LLM 总结生成失败:', e.message)
+      const fallback = `⚠️ 逆向分析${reason}。\n已执行：${aiRequestCount} 轮分析，${totalToolCalls} 次工具调用。\n（LLM 总结生成失败: ${e.message}）\n建议：查看上方分析过程中的工具调用记录，手动整理分析结果。`
+      await streamToUI(sendEvent, fallback)
+    }
   }
 
   sendEvent('agentDone', { totalRounds: aiRequestCount, totalToolCalls, durationMs: Date.now() - startTime })

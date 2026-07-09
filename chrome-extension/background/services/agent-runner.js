@@ -305,13 +305,13 @@ export async function runAgent(ctx) {
 
   // 上限策略：完全信任后端 agent_max_rounds 配置（管理员可调）
   // 仅保留一个绝对硬上限防止后端配错（如配成 9999），不影响正常使用
-  const ABSOLUTE_MAX_ROUNDS = 100
+  const ABSOLUTE_MAX_ROUNDS = 500
   const effectiveMaxRounds = Math.min(maxRounds, ABSOLUTE_MAX_ROUNDS)
   if (effectiveMaxRounds !== maxRounds) {
     console.warn(`[Agent] maxRounds ${maxRounds} 超过绝对硬上限 ${ABSOLUTE_MAX_ROUNDS}，自动收敛`)
   }
-  // 工具调用上限：基础 30，按轮数缩放，但不超过 300（每轮平均 3 次工具调用）
-  const MAX_TOOL_CALLS = Math.min(300, Math.max(30, effectiveMaxRounds * 3))
+  // 工具调用上限：基础 30，按轮数缩放，但不超过 1500（每轮平均 3 次工具调用）
+  const MAX_TOOL_CALLS = Math.min(1500, Math.max(30, effectiveMaxRounds * 3))
   let aiRequestCount = 0
   let totalToolCalls = 0
   let searchResults = []
@@ -1975,7 +1975,7 @@ ${allData.length > 0 ? '全局存储:\n' + allData.join('\n') : ''}${payloadItem
   }
 
   // ===== 循环结束：达到最大轮次 =====
-  // 上限完全由后端 agent_max_rounds 控制（仅 ABSOLUTE_MAX_ROUNDS=100 防配错）
+  // 上限完全由后端 agent_max_rounds 控制（仅 ABSOLUTE_MAX_ROUNDS=500 防配错）
   const reachedRounds = aiRequestCount
   const reachedToolCalls = totalToolCalls
   postToUI(tabId, { type: 'agentError', error: `Agent达到最大请求次数（已执行 ${reachedRounds}/${effectiveMaxRounds} 轮），请简化任务重试` })
