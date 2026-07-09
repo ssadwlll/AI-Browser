@@ -1,0 +1,213 @@
+小红书笔记搜索接口逆向分析报告
+一、接口分析
+1.1 核心搜索API
+URL: POST https://edith.xiaohongshu.com/api/sns/web/v1/search/notes
+Content-Type: application/json;charset=UTF-8
+1.2 请求参数（Body）
+| 参数 | 类型 | 说明 | |------|------|------| | keyword | string | 搜索关键词 | | page | number | 页码（从1开始） | | page_size | number | 每页数量（默认20） | | sort | string | 排序方式：general(综合)、time_descending(最新)、popularity_descending(最热) | | note_type | number | 笔记类型：0=全部、1=图文、2=视频 | | search_id | string | 搜索ID（UUID） | | session_id | string | 会话ID |
+
+1.3 关键请求头（签名相关）
+| Header | 说明 | |--------|------| | X-s | 签名值（核心） | | X-t | 时间戳（毫秒） | | X-s-common | 公共参数签名 | | X-b3-traceid | 链路追踪ID | | Cookie | 必须包含 web_session（登录态）和 a1、webId |
+
+1.4 响应结构
+{
+  "code": 0,
+  "success": true,
+  "data": {
+    "items": [
+      {
+        "id": "笔记唯一ID",
+        "noteId": "笔记展示ID",
+        "displayTitle": "标题",
+        "type": "normal/video",
+        "user": { "nickname": "作者昵称", "userId": "..." },
+        "cover": { "url": "封面图", "width": 1080, "height": 1440 },
+        "interactInfo": { "likedCount": 点赞数, "collectedCount": 收藏, "commentCount": 评论 }
+      }
+    ],
+    "hasMore": true/false,
+    "searchId": "..."
+  }
+}
+二、签名机制分析
+2.1 核心发现
+签名使用 ACE (Anti-Crawler Engine) 反爬系统，关键函数：
+
+签名函数: window._webmsxyw — 高度混淆的IIFE函数
+拦截器: Hook了 XMLHttpRequest.prototype.open 和 window.fetch
+拦截器入口: _sabo_d156d(w) — 在请求前注入签名头
+恢复函数: _sabo_46047(d[0]) — 调用原始函数
+2.2 签名配置 (window.anti_hp_sign_config)
+{
+  "signIncludesUrl": [
+    { "pattern": "api/sns/web/v1/homefeed", "mode": "endsWith" },
+    { "pattern": "api/sns/web/v1/search/notes", "mode": "endsWith" },
+    { "pattern": "api/sns/web/v1/user_posted", "mode": "includes" },
+    { "pattern": "api/sns/web/v1/feed", "mode": "endsWith" },
+    { "pattern": "api/sns/web/v1/comment/post", "mode": "endsWith" }
+  ],
+  "responseTransformConfigs": [
+    { "url": { "pattern": "api/sns/web/v1/search/notes", "mode": "endsWith" }, "listKey": "items" }
+  ]
+}
+2.3 签名函数源码（混淆后）
+// XHR.prototype.open 被替换为:
+function(){
+  return k={_sabo_eb61:this||A, _sabo_d0d8:k, _sabo_288c3:arguments, _sabo_e44b:x},
+    _sabo_d156d(w),      // 注入签名逻辑
+    k=k._sabo_d0d8,
+    _sabo_46047(d[0])    // 调用原始 open
+}
+
+// fetch 被替换为相同模式:
+function(){
+  return k={_sabo_eb61:this||A, _sabo_d0d8:k, _sabo_288c3:arguments, _sabo_e44b:x},
+    _sabo_d156d(w),
+    k=k._sabo_d0d8,
+    _sabo_46047(d[0])
+}
+2.4 相关全局变量
+| 变量 | 值/类型 | 说明 | |------|---------|------| | window._webmsxyw | function | 签名生成函数（核心） | | window.__rap_app_id__ | "xhs-pc-web" | 应用标识 | | window.__rap_hijack_installed__ | true | 拦截器已安装 | | window.xsecappid | "xhs-pc-web" | 安全应用ID | | window.xsecplatform | "Windows" | 平台标识 | | window.xhsFingerprintV3 | object | V3设备指纹 | | window.__INITIAL_STATE__ | object | SSR初始状态（含搜索数据） |
+
+三、批量采集方案
+方案A：Playwright浏览器自动化（推荐⭐）
+利用浏览器内的签名拦截器自动签名，无需逆向算法。
+
+const { chromium } = require('playwright');
+
+async function searchXhsNotes(keyword, pageNum = 1) {
+  const browser = await chromium.launchPersistentContext('./xhs_profile', {
+    headless: false,  // 首次需手动登录
+    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ...'
+  });
+  
+  const page = await browser.newPage();
+  
+  // 加载小红书首页（加载签名引擎）
+  await page.goto('https://www.xiaohongshu.com', { waitUntil: 'networkidle' });
+  
+  // 此时 window._webmsxyw 和拦截器已就绪
+  // 直接调用 fetch，拦截器自动添加签名
+  const result = await page.evaluate(async ({ keyword, pageNum }) => {
+    const url = 'https://edith.xiaohongshu.com/api/sns/web/v1/search/notes';
+    const body = {
+      keyword,
+      page: pageNum,
+      page_size: 20,
+      sort: 'general',
+      note_type: 0,
+      search_id: crypto.randomUUID(),
+      session_id: ''
+    };
+    
+    const resp = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json;charset=UTF-8' },
+      body: JSON.stringify(body),
+      credentials: 'include'
+    });
+    
+    return resp.json();
+  }, { keyword, pageNum });
+  
+  return result;
+}
+关键步骤：
+
+启动Playwright持久化浏览器上下文（保存登录态）
+首次运行手动登录小红书（扫码/手机号）
+登录后Cookie（web_session、a1、webId）自动持久化
+每次搜索前先加载首页让签名引擎初始化
+在 page.evaluate 中使用 fetch 调用API，拦截器自动签名
+方案B：批量采集脚本（完整示例）
+const { chromium } = require('playwright');
+const fs = require('fs');
+
+async function batchCollect(keywords, outputFile) {
+  const browser = await chromium.launchPersistentContext('./xhs_profile', {
+    headless: true,
+  });
+  
+  const page = await browser.newPage();
+  await page.goto('https://www.xiaohongshu.com', { waitUntil: 'networkidle' });
+  
+  const allNotes = [];
+  
+  for (const kw of keywords) {
+    console.log(`搜索: ${kw}`);
+    let pageNum = 1, hasMore = true;
+    
+    while (hasMore && pageNum <= 10) {  // 每个关键词最多10页
+      const data = await page.evaluate(async ({ kw, pageNum }) => {
+        const resp = await fetch(
+          'https://edith.xiaohongshu.com/api/sns/web/v1/search/notes',
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json;charset=UTF-8' },
+            body: JSON.stringify({
+              keyword: kw,
+              page: pageNum,
+              page_size: 20,
+              sort: 'general',
+              note_type: 0,
+              search_id: crypto.randomUUID(),
+              session_id: ''
+            }),
+            credentials: 'include'
+          }
+        );
+        return resp.json();
+      }, { kw, pageNum });
+      
+      if (data.success && data.data?.items) {
+        allNotes.push(...data.data.items.map(item => ({
+          keyword: kw,
+          noteId: item.noteId,
+          title: item.displayTitle,
+          author: item.user?.nickname,
+          likes: item.interactInfo?.likedCount,
+          type: item.type,
+          coverUrl: item.cover?.url || item.cover?.urlDefault,
+          page: pageNum
+        })));
+        hasMore = data.data.hasMore;
+      } else {
+        hasMore = false;
+      }
+      
+      pageNum++;
+      // 随机延迟 2-5 秒
+      await new Promise(r => setTimeout(r, 2000 + Math.random() * 3000));
+    }
+  }
+  
+  fs.writeFileSync(outputFile, JSON.stringify(allNotes, null, 2));
+  console.log(`采集完成: ${allNotes.length} 条笔记 -> ${outputFile}`);
+  
+  await browser.close();
+}
+
+// 使用
+batchCollect(['温州美食', '温州必吃', '温州探店'], './xhs_notes.json');
+方案C：SSR数据直接提取（仅限AI搜索页）
+AI搜索页面 (/search_result_ai) 的笔记数据直接渲染在 window.__INITIAL_STATE__.search.feeds 中，无需API调用：
+
+// 在Playwright中直接提取
+const notes = await page.evaluate(() => {
+  return window.__INITIAL_STATE__.search.feeds?.map(f => ({
+    id: f.id,
+    noteId: f.noteId,
+    title: f.displayTitle,
+    author: f.user?.nickname,
+    likes: f.interactInfo?.likedCount
+  }));
+});
+四、反爬注意事项
+频率控制: 每次请求间隔 ≥ 2秒，不要并发
+Cookie有效期: web_session 过期后需重新登录
+账号风控:
+错误码 300011：账号异常，需切换账号
+错误码 -101：登录信息缺失
+指纹检测: xhsFingerprintV3 进行浏览器指纹验证，避免使用无头模式特征过于明显
+代理IP: 大规模采集建议搭配住宅代理IP
+签名更新: ACE引擎会定期更新签名算法，本方案依赖浏览器内签名可自动适应

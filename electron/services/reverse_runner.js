@@ -13,7 +13,7 @@ const WorkingMemory = require('./working_memory')
 const STREAM_SEGMENT = 80
 const STREAM_DELAY_MS = 15
 const STREAM_CHAR_THRESHOLD = 2000
-const MAX_ROUNDS = 20
+const DEFAULT_MAX_ROUNDS = 20
 const MAX_API_RETRIES = 2
 const API_TIMEOUT_MS = 60000
 
@@ -91,6 +91,10 @@ async function runReverseAnalysis(opts) {
     return
   }
 
+  // 读取最大轮次配置（支持从 opts 或 agentConfig 传入，默认 20）
+  const maxRounds = opts.maxRounds || DEFAULT_MAX_ROUNDS
+  console.log(`[Reverse] 最大轮次配置: ${maxRounds}`)
+
   const workingMemory = new WorkingMemory()
   let aiRequestCount = 0
   let totalToolCalls = 0
@@ -159,7 +163,7 @@ async function runReverseAnalysis(opts) {
   }))
 
   // ===== 主循环 =====
-  while (aiRequestCount < MAX_ROUNDS) {
+  while (aiRequestCount < maxRounds) {
     // 检查中止
     if (opts._aborted) {
       sendEvent('agentStatus', { text: '任务已中止' })
@@ -237,12 +241,17 @@ async function runReverseAnalysis(opts) {
     const msg = choice.message
     messages.push({ role: 'assistant', content: msg.content || '', tool_calls: msg.tool_calls })
 
+    // 发送 AI 思考内容（每轮 LLM 返回的 content）
+    if (msg.content && msg.content.trim()) {
+      sendEvent('agentThinking', { round: aiRequestCount, content: msg.content })
+    }
+
     // 无工具调用 → 直接回复
     if (!msg.tool_calls || msg.tool_calls.length === 0) {
       const textContent = msg.content || '(无内容)'
       sendEvent('agentStep', { step: totalToolCalls, round: aiRequestCount, toolName: '回复', status: 'done' })
       // 如果是自然结束，发送流式回复
-      if (aiRequestCount >= MAX_ROUNDS || /任务完成|分析完成|finish_task/i.test(textContent)) {
+      if (aiRequestCount >= maxRounds || /任务完成|分析完成|finish_task/i.test(textContent)) {
         await streamToUI(sendEvent, textContent)
         break
       }
@@ -367,16 +376,41 @@ async function runReverseAnalysis(opts) {
     // 上下文压缩（避免 token 超限）
     const totalChars = messages.reduce((sum, m) => sum + (m.content?.length || 0) + (m.tool_calls ? JSON.stringify(m.tool_calls).length : 0), 0)
     if (totalChars > 50000) {
-      console.log(`[Reverse] 上下文压缩: ${totalChars} 字符，保留最近 30 条`)
-      const keep = messages.slice(0, 2).concat(messages.slice(-30))
+      // 保留最近 30 条，但起点必须回溯到最近一个带 tool_calls 的 assistant 消息，
+      // 否则开头的 tool 消息会因找不到父级 tool_calls 触发 400 错误
+      const TAIL = 30
+      let cutIdx = Math.max(2, messages.length - TAIL)
+      // 先跳过孤立 tool 消息，再回溯到带 tool_calls 的 assistant
+      while (cutIdx < messages.length && messages[cutIdx].role === 'tool') cutIdx++
+      while (cutIdx < messages.length) {
+        const m = messages[cutIdx]
+        if (m.role === 'assistant' && Array.isArray(m.tool_calls) && m.tool_calls.length > 0) break
+        cutIdx++
+      }
+      console.log(`[Reverse] 上下文压缩: ${totalChars} 字符，从 ${messages.length} 条压缩到 ${messages.length - cutIdx + 2} 条`)
+      const keep = messages.slice(0, 2).concat(messages.slice(cutIdx))
       messages.length = 0
       messages.push(...keep)
+
+      // 兜底：移除孤立的 tool 消息（tool_call_id 找不到对应 assistant.tool_calls.id）
+      const validToolCallIds = new Set()
+      for (const m of messages) {
+        if (m.role === 'assistant' && Array.isArray(m.tool_calls)) {
+          for (const tc of m.tool_calls) validToolCallIds.add(tc.id)
+        }
+      }
+      for (let i = messages.length - 1; i >= 0; i--) {
+        if (messages[i].role === 'tool' && !validToolCallIds.has(messages[i].tool_call_id)) {
+          console.warn('[Reverse] 移除孤立 tool 消息:', messages[i].tool_call_id)
+          messages.splice(i, 1)
+        }
+      }
     }
   }
 
   // 达到最大轮次
-  if (aiRequestCount >= MAX_ROUNDS) {
-    const finalNote = `⚠️ 逆向分析已达到最大轮次(${MAX_ROUNDS})。\n已执行：${aiRequestCount} 轮分析，${totalToolCalls} 次工具调用。\n建议：1) 缩小分析范围 2) 手动查看捕获的请求 3) 分步骤分析`
+  if (aiRequestCount >= maxRounds) {
+    const finalNote = `⚠️ 逆向分析已达到最大轮次(${maxRounds})。\n已执行：${aiRequestCount} 轮分析，${totalToolCalls} 次工具调用。\n建议：1) 缩小分析范围 2) 手动查看捕获的请求 3) 分步骤分析 4) 在逆向窗口顶部调大「最大轮次」设置`
     sendEvent('agentStatus', { text: '达到最大轮次，生成总结...' })
     await streamToUI(sendEvent, finalNote)
   }

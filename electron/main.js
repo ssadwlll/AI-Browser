@@ -267,6 +267,39 @@ function registerIpcHandlers() {
     return { success: false }
   })
 
+  // 清除当前 BrowserView 的所有 cookie（用于重置设备指纹，解决 300011 风控）
+  ipcMain.handle('browser:clear-cookies', async () => {
+    try {
+      const bv = tabManager.getActiveBrowserView()
+      if (!bv) return { success: false, error: '无可用标签页' }
+      const wc = bv.webContents
+      const ses = wc.session
+      // 清除所有 cookie
+      await ses.clearStorageData({
+        storages: ['cookies'],
+      })
+      // 同时清除 cache，确保完全重置
+      await ses.clearCache()
+      console.log('[Browser] 已清除所有 cookie 和 cache')
+      return { success: true }
+    } catch (e) {
+      console.error('[Browser] 清除 cookie 失败:', e.message)
+      return { success: false, error: e.message }
+    }
+  })
+
+  // 打开当前 BrowserView 的 DevTools（用于调试小红书页面）
+  ipcMain.handle('browser:open-devtools', async () => {
+    try {
+      const bv = tabManager.getActiveBrowserView()
+      if (!bv) return { success: false, error: '无可用标签页' }
+      bv.webContents.openDevTools({ mode: 'detach' })
+      return { success: true }
+    } catch (e) {
+      return { success: false, error: e.message }
+    }
+  })
+
   ipcMain.handle('browser:stop', async () => {
     const bv = tabManager.getActiveBrowserView()
     if (bv) { bv.webContents.stop(); return { success: true } }
@@ -753,7 +786,7 @@ function registerIpcHandlers() {
     }
   })
 
-  ipcMain.handle('reverse:start-analysis', async (event, { userMessage, chatHistory }) => {
+  ipcMain.handle('reverse:start-analysis', async (event, { userMessage, chatHistory, maxRounds }) => {
     const bv = tabManager.getActiveBrowserView()
     if (!bv) return { success: false, error: '无可用标签页' }
 
@@ -776,6 +809,9 @@ function registerIpcHandlers() {
     // 中止状态
     reverseRunnerState = { _aborted: false }
 
+    // 解析最大轮次：前端传入优先，否则使用默认值 20
+    const effectiveMaxRounds = Math.max(1, Math.min(100, Number(maxRounds) || 20))
+
     // 异步启动分析
     runReverseAnalysis({
       webContents: bv.webContents,
@@ -786,6 +822,7 @@ function registerIpcHandlers() {
       configService,
       payloadStore: reversePayloadStore,
       sendEvent: sendReverseEvent,
+      maxRounds: effectiveMaxRounds,
       _aborted: false,
     }).then(result => {
       console.log('[Reverse] 分析完成:', result)

@@ -344,6 +344,11 @@
       return Array.from(document.querySelectorAll('section.note-item'));
     },
 
+    // 判断是否为广告/推荐搜索区块（"大家都在搜"）
+    isAdNote(noteEl) {
+      return !!(noteEl.querySelector('.query-note-wrapper, .query-note-item, .query-note-header-text'));
+    },
+
     /* ========== 人类行为模拟 ========== */
 
     // 贝塞尔曲线人类化鼠标移动
@@ -536,6 +541,12 @@
 
     /* ========== 单条采集流程 ========== */
     async scrapeOneNote(noteEl, index) {
+      // 跳过广告/推荐搜索区块（"大家都在搜"）
+      if (this.isAdNote(noteEl)) {
+        this.log(`⏭ 跳过广告区块 #${index + 1}`, 'warn');
+        return null;
+      }
+
       const noteId = this.getNoteId(noteEl);
 
       if (this.collectedIds.has(noteId)) {

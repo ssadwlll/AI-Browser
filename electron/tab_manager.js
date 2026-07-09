@@ -386,11 +386,28 @@ class TabManager {
     const id = this._generateTabId()
     const bv = new BrowserView({
       webPreferences: {
-        contextIsolation: true,
+        // 关闭 contextIsolation 让 preload 在主世界运行
+        // 原因：小红书 ACE 引擎在主世界检测指纹，preload 在隔离世界修改 navigator 无效
+        // 关闭后需用 window.xxx 直接暴露 API（不能用 contextBridge）
+        contextIsolation: false,
         nodeIntegration: false,
         preload: path.join(__dirname, 'preload_browser.js'),
       },
     })
+
+    // 伪装 User-Agent：移除 Electron/ai-browser 标识，避免被 WAF 识别为自动化工具
+    try {
+      const defaultUA = bv.webContents.getUserAgent()
+      const fakeUA = defaultUA
+        .replace(/\s*ai-browser\/[\d.]+/g, '')
+        .replace(/\s*Electron\/[\d.]+/g, '')
+      bv.webContents.setUserAgent(fakeUA)
+    } catch (e) {
+      console.warn('[TabManager] 设置 User-Agent 失败:', e.message)
+    }
+
+    // 浏览器指纹伪装已在 preload_browser.js 中注入（在页面 JS 执行前生效）
+    // 包括：navigator.webdriver=false、window.chrome 补全、plugins/languages/platform 伪装
 
     const tab = {
       id,

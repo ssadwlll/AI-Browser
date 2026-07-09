@@ -17,6 +17,8 @@ contextBridge.exposeInMainWorld('api', {
     canGoForward: () => ipcRenderer.invoke('browser:can-go-forward'),
     openExternal: (url) => ipcRenderer.invoke('browser:open-external', url),
     resize: (ratio) => ipcRenderer.send('browser:resize', { browserRatio: ratio }),
+    clearCookies: () => ipcRenderer.invoke('browser:clear-cookies'),
+    openDevTools: () => ipcRenderer.invoke('browser:open-devtools'),
     togglePanel: (visible) => ipcRenderer.invoke('panel:toggle', { visible }),
     onNavState: (callback) => {
       const handler = (e, data) => callback(data)
