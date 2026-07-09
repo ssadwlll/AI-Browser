@@ -26,14 +26,19 @@
 const http = require('http')
 
 // 签名注入脚本（在 BrowserView 页面上下文中执行）
-// 直接调用 _webmsxyw(apiPath, bodyStr) 获取 XYW_ 签名
+// _webmsxyw(apiPath, bodyObj) — 第二个参数是对象，不是字符串
 const SIGN_SCRIPT = `
 (function(apiPath, bodyStr) {
   if (typeof window._webmsxyw !== 'function') {
     return { error: 'window._webmsxyw 不可用，页面未加载完成或 signSvn 未初始化' }
   }
   try {
-    var result = window._webmsxyw(apiPath, bodyStr)
+    // _webmsxyw 接受 (url, params) 两参数，params 是对象或 undefined
+    var params = undefined;
+    if (bodyStr) {
+      try { params = JSON.parse(bodyStr); } catch(e) { params = bodyStr; }
+    }
+    var result = window._webmsxyw(apiPath, params);
     if (result && result['X-s']) {
       return {
         'X-s': result['X-s'],
@@ -161,9 +166,11 @@ class SignServer {
           const result = await wc.executeJavaScript(script, true)
 
           if (result.error) {
+            console.error('[SignServer] 签名失败:', result.error)
             res.writeHead(500)
             res.end(JSON.stringify({ error: result.error }))
           } else {
+            console.log(`[SignServer] 签名成功: ${apiPath} → ${result['X-s'].substring(0, 20)}...`)
             res.writeHead(200)
             res.end(JSON.stringify(result))
           }
