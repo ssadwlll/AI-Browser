@@ -77,9 +77,9 @@ function getBrowserCookies() {
  * 通过签名服务在浏览器内发起 API 请求（签名+请求全在浏览器中完成）
  * 避免 Node.js 的 TLS/HTTP 指纹被服务端检测
  */
-function browserFetch(apiPath, bodyObj) {
+function browserFetch(apiPath, bodyObj, xsc, rapParam) {
   return new Promise((resolve) => {
-    const bodyData = JSON.stringify({ apiPath, body: bodyObj, method: 'POST' });
+    const bodyData = JSON.stringify({ apiPath, body: bodyObj, method: 'POST', xsc, rapParam });
     const req = http.request(`${SIGN_SERVER_URL}/fetch`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(bodyData) },
@@ -289,21 +289,14 @@ function fetchFeed(noteId, xsecToken) {
   feedSigCount++;
   if (feedSigCount > 30) feedSigCount = Math.floor(Math.random() * 5) + 1; // 到30后重置
 
-  // 签名服务可用时：在浏览器内发起 fetch（签名+请求全在浏览器环境中）
-  // 避免 Node.js 的 TLS/HTTP 指纹被检测（300015 环境异常）
-  if (signServerAvailable) {
-    return (async () => {
-      const result = await browserFetch('/api/sns/web/v1/feed', body);
-      if (result.ok && result.data) {
-        return result.data;
-      }
-      // 浏览器 fetch 失败时回退到 Node.js 方式
-      log(`  [fetch] 浏览器请求失败，回退: ${result.error || 'unknown'}`);
-      return fetchFeedFallback(noteId, xsecToken, bodyStr);
-    })();
-  }
-
-  // 签名服务不可用时：静态 XYS_ + 动态 x-s-common
+  // === 采集策略（2026-07-10 最终验证）===
+  // XYW_ 动态签名（浏览器内 _webmsxyw + fetch）→ 300015 环境检测，不可用
+  //   原因：executeJavaScript 调用 _webmsxyw 生成的 XYW_ payload 环境指纹
+  //         与正常用户交互时不同，服务端可识别
+  // 静态 XYS_ + 动态 x-s-common → 957 次调用 0 签名错误，验证有效
+  //   x-s: 静态 XYS_ 复用（不绑定请求体，可复用）
+  //   x-s-common: xs-common-node.js 每次动态生成（绑定 URL+cookie+sigCount）
+  // 签名服务仅用于 cookie 同步（获取浏览器最新 a1 等_cookie）
   return fetchFeedFallback(noteId, xsecToken, bodyStr);
 }
 
@@ -513,11 +506,11 @@ async function main() {
   log('====================================');
   log('小红书笔记详情批量采集（按关键词）');
   log(`搜索API: so.xiaohongshu.com v2 (静态 XYS_ 签名)`);
+  log(`详情API: edith.xiaohongshu.com feed (静态 XYS_ x-s + 动态 x-s-common)`);
   if (signServerAvailable) {
-    log(`详情API: edith.xiaohongshu.com feed (动态 XYW_ 签名 via 签名服务)`);
-    log(`  签名服务: ${SIGN_SERVER_URL} ✅ 已连接`);
+    log(`  签名服务: ${SIGN_SERVER_URL} ✅ 已连接（仅用于 cookie 同步）`);
 
-    // 从浏览器获取最新 cookies，覆盖硬编码值（确保签名与 cookie 匹配）
+    // 从浏览器获取最新 cookies，覆盖硬编码值（确保 x-s-common 的 a1 匹配）
     const browserCookies = await getBrowserCookies();
     if (browserCookies && browserCookies.a1) {
       Object.assign(COMMON_COOKIES, browserCookies);
@@ -530,11 +523,10 @@ async function main() {
         log(`  acw_tc 已同步: ${browserCookies.acw_tc.substring(0, 20)}...`);
       }
     } else {
-      log(`  ⚠️ 无法获取浏览器 cookies，使用硬编码值（可能导致签名不匹配）`);
+      log(`  ⚠️ 无法获取浏览器 cookies，使用硬编码值（可能导致 x-s-common 不匹配）`);
     }
   } else {
-    log(`详情API: edith.xiaohongshu.com feed (静态 XYS_ x-s + 动态 x-s-common)`);
-    log(`  签名服务: ${SIGN_SERVER_URL} ❌ 未连接（回退静态签名）`);
+    log(`  签名服务: ${SIGN_SERVER_URL} ❌ 未连接（使用硬编码 cookies）`);
   }
   log(`详情间隔: ${FEED_DELAY_MIN}-${FEED_DELAY_MAX}ms (随机) | 关键词间: ${KEYWORD_PAUSE_MIN}-${KEYWORD_PAUSE_MAX}ms (随机)`);
   log(`单次最多: ${MAX_KEYWORDS_PER_SESSION} 个关键词`);

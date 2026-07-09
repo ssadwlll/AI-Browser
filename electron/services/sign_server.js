@@ -179,7 +179,7 @@ class SignServer {
         // 返回: { ok, status, data }
         if (req.method === 'POST' && url.pathname === '/fetch') {
           const body = await this._readBody(req)
-          const { apiPath, body: reqBody, method } = JSON.parse(body)
+          const { apiPath, body: reqBody, method, xsc, rapParam } = JSON.parse(body)
 
           if (!apiPath) {
             res.writeHead(400)
@@ -203,8 +203,10 @@ class SignServer {
           }
 
           // 在浏览器页面内执行：签名 → fetch 请求 → 返回结果
+          // xsc: x-s-common（由调用方通过 xs-common-node.js 生成，_webmsxyw 不生成它）
+          // rapParam: x-rap-param（由调用方传入）
           const fetchScript = `
-(function(apiPath, bodyStr, method) {
+(function(apiPath, bodyStr, method, xsc, rapParam) {
   return (async function() {
     try {
       // 1. 生成签名
@@ -218,18 +220,36 @@ class SignServer {
         return { ok: false, error: '签名生成失败' }
       }
 
-      // 2. 构建请求头
+      // 2. 生成随机 traceId（与真实浏览器一致）
+      function randHex(len) {
+        var s = '';
+        var chars = '0123456789abcdef';
+        for (var i = 0; i < len; i++) s += chars[Math.floor(Math.random() * 16)];
+        return s;
+      }
+
+      // 3. 构建请求头（与真实浏览器完全一致）
       var headers = {
         'accept': 'application/json, text/plain, */*',
         'content-type': 'application/json;charset=UTF-8',
         'x-s': signResult['X-s'],
         'x-t': signResult['X-t'] || String(Date.now()),
+        'x-b3-traceid': randHex(16),
+        'x-xray-traceid': randHex(32),
+        'xy-direction': '18',
       }
-      if (signResult['X-s-common']) {
+      // x-s-common: _webmsxyw 不生成，由调用方传入
+      if (xsc) {
+        headers['x-s-common'] = xsc
+      } else if (signResult['X-s-common']) {
         headers['x-s-common'] = signResult['X-s-common']
       }
+      // x-rap-param: 由调用方传入
+      if (rapParam) {
+        headers['x-rap-param'] = rapParam
+      }
 
-      // 3. 发起 fetch 请求（在浏览器环境中，TLS/HTTP2 自动正确）
+      // 4. 发起 fetch 请求（在浏览器环境中，TLS/HTTP2 自动正确）
       var fullUrl = 'https://edith.xiaohongshu.com' + apiPath;
       var fetchOpts = {
         method: method || 'POST',
@@ -254,13 +274,15 @@ class SignServer {
       return { ok: false, error: e.message }
     }
   })()
-})(__API_PATH__, __BODY_STR__, __METHOD__)
+})(__API_PATH__, __BODY_STR__, __METHOD__, __XSC__, __RAP_PARAM__)
 `
 
           const script = fetchScript
             .replace('__API_PATH__', JSON.stringify(apiPath))
             .replace('__BODY_STR__', JSON.stringify(reqBody ? (typeof reqBody === 'string' ? reqBody : JSON.stringify(reqBody)) : ''))
             .replace('__METHOD__', JSON.stringify(method || 'POST'))
+            .replace('__XSC__', JSON.stringify(xsc || ''))
+            .replace('__RAP_PARAM__', JSON.stringify(rapParam || ''))
 
           console.log(`[SignServer] 浏览器内 fetch: ${method || 'POST'} ${apiPath}`)
           const result = await wc.executeJavaScript(script, true)
@@ -272,6 +294,70 @@ class SignServer {
           } else {
             console.error('[SignServer] fetch 失败:', result.error)
             res.writeHead(500)
+            res.end(JSON.stringify(result))
+          }
+          return
+        }
+
+        // POST /mnsv2 — 在浏览器中调用 window.mnsv2(c, u, p)
+        // 请求体: { c, u, p } → { result: "mns0301_..." }
+        // 用于 XYS_ 签名生成（Node.js 侧构建 payload + Base64）
+        if (req.method === 'POST' && url.pathname === '/mnsv2') {
+          const body = await this._readBody(req)
+          const { c, u, p } = JSON.parse(body)
+
+          if (!c) {
+            res.writeHead(400)
+            res.end(JSON.stringify({ error: '缺少参数 c' }))
+            return
+          }
+
+          const bv = this.getBrowserView()
+          if (!bv) {
+            res.writeHead(500)
+            res.end(JSON.stringify({ error: '无活动标签页' }))
+            return
+          }
+
+          const wc = bv.webContents
+          const currentUrl = wc.getURL()
+          if (!currentUrl || !currentUrl.includes('xiaohongshu.com')) {
+            res.writeHead(500)
+            res.end(JSON.stringify({ error: '当前页面不是小红书' }))
+            return
+          }
+
+          // 在浏览器中调用 mnsv2
+          const mnsv2Script = `
+(function(c, u, p) {
+  if (typeof window.mnsv2 !== 'function') {
+    return { error: 'window.mnsv2 不可用' }
+  }
+  try {
+    var result = window.mnsv2(c, u, p);
+    if (!result) return { error: 'mnsv2 返回空值' }
+    return { result: result }
+  } catch(e) {
+    return { error: 'mnsv2 执行失败: ' + e.message }
+  }
+})(__C__, __U__, __P__)
+`
+
+          const script = mnsv2Script
+            .replace('__C__', JSON.stringify(c))
+            .replace('__U__', JSON.stringify(u || ''))
+            .replace('__P__', JSON.stringify(p || ''))
+
+          console.log(`[SignServer] mnsv2 调用: c=${c.substring(0, 30)}...`)
+          const result = await wc.executeJavaScript(script, true)
+
+          if (result.error) {
+            console.error('[SignServer] mnsv2 失败:', result.error)
+            res.writeHead(500)
+            res.end(JSON.stringify({ error: result.error }))
+          } else {
+            console.log(`[SignServer] mnsv2 成功: ${result.result.substring(0, 30)}...`)
+            res.writeHead(200)
             res.end(JSON.stringify(result))
           }
           return
@@ -322,6 +408,7 @@ class SignServer {
       console.log(`[SignServer]   GET  /health       — 检查浏览器环境`)
       console.log(`[SignServer]   POST /sign         — 生成 XYW_ 签名`)
       console.log(`[SignServer]   POST /fetch         — 浏览器内 fetch（签名+请求全在浏览器中）`)
+      console.log(`[SignServer]   POST /mnsv2         — 调用浏览器 mnsv2（用于 XYS_ 动态签名）`)
       console.log(`[SignServer]   GET  /cookies      — 获取浏览器 cookies`)
       console.log(`[SignServer]   GET  /user-agent   — 获取浏览器 UA`)
     })
