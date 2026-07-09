@@ -21,11 +21,70 @@
 'use strict';
 
 const https = require('https');
+const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const zlib = require('zlib');
 const crypto = require('crypto');
 const { generateXsCommon } = require('./xs-common-node');
+
+// ======================= 签名服务配置 =======================
+
+const SIGN_SERVER_URL = 'http://127.0.0.1:3721';
+let signServerAvailable = false;  // 运行时检测
+
+/**
+ * 检测签名服务是否可用
+ */
+async function checkSignServer() {
+  return new Promise((resolve) => {
+    const req = http.get(`${SIGN_SERVER_URL}/health`, { timeout: 3000 }, (res) => {
+      let data = '';
+      res.on('data', c => data += c);
+      res.on('end', () => {
+        try {
+          const info = JSON.parse(data);
+          resolve(info.ok === true);
+        } catch { resolve(false); }
+      });
+    });
+    req.on('error', () => resolve(false));
+    req.on('timeout', () => { req.destroy(); resolve(false); });
+  });
+}
+
+/**
+ * 通过签名服务生成动态 XYW_ 签名
+ */
+function getDynamicSign(apiPath, bodyStr) {
+  return new Promise((resolve) => {
+    const bodyData = JSON.stringify({ apiPath, body: bodyStr });
+    const req = http.request(`${SIGN_SERVER_URL}/sign`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(bodyData) },
+      timeout: 10000,
+    }, (res) => {
+      let data = '';
+      res.on('data', c => data += c);
+      res.on('end', () => {
+        try {
+          const result = JSON.parse(data);
+          if (result['X-s']) {
+            resolve({ ok: true, sign: result });
+          } else {
+            resolve({ ok: false, error: result.error || '签名服务返回异常' });
+          }
+        } catch (e) {
+          resolve({ ok: false, error: '解析失败: ' + e.message });
+        }
+      });
+    });
+    req.on('error', (e) => resolve({ ok: false, error: e.message }));
+    req.on('timeout', () => { req.destroy(); resolve({ ok: false, error: '超时' }); });
+    req.write(bodyData);
+    req.end();
+  });
+}
 
 // ======================= 配置 =======================
 
@@ -192,25 +251,51 @@ function fetchFeed(noteId, xsecToken) {
     sigCount: feedSigCount,
   });
 
-  return httpPost('edith.xiaohongshu.com', '/api/sns/web/v1/feed', {
-    'accept': 'application/json, text/plain, */*',
-    'accept-encoding': 'gzip, deflate, br, zstd',
-    'accept-language': 'zh-CN,zh;q=0.9',
-    'content-type': 'application/json;charset=UTF-8',
-    'cookie': buildCookieString(FEED_ACW_TC),
-    'origin': 'https://www.xiaohongshu.com',
-    'priority': 'u=1, i',
-    'referer': 'https://www.xiaohongshu.com/',
-    'sec-ch-ua': '"Google Chrome";v="135", "Not-A.Brand";v="8", "Chromium";v="135"',
-    'sec-ch-ua-mobile': '?0', 'sec-ch-ua-platform': '"Windows"',
-    'sec-fetch-dest': 'empty', 'sec-fetch-mode': 'cors', 'sec-fetch-site': 'same-site',
-    'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36',
-    'x-b3-traceid': randomHex(8), 'x-rap-param': FEED_RAP_PARAM,
-    'x-s': FEED_X_S,
-    'x-s-common': dynamicXsc,
-    'x-t': String(Date.now()), 'x-xray-traceid': randomHex(16),
-    'xy-direction': '18',
-  }, bodyStr);
+  // 优先使用签名服务生成动态 XYW_ 签名（真实浏览器环境，不会触发 300015）
+  // 回退到静态 XYS_ 签名（签名服务不可用时）
+  return (async () => {
+    let xS = FEED_X_S;
+    let xT = String(Date.now());
+    let xSc = dynamicXsc;
+
+    if (signServerAvailable) {
+      try {
+        const dynSign = await getDynamicSign('/api/sns/web/v1/feed', bodyStr);
+        if (dynSign.ok) {
+          xS = dynSign.sign['X-s'];
+          xT = dynSign.sign['X-t'] || xT;
+          // 签名服务可能也返回 x-s-common，优先使用
+          if (dynSign.sign['X-s-common']) {
+            xSc = dynSign.sign['X-s-common'];
+          }
+        } else {
+          log(`  [签名] 动态签名失败，回退静态: ${dynSign.error}`);
+        }
+      } catch (e) {
+        log(`  [签名] 签名服务异常，回退静态: ${e.message}`);
+      }
+    }
+
+    return httpPost('edith.xiaohongshu.com', '/api/sns/web/v1/feed', {
+      'accept': 'application/json, text/plain, */*',
+      'accept-encoding': 'gzip, deflate, br, zstd',
+      'accept-language': 'zh-CN,zh;q=0.9',
+      'content-type': 'application/json;charset=UTF-8',
+      'cookie': buildCookieString(FEED_ACW_TC),
+      'origin': 'https://www.xiaohongshu.com',
+      'priority': 'u=1, i',
+      'referer': 'https://www.xiaohongshu.com/',
+      'sec-ch-ua': '"Google Chrome";v="135", "Not-A.Brand";v="8", "Chromium";v="135"',
+      'sec-ch-ua-mobile': '?0', 'sec-ch-ua-platform': '"Windows"',
+      'sec-fetch-dest': 'empty', 'sec-fetch-mode': 'cors', 'sec-fetch-site': 'same-site',
+      'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36',
+      'x-b3-traceid': randomHex(8), 'x-rap-param': FEED_RAP_PARAM,
+      'x-s': xS,
+      'x-s-common': xSc,
+      'x-t': xT, 'x-xray-traceid': randomHex(16),
+      'xy-direction': '18',
+    }, bodyStr);
+  })();
 }
 
 // ======================= 详情提取 =======================
@@ -377,10 +462,19 @@ async function collectKeyword(keyword, keywordIndex) {
 // ======================= 主流程 =======================
 
 async function main() {
+  // 检测签名服务（Electron 应用需运行且浏览器已打开小红书页面）
+  signServerAvailable = await checkSignServer();
+
   log('====================================');
   log('小红书笔记详情批量采集（按关键词）');
   log(`搜索API: so.xiaohongshu.com v2 (静态 XYS_ 签名)`);
-  log(`详情API: edith.xiaohongshu.com feed (静态 XYS_ x-s + 动态 x-s-common)`);
+  if (signServerAvailable) {
+    log(`详情API: edith.xiaohongshu.com feed (动态 XYW_ 签名 via 签名服务)`);
+    log(`  签名服务: ${SIGN_SERVER_URL} ✅ 已连接`);
+  } else {
+    log(`详情API: edith.xiaohongshu.com feed (静态 XYS_ x-s + 动态 x-s-common)`);
+    log(`  签名服务: ${SIGN_SERVER_URL} ❌ 未连接（回退静态签名）`);
+  }
   log(`详情间隔: ${FEED_DELAY_MIN}-${FEED_DELAY_MAX}ms (随机) | 关键词间: ${KEYWORD_PAUSE_MIN}-${KEYWORD_PAUSE_MAX}ms (随机)`);
   log(`单次最多: ${MAX_KEYWORDS_PER_SESSION} 个关键词`);
   if (START_FROM_INDEX > 0) {

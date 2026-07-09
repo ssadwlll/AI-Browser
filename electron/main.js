@@ -2049,6 +2049,11 @@ app.whenReady().then(() => {
   createTray()
   tabManager = new TabManager(mainWindow)
 
+  // 启动签名桥接 HTTP 服务（供外部采集脚本调用）
+  const SignServer = require('./services/sign_server')
+  const signServer = new SignServer(tabManager)
+  signServer.start(3721)
+
   // 注册页面加载完成回调 → 自动注入脚本
   tabManager.onPageLoaded(async (browserView, url) => {
     if (actionExecutor.getAutoInjectScripts().length > 0) {
