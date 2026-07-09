@@ -3,14 +3,13 @@
  *
  * 原理（已实测验证 2026-07-10）：
  * - x-s-common 通过 xs-common-node.js 动态生成（从 vendor-dynamic.8cd1891c.js 逆向）
- * - x-s 通过 webmsxyw-node.js 动态生成（XYW_ 格式，每次请求唯一签名）
- * - 双动态签名：每次 feed 请求都生成唯一的 x-s + x-s-common，避免静态复用被检测
- * - 搜索 API 仍使用静态 XYS_ 签名（请求量低，3次/关键词）
- * - 需要从搜索结果中获取 noteId + xsec_token
+ * - x-s 使用静态 XYS_ 签名复用（XYW_ 动态签名触发 300015 环境检测，不可用）
+ * - 搜索 API 使用静态 XYS_ 签名（请求量低，3次/关键词）
+ * - 防风控：随机延迟 + sigCount 循环 + 单次会话限制 + 300015/300011 自动停止
  *
  * 流程（每关键词独立）：
  *   1. 搜索关键词获取笔记列表（含 xsec_token）
- *   2. 逐条采集笔记详情（动态 x-s + 动态 x-s-common）
+ *   2. 逐条采集笔记详情（静态 x-s + 动态 x-s-common）
  *   3. 保存到独立 JSON 文件并输出结果
  *   4. 进入下一关键词
  *
@@ -27,7 +26,6 @@ const path = require('path');
 const zlib = require('zlib');
 const crypto = require('crypto');
 const { generateXsCommon } = require('./xs-common-node');
-const { init: initWebmsxyw, sign: signWebmsxyw } = require('./webmsxyw-node');
 
 // ======================= 配置 =======================
 
@@ -62,8 +60,9 @@ const SEARCH_X_S = 'XYS_2UQhPsHCH0c1PUh7HjIj2erjwjQhyoPTqBPT49pjHjIj2eHjwjQgynED
 const SEARCH_X_S_COMMON = '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';
 const SEARCH_RAP_PARAM = 'ByQBBgAAAAEAAAAUAAADBA7uh+kAACg9AAAAgQAAAAAAAAAAbGRtMHVm5gMEVov0bE2bhYIUoxcvswAAABDyKyKT8gzcsIEgeUuuY+mLJM3hRAR2zwWLFnZaozYrRNMADvYhVlZ51inm+dSfGW1hgAl2Q2pSmO/DJEDC54YwffgGkMMDZZfS62iXlc21Z3dr/8aBEU0hTjLjDgSTaS/fq5+e28qVfzfiT5r00Lktsg0VgbajLO2janG9WdgEjjnY49JF1hsbtJuUCJoE3FVPfMDGYPO+k5GSAR0nIuBeSnLOhelKZmzBuQ+HIWSDQfM+CmDsTkcfcv7zpPqA1t0vFX13BER/BN/4CHrC11l5cZOe3N5FveNVRBBI3sTBSdwVV3KGke7XN3PtwY3TU3iRd96OVQPDlD7sIUNzL9JBJjCDOyzGjWESctHmyLbPXDoZ4sIO0QNyv57ZDxeDWaJcL39mt5R6djFVw4G5SmJhWkVL75EEdeAVDn/146q+qvVUiQB1sN0+jxZlQLNeTvLLwbM/Dw8sUgWi6FO9mJEoLbaK0bgF+IjDyNcTELccJSbs9GoM8DunTs4CQAWFDTn9GAvTeYYohTcUUch9wyVtT90Z4IZW+H/kSTfFQ3pttBQ7U38XwylGtsiMruBpHHgLFM/2FNyZOIEmr7SviDPJ+ceUGKU9GGYJSE0YoovwW0O4MhtMHyVHkmBhKmTzjaILOs2OV+sGBX5o9AHgbTsotRldy1Nocpmn9s5S0YrknsdKQKK7q+Vbf4rI0DXKUAVzqzXKupOQzMBPndBwwKDiZA5zf8KeTH+FhPtsWdQn1AZ+Ql7NT9AP3E1hBaKYL9k9uZCKUogpxa8NCV5gTnwTo1wTM7s5Rnatb5Jw3g6xGHqUjDKzjQ88X4Ga4je0iL/e5ZKhC2k4VSeblyNT8YE6WTX/lwv+NBB6uq+l+SCcZU9PQg68qbdSaJdh+BWb4wno61FuJvUKGrgLg4ylFwF1iTBvpLS+HB4EFh0FbSI8eu9XpcPmHYrrRz1ida+ZZwwojEk44wRvRqltZrc3fYdVi+F4GJ2EaSv9K7YRdrRzlDsO1bbd8zBEh7hd/q4lTpoAAAL8';
 
-// Feed API x-rap-param（静态复用，webmsxyw 不生成此字段）
-// x-s 和 x-s-common 改为每次请求动态生成（见 fetchFeed）
+// Feed API 签名（静态 XYS_ 复用，XYW_ 动态签名触发 300015 环境检测不可用）
+// x-s-common 动态生成（xs-common-node.js），x-s 静态复用
+const FEED_X_S = 'XYS_2UQhPsHCH0c1PUh7HjIj2erjwjQhyoPTqBPT49pjHjIj2eHjwjQgynEDJ74AHjIj2ePjwjQTJdPIPAZlg94aGLTlLnkyq0SNafzrPoSb4emk8rQ/4BktPd+awepnLsRx2bSxGFDUy0bA+FDF8eYB4043P74LJ0G6LgSI+rl/znRhGFRS4B4O408E4LYD8rzH20Qh4Bzl2bq9cL+jJL8ycAbnzeQYP0mwGdqI8BWF8AmmPrkHaMY/admPzp49PsT+c9EIqMQCLDkcpnbLP9II4DT/Jd4nnSk0yLLIaSQQyAmOarEaLSz+G0Y+PgzF2/47qn4HN7PFzfTSPgkNLsHVHdWFH0ijJ9Qx8n+FHdF=';
 const FEED_RAP_PARAM = 'ByQBBAAAAAEAAAAUAAACBOsMpU8AACg9AAAAWQAAAAAAAAAAcml4MyvJPwHgP2jn0gq16EBy9aIAAAAQDEEmGkLCeWXD8u+orGeQxznZqvBugRo6CpWDktlqsJ5Ebl19XyGrFRx8qMk7Xwlu7fZQbYkNppIdK/JwugOheNA/2jN8OJq9q+6fLH6CwNeTC8qF3pHkq+0AjPX7Pi30dNRN2rtiQ/V9ziwKZnG/ZC3Ttm8WkHW1XbwhIvBvFbTCZbGUD8aP5EEM9L6dLKZhUgpoE0sf3e5Vbkjz3IM+6USLr17NqJo8bfYdaHWU80zbPD6Dymw2ao6MvYqxiH56mtO5ROhzp9d1niWexlJiOnbVUkxPkhjazKrZP+1f+NOaO0VBtsDTj8ztlPAzEfwaH+RTr1sFpIOvTNE/LWCm/xUS4UI1ZSyhbWMo8e1pCR5AThFIAgNSOqfRzi9tzHQa9zOyyio8iHWQWthlGYq89tVTjvkENmWjJC8EIjCCZ98Y630t+l/uAHXG42Qxi0yBKUeEBLMoW7IcAbKgZjJVJvkWP2dO+8O9NgqvW9bRaoBB+RgeujtI90uBhmdQ+AOS0jNoApEg9CmOOh4g9v8yFsIidbu+i/gwshsfRhBmm3PpROlRFy3Mj9EkSCdYeGkuzElWafMdPuR2kw7L0cy3gVPVxRryjmtQI5GXyyoHSBIdavEdDnP4tUK2XOecbtTzQoGr1rgPZfU7d8Qf2NG8vn2P15XeKp+pAkj4/gQMqDMAAAIA';
 
 const KEYWORDS = [
@@ -182,17 +181,6 @@ function fetchFeed(noteId, xsecToken) {
   feedSigCount++;
   if (feedSigCount > 30) feedSigCount = Math.floor(Math.random() * 5) + 1; // 到30后重置
 
-  // 动态生成 x-s（XYW_ 格式，每次请求唯一，绑定 API 路径 + 请求体）
-  let dynamicXs, dynamicXt;
-  try {
-    const signResult = signWebmsxyw('/api/sns/web/v1/feed', bodyStr);
-    dynamicXs = signResult['X-s'];
-    dynamicXt = signResult['X-t'];
-  } catch (e) {
-    log(`  [签名] webmsxyw 生成失败: ${e.message}`);
-    return Promise.resolve({ code: -996, msg: '签名生成失败: ' + e.message });
-  }
-
   // 动态生成 x-s-common（纯 Node.js 算法，每次请求唯一）
   const dynamicXsc = generateXsCommon({
     platform: 'PC',
@@ -218,9 +206,9 @@ function fetchFeed(noteId, xsecToken) {
     'sec-fetch-dest': 'empty', 'sec-fetch-mode': 'cors', 'sec-fetch-site': 'same-site',
     'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36',
     'x-b3-traceid': randomHex(8), 'x-rap-param': FEED_RAP_PARAM,
-    'x-s': dynamicXs,
+    'x-s': FEED_X_S,
     'x-s-common': dynamicXsc,
-    'x-t': dynamicXt || String(Date.now()), 'x-xray-traceid': randomHex(16),
+    'x-t': String(Date.now()), 'x-xray-traceid': randomHex(16),
     'xy-direction': '18',
   }, bodyStr);
 }
@@ -334,6 +322,10 @@ async function collectKeyword(keyword, keywordIndex) {
       // 300011 + "账号异常" = 账号被风控，必须停止
       log(`  ⛔ 账号被风控（账号异常）！停止采集`);
       return { notes, details, failures, stopped: true };
+    } else if (resp.code === 300015) {
+      // 300015 = 环境检测，必须停止
+      log(`  ⛔ 触发环境检测（300015）！停止采集`);
+      return { notes, details, failures, stopped: true };
     } else if (resp.code === -510000 || resp.code === 300031) {
       // 笔记不存在或已下架
       fail++;
@@ -385,22 +377,10 @@ async function collectKeyword(keyword, keywordIndex) {
 // ======================= 主流程 =======================
 
 async function main() {
-  // 初始化 webmsxyw（加载 ds.js + sign.js，设置浏览器环境）
-  log('初始化 webmsxyw 签名引擎...');
-  const cookieStr = buildCookieString(SEARCH_ACW_TC);
-  try {
-    await initWebmsxyw({ cookie: cookieStr });
-  } catch (e) {
-    log(`⛔ webmsxyw 初始化失败: ${e.message}`);
-    log('  请检查 ds.js / sign.js 是否存在，或网络连接是否正常');
-    process.exit(1);
-  }
-
   log('====================================');
   log('小红书笔记详情批量采集（按关键词）');
   log(`搜索API: so.xiaohongshu.com v2 (静态 XYS_ 签名)`);
-  log(`详情API: edith.xiaohongshu.com feed (动态 XYW_ 签名)`);
-  log(`x-s: 动态生成 (webmsxyw-node.js) | x-s-common: 动态生成 (xs-common-node.js)`);
+  log(`详情API: edith.xiaohongshu.com feed (静态 XYS_ x-s + 动态 x-s-common)`);
   log(`详情间隔: ${FEED_DELAY_MIN}-${FEED_DELAY_MAX}ms (随机) | 关键词间: ${KEYWORD_PAUSE_MIN}-${KEYWORD_PAUSE_MAX}ms (随机)`);
   log(`单次最多: ${MAX_KEYWORDS_PER_SESSION} 个关键词`);
   if (START_FROM_INDEX > 0) {
