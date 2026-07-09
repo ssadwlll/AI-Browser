@@ -174,6 +174,109 @@ class SignServer {
           return
         }
 
+        // POST /fetch — 在浏览器页面内发起 API 请求（签名+请求全部在浏览器中完成）
+        // 请求体: { apiPath, body, method }
+        // 返回: { ok, status, data }
+        if (req.method === 'POST' && url.pathname === '/fetch') {
+          const body = await this._readBody(req)
+          const { apiPath, body: reqBody, method } = JSON.parse(body)
+
+          if (!apiPath) {
+            res.writeHead(400)
+            res.end(JSON.stringify({ error: '缺少 apiPath' }))
+            return
+          }
+
+          const bv = this.getBrowserView()
+          if (!bv) {
+            res.writeHead(500)
+            res.end(JSON.stringify({ error: '无活动标签页' }))
+            return
+          }
+
+          const wc = bv.webContents
+          const currentUrl = wc.getURL()
+          if (!currentUrl || !currentUrl.includes('xiaohongshu.com')) {
+            res.writeHead(500)
+            res.end(JSON.stringify({ error: '当前页面不是小红书' }))
+            return
+          }
+
+          // 在浏览器页面内执行：签名 → fetch 请求 → 返回结果
+          const fetchScript = `
+(function(apiPath, bodyStr, method) {
+  return (async function() {
+    try {
+      // 1. 生成签名
+      if (typeof window._webmsxyw !== 'function') {
+        return { ok: false, error: '_webmsxyw 不可用' }
+      }
+      var params = undefined;
+      if (bodyStr) { try { params = JSON.parse(bodyStr); } catch(e) {} }
+      var signResult = window._webmsxyw(apiPath, params);
+      if (!signResult || !signResult['X-s']) {
+        return { ok: false, error: '签名生成失败' }
+      }
+
+      // 2. 构建请求头
+      var headers = {
+        'accept': 'application/json, text/plain, */*',
+        'content-type': 'application/json;charset=UTF-8',
+        'x-s': signResult['X-s'],
+        'x-t': signResult['X-t'] || String(Date.now()),
+      }
+      if (signResult['X-s-common']) {
+        headers['x-s-common'] = signResult['X-s-common']
+      }
+
+      // 3. 发起 fetch 请求（在浏览器环境中，TLS/HTTP2 自动正确）
+      var fullUrl = 'https://edith.xiaohongshu.com' + apiPath;
+      var fetchOpts = {
+        method: method || 'POST',
+        headers: headers,
+        credentials: 'include',  // 自动带上 cookies
+      }
+      if (bodyStr && (method || 'POST') !== 'GET') {
+        fetchOpts.body = bodyStr
+      }
+
+      var resp = await fetch(fullUrl, fetchOpts);
+      var text = await resp.text();
+      var data;
+      try { data = JSON.parse(text); } catch(e) { data = text }
+
+      return {
+        ok: true,
+        status: resp.status,
+        data: data
+      }
+    } catch(e) {
+      return { ok: false, error: e.message }
+    }
+  })()
+})(__API_PATH__, __BODY_STR__, __METHOD__)
+`
+
+          const script = fetchScript
+            .replace('__API_PATH__', JSON.stringify(apiPath))
+            .replace('__BODY_STR__', JSON.stringify(reqBody ? (typeof reqBody === 'string' ? reqBody : JSON.stringify(reqBody)) : ''))
+            .replace('__METHOD__', JSON.stringify(method || 'POST'))
+
+          console.log(`[SignServer] 浏览器内 fetch: ${method || 'POST'} ${apiPath}`)
+          const result = await wc.executeJavaScript(script, true)
+
+          if (result.ok) {
+            console.log(`[SignServer] fetch 成功: status=${result.status}`)
+            res.writeHead(200)
+            res.end(JSON.stringify(result))
+          } else {
+            console.error('[SignServer] fetch 失败:', result.error)
+            res.writeHead(500)
+            res.end(JSON.stringify(result))
+          }
+          return
+        }
+
         // GET /cookies — 获取浏览器 cookies
         if (req.method === 'GET' && url.pathname === '/cookies') {
           const bv = this.getBrowserView()
@@ -218,6 +321,7 @@ class SignServer {
       console.log(`[SignServer] 签名服务已启动: http://127.0.0.1:${port}`)
       console.log(`[SignServer]   GET  /health       — 检查浏览器环境`)
       console.log(`[SignServer]   POST /sign         — 生成 XYW_ 签名`)
+      console.log(`[SignServer]   POST /fetch         — 浏览器内 fetch（签名+请求全在浏览器中）`)
       console.log(`[SignServer]   GET  /cookies      — 获取浏览器 cookies`)
       console.log(`[SignServer]   GET  /user-agent   — 获取浏览器 UA`)
     })
