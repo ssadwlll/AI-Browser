@@ -54,6 +54,26 @@ async function checkSignServer() {
 }
 
 /**
+ * 通过签名服务获取浏览器 cookies（签名服务可用时覆盖硬编码值）
+ */
+function getBrowserCookies() {
+  return new Promise((resolve) => {
+    const req = http.get(`${SIGN_SERVER_URL}/cookies`, { timeout: 5000 }, (res) => {
+      let data = '';
+      res.on('data', c => data += c);
+      res.on('end', () => {
+        try {
+          const result = JSON.parse(data);
+          resolve(result.cookies || null);
+        } catch { resolve(null); }
+      });
+    });
+    req.on('error', () => resolve(null));
+    req.on('timeout', () => { req.destroy(); resolve(null); });
+  });
+}
+
+/**
  * 通过签名服务生成动态 XYW_ 签名
  */
 function getDynamicSign(apiPath, bodyStr) {
@@ -111,8 +131,8 @@ const COMMON_COOKIES = {
   id_token: 'VjEAANhwLOxSoDzPXeRVDhHelhhunlYN+dguETDo8/MplQYvOS6o8+ARuz+oPXhk1++ArPEHn0mTGMJj+yDDSu0yXVZUpELj22z+HblhCgKsW0eCHjLP/81oXGXkkst/Qf7BZIav',
 };
 
-const SEARCH_ACW_TC = '0ad6226c17836108952176343e3ad47211aef67a8af1abf13f3b33afdd42ac';
-const FEED_ACW_TC = '0ad526c017835991173548419e19e9286dd6f92597046eff63a01078089887';
+let SEARCH_ACW_TC = '0ad6226c17836108952176343e3ad47211aef67a8af1abf13f3b33afdd42ac';
+let FEED_ACW_TC = '0ad526c017835991173548419e19e9286dd6f92597046eff63a01078089887';
 
 // Search v2 API 签名（用户最新提供，静态复用，请求量低 3次/关键词）
 const SEARCH_X_S = 'XYS_2UQhPsHCH0c1PUh7HjIj2erjwjQhyoPTqBPT49pjHjIj2eHjwjQgynEDJ74AHjIj2ePjwjQTJdPIPAZlg94aGLTlGMS1JBp0nLVFPokb4emk8rQ/4BktPd+awepnGDVA2bSxGFDUy0by+7iF8o+8aobsJsTBcLpGLgSI+rl/znRhGFRS4B4O408E4LYD8rzH20Qh4Bzl2bq9cL+jJL8ycAbnzeQYP0mwGdqI8BWF8AmmPrkHaMY/admPzp49PsT+c9EIqMQCLDkcpnbLP9lt/LT/Jd4nnSk0yLLIaSQQyAmOarEaLSz+G9TNP0mPGSSO/LlizFuIqBknpAmOPaHVHdWFH0ijJ9Qx8n+FHdF=';
@@ -471,6 +491,22 @@ async function main() {
   if (signServerAvailable) {
     log(`详情API: edith.xiaohongshu.com feed (动态 XYW_ 签名 via 签名服务)`);
     log(`  签名服务: ${SIGN_SERVER_URL} ✅ 已连接`);
+
+    // 从浏览器获取最新 cookies，覆盖硬编码值（确保签名与 cookie 匹配）
+    const browserCookies = await getBrowserCookies();
+    if (browserCookies && browserCookies.a1) {
+      Object.assign(COMMON_COOKIES, browserCookies);
+      log(`  浏览器 cookies 已同步 (a1: ${COMMON_COOKIES.a1.substring(0, 15)}...)`);
+
+      // 同时更新 acw_tc（浏览器中可能有不同的值）
+      if (browserCookies.acw_tc) {
+        SEARCH_ACW_TC = browserCookies.acw_tc;
+        FEED_ACW_TC = browserCookies.acw_tc;
+        log(`  acw_tc 已同步: ${browserCookies.acw_tc.substring(0, 20)}...`);
+      }
+    } else {
+      log(`  ⚠️ 无法获取浏览器 cookies，使用硬编码值（可能导致签名不匹配）`);
+    }
   } else {
     log(`详情API: edith.xiaohongshu.com feed (静态 XYS_ x-s + 动态 x-s-common)`);
     log(`  签名服务: ${SIGN_SERVER_URL} ❌ 未连接（回退静态签名）`);
