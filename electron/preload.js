@@ -79,6 +79,8 @@ contextBridge.exposeInMainWorld('api', {
     clearRequests: () => ipcRenderer.invoke('reverse:clear-requests'),
     getRequests: (filter) => ipcRenderer.invoke('reverse:get-requests', filter || {}),
     getRequestDetail: (requestId) => ipcRenderer.invoke('reverse:get-request-detail', { requestId }),
+    // 获取当前页面 Cookie（用于复制请求）
+    getCookies: () => ipcRenderer.invoke('reverse:get-cookies'),
     // 脚本抓取
     extractScripts: () => ipcRenderer.invoke('reverse:extract-scripts'),
     fetchScriptSource: (url) => ipcRenderer.invoke('reverse:fetch-script-source', { url }),
@@ -87,6 +89,11 @@ contextBridge.exposeInMainWorld('api', {
     // AI 分析
     startAnalysis: (params) => ipcRenderer.invoke('reverse:start-analysis', params),
     abortAnalysis: () => ipcRenderer.invoke('reverse:abort-analysis'),
+    // 存储管理
+    getStorage: () => ipcRenderer.invoke('reverse:get-storage'),
+    clearCookie: (name) => ipcRenderer.invoke('reverse:clear-cookie', { name }),
+    clearStorageItem: (type, key) => ipcRenderer.invoke('reverse:clear-storage-item', { type, key }),
+    clearAllStorage: (type) => ipcRenderer.invoke('reverse:clear-all-storage', { type }),
     // 事件监听（流式回复、步骤等）
     onEvent: (callback) => {
       const handler = (_e, { channel, data }) => callback(channel, data)
@@ -238,6 +245,22 @@ contextBridge.exposeInMainWorld('api', {
       ipcRenderer.invoke('scripts:get-detail', { serverUrl, appKey, appSecret, id }),
     upload: ({ serverUrl, appKey, appSecret, name, code, description, categoryId, urlPattern, toolType, toolConfig, metadata }) =>
       ipcRenderer.invoke('scripts:upload', { serverUrl, appKey, appSecret, name, code, description, categoryId, urlPattern, toolType, toolConfig, metadata }),
+  },
+  // 小红书 API 直连（方案 A：Headless 浏览器）
+  xhs: {
+    checkEnv: () => ipcRenderer.invoke('xhs:check-env'),
+    search: ({ keyword, page, pageSize, sort }) =>
+      ipcRenderer.invoke('xhs:search', { keyword, page, pageSize, sort }),
+    getNote: ({ noteId }) =>
+      ipcRenderer.invoke('xhs:get-note', { noteId }),
+    batchGetNotes: ({ noteIds }) =>
+      ipcRenderer.invoke('xhs:batch-get-notes', { noteIds }),
+    getComments: ({ noteId, cursor }) =>
+      ipcRenderer.invoke('xhs:get-comments', { noteId, cursor }),
+    getUser: ({ userId }) =>
+      ipcRenderer.invoke('xhs:get-user', { userId }),
+    getUserNotes: ({ userId, cursor }) =>
+      ipcRenderer.invoke('xhs:get-user-notes', { userId, cursor }),
   },
   // 智能体
   agent: {

@@ -842,6 +842,116 @@ function registerIpcHandlers() {
     return { success: true }
   })
 
+  // ===== 获取 Cookie（用于复制请求时附带） =====
+  ipcMain.handle('reverse:get-cookies', async () => {
+    const bv = tabManager.getActiveBrowserView()
+    if (!bv) return { success: false, error: '无可用标签页', cookies: [] }
+    const url = bv.webContents.getURL()
+    try {
+      const cookies = await bv.webContents.session.cookies.get({ url })
+      // 格式化为 Cookie 字符串
+      const cookieStr = cookies.map(c => `${c.name}=${c.value}`).join('; ')
+      return { success: true, cookies, cookieStr }
+    } catch (e) {
+      return { success: false, error: e.message, cookies: [] }
+    }
+  })
+
+  // ===== 存储管理 API =====
+  ipcMain.handle('reverse:get-storage', async () => {
+    const bv = tabManager.getActiveBrowserView()
+    if (!bv) return { success: false, error: '无可用标签页' }
+    const url = bv.webContents.getURL()
+    try {
+      // 获取 cookies
+      const cookies = await bv.webContents.session.cookies.get({ url })
+      // 执行 JS 获取 localStorage 和 sessionStorage
+      const storage = await bv.webContents.executeJavaScript(`
+        (function() {
+          const ls = [];
+          const ss = [];
+          try {
+            for (let i = 0; i < localStorage.length; i++) {
+              const key = localStorage.key(i);
+              ls.push({ key, value: localStorage.getItem(key) });
+            }
+          } catch (e) {}
+          try {
+            for (let i = 0; i < sessionStorage.length; i++) {
+              const key = sessionStorage.key(i);
+              ss.push({ key, value: sessionStorage.getItem(key) });
+            }
+          } catch (e) {}
+          return { localStorage: ls, sessionStorage: ss };
+        })()
+      `)
+      return {
+        success: true,
+        cookies: cookies.map(c => ({
+          name: c.name,
+          value: c.value,
+          domain: c.domain,
+          path: c.path,
+          secure: c.secure,
+          httpOnly: c.httpOnly,
+          expirationDate: c.expirationDate,
+        })),
+        localStorage: storage.localStorage || [],
+        sessionStorage: storage.sessionStorage || [],
+        domain: url ? new URL(url).hostname : '',
+      }
+    } catch (e) {
+      return { success: false, error: e.message }
+    }
+  })
+
+  ipcMain.handle('reverse:clear-cookie', async (event, { name }) => {
+    const bv = tabManager.getActiveBrowserView()
+    if (!bv) return { success: false, error: '无可用标签页' }
+    const url = bv.webContents.getURL()
+    try {
+      const cookies = await bv.webContents.session.cookies.get({ url, name })
+      for (const c of cookies) {
+        await bv.webContents.session.cookies.remove(url, c.name)
+      }
+      return { success: true }
+    } catch (e) {
+      return { success: false, error: e.message }
+    }
+  })
+
+  ipcMain.handle('reverse:clear-storage-item', async (event, { type, key }) => {
+    const bv = tabManager.getActiveBrowserView()
+    if (!bv) return { success: false, error: '无可用标签页' }
+    try {
+      const storage = type === 'localStorage' ? 'localStorage' : 'sessionStorage'
+      await bv.webContents.executeJavaScript(`${storage}.removeItem('${key.replace(/'/g, "\\'")}')`)
+      return { success: true }
+    } catch (e) {
+      return { success: false, error: e.message }
+    }
+  })
+
+  ipcMain.handle('reverse:clear-all-storage', async (event, { type }) => {
+    const bv = tabManager.getActiveBrowserView()
+    if (!bv) return { success: false, error: '无可用标签页' }
+    try {
+      if (type === 'cookies') {
+        const url = bv.webContents.getURL()
+        const cookies = await bv.webContents.session.cookies.get({ url })
+        for (const c of cookies) {
+          await bv.webContents.session.cookies.remove(url, c.name)
+        }
+      } else {
+        const storage = type === 'localStorage' ? 'localStorage' : 'sessionStorage'
+        await bv.webContents.executeJavaScript(`${storage}.clear()`)
+      }
+      return { success: true }
+    } catch (e) {
+      return { success: false, error: e.message }
+    }
+  })
+
   // --- 数据报告窗口（独立 BrowserWindow，Agent 完成时自动弹出） ---
   let reportWindow = null
   // 缓存最新的报告数据，供报告窗口加载时读取
@@ -1845,6 +1955,74 @@ function registerIpcHandlers() {
       return { success: result.data?.success || false, data: result.data }
     } catch (e) {
       return { success: false, error: e.message }
+    }
+  })
+
+  // --- 小红书 API 直连（方案 A：Headless 浏览器）---
+  const xhsApiService = require('./services/xhs_api_service')
+
+  // 环境检查：确认当前页面是小红书且 mnsv2 可用
+  ipcMain.handle('xhs:check-env', async () => {
+    const bv = tabManager.getActiveBrowserView()
+    return xhsApiService.checkEnvironment(bv)
+  })
+
+  // 搜索笔记
+  ipcMain.handle('xhs:search', async (event, { keyword, page, pageSize, sort }) => {
+    const bv = tabManager.getActiveBrowserView()
+    return xhsApiService.searchNotes(bv, keyword, page || 1, pageSize || 20, sort || 'general')
+  })
+
+  // 获取笔记详情
+  ipcMain.handle('xhs:get-note', async (event, { noteId }) => {
+    const bv = tabManager.getActiveBrowserView()
+    return xhsApiService.getNoteDetail(bv, noteId)
+  })
+
+  // 批量获取笔记详情
+  ipcMain.handle('xhs:batch-get-notes', async (event, { noteIds }) => {
+    const bv = tabManager.getActiveBrowserView()
+    return xhsApiService.batchGetNoteDetail(bv, noteIds)
+  })
+
+  // 获取评论
+  ipcMain.handle('xhs:get-comments', async (event, { noteId, cursor }) => {
+    const bv = tabManager.getActiveBrowserView()
+    return xhsApiService.getComments(bv, noteId, cursor || '')
+  })
+
+  // 获取用户信息
+  ipcMain.handle('xhs:get-user', async (event, { userId }) => {
+    const bv = tabManager.getActiveBrowserView()
+    return xhsApiService.getUserProfile(bv, userId)
+  })
+
+  // 获取用户笔记
+  ipcMain.handle('xhs:get-user-notes', async (event, { userId, cursor }) => {
+    const bv = tabManager.getActiveBrowserView()
+    return xhsApiService.getUserNotes(bv, userId, cursor || '')
+  })
+
+  // 清除小红书 Cookie 并刷新页面（重置 a1 标记）
+  ipcMain.handle('xhs:reset-session', async () => {
+    const bv = tabManager.getActiveBrowserView()
+    if (!bv) return { ok: false, error: '无活动标签页' }
+    try {
+      const ses = bv.webContents.session
+      // 清除小红书相关 cookie
+      await ses.clearStorageData({
+        origin: 'https://www.xiaohongshu.com',
+        storages: ['cookies'],
+      })
+      await ses.clearStorageData({
+        origin: 'https://edith.xiaohongshu.com',
+        storages: ['cookies'],
+      })
+      // 刷新页面获取新的 a1
+      bv.webContents.reload()
+      return { ok: true, message: 'Cookie已清除，页面正在刷新。请等待页面加载完成后重新登录并重试' }
+    } catch (e) {
+      return { ok: false, error: '清除Cookie失败: ' + e.message }
     }
   })
 }

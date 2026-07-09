@@ -165,6 +165,7 @@ class NetworkCapture {
         sendStart: response.timing.sendStart,
         receiveHeadersEnd: response.timing.receiveHeadersEnd,
         waitTime: response.timing.waitTime,
+        totalDuration: response.timing.receiveHeadersEnd ? Math.round(response.timing.receiveHeadersEnd - response.timing.sendStart) : null,
       } : null,
       protocol: response.protocol,
     })
@@ -206,11 +207,13 @@ class NetworkCapture {
     const state = this.attached.get(wcId)
     if (!state) return { success: false, error: '未在捕获状态', requests: [] }
 
-    const { urlFilter = '', method = '', resourceType = '', includeBody = true, limit = 100 } = options
+    const { urlFilter = '', method = '', resourceType = '__default__', includeBody = true, limit = 100 } = options
 
-    // 资源类型筛选：逆向分析默认只看 XHR/Fetch，但支持传 '' 看全部
-    const typeFilter = resourceType || ''
-    // 如果没指定 resourceType，默认过滤出 XHR/Fetch/Script（逆向主要看这三类）
+    // 资源类型筛选：
+    // '__default__'(未传) → 只看 XHR/Fetch/Script
+    // 'ALL' → 看全部类型
+    // 具体类型 → 只看该类型
+    const typeFilter = resourceType
     const defaultTypes = ['XHR', 'Fetch', 'Script']
 
     const result = []
@@ -228,11 +231,14 @@ class NetworkCapture {
       if (method && req.method.toUpperCase() !== method.toUpperCase()) continue
       // 资源类型过滤
       const rType = resp?.resourceType || req.resourceType
-      if (typeFilter) {
-        if (rType !== typeFilter) continue
-      } else {
+      if (typeFilter === '__default__') {
         // 默认过滤：只看 XHR/Fetch/Script
         if (!defaultTypes.includes(rType)) continue
+      } else if (typeFilter === 'ALL') {
+        // 看全部类型，不过滤
+      } else if (typeFilter) {
+        // 指定具体类型
+        if (rType !== typeFilter) continue
       }
 
       const item = {
@@ -243,6 +249,7 @@ class NetworkCapture {
         status: resp?.status || null,
         statusText: resp?.statusText || '',
         mimeType: resp?.mimeType || '',
+        contentLength: body?.actualLength || parseInt(resp?.headers?.['content-length'] || resp?.headers?.['Content-Length']) || null,
         timestamp: req.wallTime || req.timestamp,
         initiator: req.initiator,
         requestHeaders: req.headers,
@@ -294,6 +301,20 @@ class NetworkCapture {
         body,
         finished: state.finishedIds.has(requestId),
       },
+    }
+  }
+
+  /**
+   * 获取当前页面的 Cookie（用于复制请求时附带）
+   * @param {WebContents} webContents
+   * @returns {Promise<{success: boolean, cookies?: Array, error?: string}>}
+   */
+  async getCookies(webContents) {
+    try {
+      const cookies = await webContents.session.cookies.get({})
+      return { success: true, cookies }
+    } catch (e) {
+      return { success: false, error: e.message }
     }
   }
 }

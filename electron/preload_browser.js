@@ -134,3 +134,17 @@ window.browserAPI = {
   selectionAction: (action, text) => ipcRenderer.send('browser:selection-action', { action, text }),
   getSelectionToolsEnabled: () => ipcRenderer.invoke('browser:get-selection-tools'),
 }
+
+// ============ 小红书 API 桥接（方案 A：Headless 浏览器） ============
+// 注入脚本可通过 window.xhsApi 调用主进程的 XHS API 服务
+// 主进程会在页面上下文中调用 window.mnsv2 生成签名，然后用 Node.js 发起 API 请求
+window.xhsApi = {
+  checkEnv: () => ipcRenderer.invoke('xhs:check-env'),
+  search: (opts) => ipcRenderer.invoke('xhs:search', opts || {}),
+  getNote: (opts) => ipcRenderer.invoke('xhs:get-note', opts || {}),
+  batchGetNotes: (opts) => ipcRenderer.invoke('xhs:batch-get-notes', opts || {}),
+  getComments: (opts) => ipcRenderer.invoke('xhs:get-comments', opts || {}),
+  getUser: (opts) => ipcRenderer.invoke('xhs:get-user', opts || {}),
+  getUserNotes: (opts) => ipcRenderer.invoke('xhs:get-user-notes', opts || {}),
+  resetSession: () => ipcRenderer.invoke('xhs:reset-session'),
+}

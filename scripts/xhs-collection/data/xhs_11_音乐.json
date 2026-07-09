@@ -1,0 +1,913 @@
+{
+  "keyword": "音乐",
+  "index": 11,
+  "collectedAt": "2026-07-09T11:43:22.069Z",
+  "pages": [
+    {
+      "page": 1,
+      "count": 22,
+      "hasMore": true
+    },
+    {
+      "page": 2,
+      "count": 22,
+      "hasMore": true
+    },
+    {
+      "page": 3,
+      "count": 22,
+      "hasMore": true
+    }
+  ],
+  "noteIds": [
+    "6a22d5af000000001503d796",
+    "6a3e681d000000001503d0c3",
+    "69f5ff43000000002301490d",
+    "6a4e4cdd000000001603c93e",
+    "6a4f60210000000006037611",
+    "6a4656850000000016025ec9",
+    "b1761d3b-d2da-40fa-bb3d-51a4709ddb87#1783597402036",
+    "6a48bad1000000001603fd6b",
+    "6a4f62350000000006021fd2",
+    "6a486d640000000008031fda",
+    "6a37a13800000000110108f6",
+    "6a4a46ee000000002100b3df",
+    "6a49e83a000000000702c735",
+    "6a4a11f60000000008026c71",
+    "6a4902710000000015026ec3",
+    "6a4f3eea0000000015026c9a",
+    "6a44e370000000001702a739",
+    "6a4cfefc000000001603f25e",
+    "6a3f883a00000000110113a3",
+    "6a4d0417000000001101d515",
+    "6a43d96f000000000f015662",
+    "6b4719f3-f179-4b3b-a153-c9b8bb3bfc22#1783597403594",
+    "6a3e8f4f000000001702b5d1",
+    "6a48d7ed0000000011005146",
+    "d67ce1fa-4269-4f75-9739-0bb45fd658b6#1783597405052",
+    "6a29f6dd0000000016025c15"
+  ],
+  "notes": [
+    {
+      "noteId": "6a22d5af000000001503d796",
+      "title": "《Float》0.7★",
+      "type": "video",
+      "cover": "",
+      "user": {
+        "userId": "6710e499000000001d023113",
+        "nickname": "Syiiluailqyy2s0021",
+        "avatar": "https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo3229g0pvr7a705pogsicncc8jidegm3g?imageView2/2/w/80/format/jpg"
+      },
+      "likedCount": "2238",
+      "xsecToken": ""
+    },
+    {
+      "noteId": "6a3e681d000000001503d0c3",
+      "title": "推荐权威音乐",
+      "type": "video",
+      "cover": "",
+      "user": {
+        "userId": "63d603320000000026010e6d",
+        "nickname": "Tulip恋屿🌷",
+        "avatar": "https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo319p3jqtungcg5oum0cp9i3jdrubibgo?imageView2/2/w/80/format/jpg"
+      },
+      "likedCount": "104495",
+      "xsecToken": ""
+    },
+    {
+      "noteId": "69f5ff43000000002301490d",
+      "title": "额 第一次推歌「剪了好久 官方不火就完了」",
+      "type": "video",
+      "cover": "",
+      "user": {
+        "userId": "65586af6000000000202afa5",
+        "nickname": "Zy荨延.🍀雪落栖梨枝.",
+        "avatar": "https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo31vctaq26iq605paodbr0lbt56mprsho?imageView2/2/w/80/format/jpg"
+      },
+      "likedCount": "33619",
+      "xsecToken": ""
+    },
+    {
+      "noteId": "6a4e4cdd000000001603c93e",
+      "title": "“浸泡在十公升的瓶里 单纯想要呼吸”",
+      "type": "video",
+      "cover": "",
+      "user": {
+        "userId": "68620260000000001e0054b6",
+        "nickname": "Hello.",
+        "avatar": "https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo31jl3ascf306g5q3209g7gl5m1770aco?imageView2/2/w/80/format/jpg"
+      },
+      "likedCount": "781",
+      "xsecToken": ""
+    },
+    {
+      "noteId": "6a4f60210000000006037611",
+      "title": "盘点一些只打高端局的音乐",
+      "type": "video",
+      "cover": "",
+      "user": {
+        "userId": "6791ab9e000000000d008a78",
+        "nickname": "草戒指的美丽",
+        "avatar": "https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo31t5qqmm95m005pshlef392jo1dj9p1o?imageView2/2/w/80/format/jpg"
+      },
+      "likedCount": "23",
+      "xsecToken": ""
+    },
+    {
+      "noteId": "6a4656850000000016025ec9",
+      "title": "宝子们，华语热歌歌单来啦！",
+      "type": "video",
+      "cover": "",
+      "user": {
+        "userId": "670a71b2000000001d032b28",
+        "nickname": "青竹",
+        "avatar": "https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo321v29qe9na505poae6p7eap8fgbfcg0?imageView2/2/w/80/format/jpg"
+      },
+      "likedCount": "2195",
+      "xsecToken": ""
+    },
+    {
+      "noteId": "b1761d3b-d2da-40fa-bb3d-51a4709ddb87#1783597402036",
+      "title": "",
+      "type": "",
+      "cover": "",
+      "user": {
+        "userId": "",
+        "nickname": "",
+        "avatar": ""
+      },
+      "likedCount": "0",
+      "xsecToken": ""
+    },
+    {
+      "noteId": "6a48bad1000000001603fd6b",
+      "title": "盘点2026爆火歌曲🌟",
+      "type": "video",
+      "cover": "",
+      "user": {
+        "userId": "642e6c61000000001201352c",
+        "nickname": "MCL",
+        "avatar": "https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo31norsbf906005p1edhgkid9c36da8dg?imageView2/2/w/80/format/jpg"
+      },
+      "likedCount": "1183",
+      "xsecToken": ""
+    },
+    {
+      "noteId": "6a4f62350000000006021fd2",
+      "title": "🎧 今日分享｜纯音乐歌单《花日》",
+      "type": "video",
+      "cover": "",
+      "user": {
+        "userId": "69a1720400000000210255b7",
+        "nickname": "白线向远 . 音乐电台",
+        "avatar": "https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo321vs2ael7e005qd1e828cldnrc34tk0?imageView2/2/w/80/format/jpg"
+      },
+      "likedCount": "3",
+      "xsecToken": ""
+    },
+    {
+      "noteId": "6a486d640000000008031fda",
+      "title": "推荐适合纯爱音乐♡",
+      "type": "video",
+      "cover": "",
+      "user": {
+        "userId": "589594786a6a69715512a3b3",
+        "nickname": "愈尾",
+        "avatar": "https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo3228vsm56ne0g493kvua7h8tj47vg0c0?imageView2/2/w/80/format/jpg"
+      },
+      "likedCount": "26475",
+      "xsecToken": ""
+    },
+    {
+      "noteId": "6a37a13800000000110108f6",
+      "title": "",
+      "type": "video",
+      "cover": "",
+      "user": {
+        "userId": "67bf06010000000008014a18",
+        "nickname": "春知树.",
+        "avatar": "https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo3226kc4pen26g5ptv0o0i2igota87lno?imageView2/2/w/80/format/jpg"
+      },
+      "likedCount": "5951",
+      "xsecToken": ""
+    },
+    {
+      "noteId": "6a4a46ee000000002100b3df",
+      "title": "暑假写作业超长歌单合集",
+      "type": "video",
+      "cover": "",
+      "user": {
+        "userId": "5aeae1e84eacab1a17f1099a",
+        "nickname": "Kerdins.",
+        "avatar": "https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo322c0qfvane6g4a513cgug2cqkavdg70?imageView2/2/w/80/format/jpg"
+      },
+      "likedCount": "10472",
+      "xsecToken": ""
+    },
+    {
+      "noteId": "6a49e83a000000000702c735",
+      "title": "爽曲歌单一命速通！！！",
+      "type": "video",
+      "cover": "",
+      "user": {
+        "userId": "659a26290000000022013c81",
+        "nickname": "lruri^",
+        "avatar": "https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo322c076nb7ukg5pcq4okoif413j6qan8?imageView2/2/w/80/format/jpg"
+      },
+      "likedCount": "2036",
+      "xsecToken": ""
+    },
+    {
+      "noteId": "6a4a11f60000000008026c71",
+      "title": "38分钟R&B音乐合集",
+      "type": "video",
+      "cover": "",
+      "user": {
+        "userId": "65935a05000000001f0137e3",
+        "nickname": "許千千",
+        "avatar": "https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo31rq54cu922605pcjb82nqdv3mdjiq1g?imageView2/2/w/80/format/jpg"
+      },
+      "likedCount": "120",
+      "xsecToken": ""
+    },
+    {
+      "noteId": "6a4902710000000015026ec3",
+      "title": "推荐适合爆肝暑假作业的超好听治愈系歌单",
+      "type": "video",
+      "cover": "",
+      "user": {
+        "userId": "6944fe1700000000320288a1",
+        "nickname": "洛忆楠",
+        "avatar": "https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo321h255qg7o5g5qa4vobsl251misa8kg?imageView2/2/w/80/format/jpg"
+      },
+      "likedCount": "2739",
+      "xsecToken": ""
+    },
+    {
+      "noteId": "6a4f3eea0000000015026c9a",
+      "title": "这是不是你们平时在找的音乐？",
+      "type": "video",
+      "cover": "",
+      "user": {
+        "userId": "6857cb45000000001e0035fa",
+        "nickname": "爱错",
+        "avatar": "https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo322c6o4mnna5g5q2npd2ngdfqkjv64a0?imageView2/2/w/80/format/jpg"
+      },
+      "likedCount": "77",
+      "xsecToken": ""
+    },
+    {
+      "noteId": "b1761d3b-d2da-40fa-bb3d-51a4709ddb87#1783597402036",
+      "title": "",
+      "type": "",
+      "cover": "",
+      "user": {
+        "userId": "",
+        "nickname": "",
+        "avatar": ""
+      },
+      "likedCount": "0",
+      "xsecToken": ""
+    },
+    {
+      "noteId": "6a44e370000000001702a739",
+      "title": "《desolate》",
+      "type": "video",
+      "cover": "",
+      "user": {
+        "userId": "60d99e140000000020027687",
+        "nickname": "沉无蓿",
+        "avatar": "https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo31uvaih53jq6g5o6pjoa84tk7dnjsr1o?imageView2/2/w/80/format/jpg"
+      },
+      "likedCount": "50",
+      "xsecToken": ""
+    },
+    {
+      "noteId": "6a4cfefc000000001603f25e",
+      "title": "",
+      "type": "video",
+      "cover": "",
+      "user": {
+        "userId": "6a48742c000000000e03e400",
+        "nickname": "白月光温澈昱.",
+        "avatar": "https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo322bidh3rnk6g5qi8egm3np00faevq0g?imageView2/2/w/80/format/jpg"
+      },
+      "likedCount": "262",
+      "xsecToken": ""
+    },
+    {
+      "noteId": "6a3f883a00000000110113a3",
+      "title": "那些突然爆火的音乐",
+      "type": "video",
+      "cover": "",
+      "user": {
+        "userId": "6745c8650000000001000fec",
+        "nickname": "映禾.",
+        "avatar": "https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo321n7e3vp706g5pq5p1ig83vcam7f2jg?imageView2/2/w/80/format/jpg"
+      },
+      "likedCount": "8600",
+      "xsecToken": ""
+    },
+    {
+      "noteId": "6a4d0417000000001101d515",
+      "title": "“清风微寒惹一厢粉黛又愁眉。”",
+      "type": "video",
+      "cover": "",
+      "user": {
+        "userId": "65256ed30000000002012842",
+        "nickname": "-Ww-",
+        "avatar": "https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo31ennhm8gm06g5p95dr9gia22h23j368?imageView2/2/w/80/format/jpg"
+      },
+      "likedCount": "562",
+      "xsecToken": ""
+    },
+    {
+      "noteId": "6a43d96f000000000f015662",
+      "title": "",
+      "type": "video",
+      "cover": "",
+      "user": {
+        "userId": "60be198700000000010038c3",
+        "nickname": "饺子WTF",
+        "avatar": "https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo31r6ia03cmu005o5u363g8e634n4f640?imageView2/2/w/80/format/jpg"
+      },
+      "likedCount": "3781",
+      "xsecToken": ""
+    },
+    {
+      "noteId": "6a22d5af000000001503d796",
+      "title": "《Float》0.7★",
+      "type": "video",
+      "cover": "",
+      "user": {
+        "userId": "6710e499000000001d023113",
+        "nickname": "Syiiluailqyy2s0021",
+        "avatar": "https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo3229g0pvr7a705pogsicncc8jidegm3g?imageView2/2/w/80/format/jpg"
+      },
+      "likedCount": "2238",
+      "xsecToken": ""
+    },
+    {
+      "noteId": "6a4f60210000000006037611",
+      "title": "盘点一些只打高端局的音乐",
+      "type": "video",
+      "cover": "",
+      "user": {
+        "userId": "6791ab9e000000000d008a78",
+        "nickname": "草戒指的美丽",
+        "avatar": "https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo31t5qqmm95m005pshlef392jo1dj9p1o?imageView2/2/w/80/format/jpg"
+      },
+      "likedCount": "23",
+      "xsecToken": ""
+    },
+    {
+      "noteId": "6a4656850000000016025ec9",
+      "title": "宝子们，华语热歌歌单来啦！",
+      "type": "video",
+      "cover": "",
+      "user": {
+        "userId": "670a71b2000000001d032b28",
+        "nickname": "青竹",
+        "avatar": "https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo321v29qe9na505poae6p7eap8fgbfcg0?imageView2/2/w/80/format/jpg"
+      },
+      "likedCount": "2195",
+      "xsecToken": ""
+    },
+    {
+      "noteId": "6a4f62350000000006021fd2",
+      "title": "🎧 今日分享｜纯音乐歌单《花日》",
+      "type": "video",
+      "cover": "",
+      "user": {
+        "userId": "69a1720400000000210255b7",
+        "nickname": "白线向远 . 音乐电台",
+        "avatar": "https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo321vs2ael7e005qd1e828cldnrc34tk0?imageView2/2/w/80/format/jpg"
+      },
+      "likedCount": "3",
+      "xsecToken": ""
+    },
+    {
+      "noteId": "6a3e681d000000001503d0c3",
+      "title": "推荐权威音乐",
+      "type": "video",
+      "cover": "",
+      "user": {
+        "userId": "63d603320000000026010e6d",
+        "nickname": "Tulip恋屿🌷",
+        "avatar": "https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo319p3jqtungcg5oum0cp9i3jdrubibgo?imageView2/2/w/80/format/jpg"
+      },
+      "likedCount": "104495",
+      "xsecToken": ""
+    },
+    {
+      "noteId": "69f5ff43000000002301490d",
+      "title": "额 第一次推歌「剪了好久 官方不火就完了」",
+      "type": "video",
+      "cover": "",
+      "user": {
+        "userId": "65586af6000000000202afa5",
+        "nickname": "Zy荨延.🍀雪落栖梨枝.",
+        "avatar": "https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo31vctaq26iq605paodbr0lbt56mprsho?imageView2/2/w/80/format/jpg"
+      },
+      "likedCount": "33619",
+      "xsecToken": ""
+    },
+    {
+      "noteId": "6b4719f3-f179-4b3b-a153-c9b8bb3bfc22#1783597403594",
+      "title": "",
+      "type": "",
+      "cover": "",
+      "user": {
+        "userId": "",
+        "nickname": "",
+        "avatar": ""
+      },
+      "likedCount": "0",
+      "xsecToken": ""
+    },
+    {
+      "noteId": "6a48bad1000000001603fd6b",
+      "title": "盘点2026爆火歌曲🌟",
+      "type": "video",
+      "cover": "",
+      "user": {
+        "userId": "642e6c61000000001201352c",
+        "nickname": "MCL",
+        "avatar": "https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo31norsbf906005p1edhgkid9c36da8dg?imageView2/2/w/80/format/jpg"
+      },
+      "likedCount": "1183",
+      "xsecToken": ""
+    },
+    {
+      "noteId": "6a37a13800000000110108f6",
+      "title": "",
+      "type": "video",
+      "cover": "",
+      "user": {
+        "userId": "67bf06010000000008014a18",
+        "nickname": "春知树.",
+        "avatar": "https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo3226kc4pen26g5ptv0o0i2igota87lno?imageView2/2/w/80/format/jpg"
+      },
+      "likedCount": "5951",
+      "xsecToken": ""
+    },
+    {
+      "noteId": "6a486d640000000008031fda",
+      "title": "推荐适合纯爱音乐♡",
+      "type": "video",
+      "cover": "",
+      "user": {
+        "userId": "589594786a6a69715512a3b3",
+        "nickname": "愈尾",
+        "avatar": "https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo3228vsm56ne0g493kvua7h8tj47vg0c0?imageView2/2/w/80/format/jpg"
+      },
+      "likedCount": "26475",
+      "xsecToken": ""
+    },
+    {
+      "noteId": "6a4a46ee000000002100b3df",
+      "title": "暑假写作业超长歌单合集",
+      "type": "video",
+      "cover": "",
+      "user": {
+        "userId": "5aeae1e84eacab1a17f1099a",
+        "nickname": "Kerdins.",
+        "avatar": "https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo322c0qfvane6g4a513cgug2cqkavdg70?imageView2/2/w/80/format/jpg"
+      },
+      "likedCount": "10472",
+      "xsecToken": ""
+    },
+    {
+      "noteId": "6a4a11f60000000008026c71",
+      "title": "38分钟R&B音乐合集",
+      "type": "video",
+      "cover": "",
+      "user": {
+        "userId": "65935a05000000001f0137e3",
+        "nickname": "許千千",
+        "avatar": "https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo31rq54cu922605pcjb82nqdv3mdjiq1g?imageView2/2/w/80/format/jpg"
+      },
+      "likedCount": "120",
+      "xsecToken": ""
+    },
+    {
+      "noteId": "6a49e83a000000000702c735",
+      "title": "爽曲歌单一命速通！！！",
+      "type": "video",
+      "cover": "",
+      "user": {
+        "userId": "659a26290000000022013c81",
+        "nickname": "lruri^",
+        "avatar": "https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo322c076nb7ukg5pcq4okoif413j6qan8?imageView2/2/w/80/format/jpg"
+      },
+      "likedCount": "2036",
+      "xsecToken": ""
+    },
+    {
+      "noteId": "6a44e370000000001702a739",
+      "title": "《desolate》",
+      "type": "video",
+      "cover": "",
+      "user": {
+        "userId": "60d99e140000000020027687",
+        "nickname": "沉无蓿",
+        "avatar": "https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo31uvaih53jq6g5o6pjoa84tk7dnjsr1o?imageView2/2/w/80/format/jpg"
+      },
+      "likedCount": "50",
+      "xsecToken": ""
+    },
+    {
+      "noteId": "6a4f3eea0000000015026c9a",
+      "title": "这是不是你们平时在找的音乐？",
+      "type": "video",
+      "cover": "",
+      "user": {
+        "userId": "6857cb45000000001e0035fa",
+        "nickname": "爱错",
+        "avatar": "https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo322c6o4mnna5g5q2npd2ngdfqkjv64a0?imageView2/2/w/80/format/jpg"
+      },
+      "likedCount": "77",
+      "xsecToken": ""
+    },
+    {
+      "noteId": "6a4902710000000015026ec3",
+      "title": "推荐适合爆肝暑假作业的超好听治愈系歌单",
+      "type": "video",
+      "cover": "",
+      "user": {
+        "userId": "6944fe1700000000320288a1",
+        "nickname": "洛忆楠",
+        "avatar": "https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo321h255qg7o5g5qa4vobsl251misa8kg?imageView2/2/w/80/format/jpg"
+      },
+      "likedCount": "2739",
+      "xsecToken": ""
+    },
+    {
+      "noteId": "6b4719f3-f179-4b3b-a153-c9b8bb3bfc22#1783597403594",
+      "title": "",
+      "type": "",
+      "cover": "",
+      "user": {
+        "userId": "",
+        "nickname": "",
+        "avatar": ""
+      },
+      "likedCount": "0",
+      "xsecToken": ""
+    },
+    {
+      "noteId": "6a3e8f4f000000001702b5d1",
+      "title": "抒情 2026超好听中文歌 放松心情情歌专辑",
+      "type": "video",
+      "cover": "",
+      "user": {
+        "userId": "6025e996000000000101f0ed",
+        "nickname": "JK",
+        "avatar": "https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo31q304cbl7g005o15t6b0bs7d9qqu2g0?imageView2/2/w/80/format/jpg"
+      },
+      "likedCount": "191",
+      "xsecToken": ""
+    },
+    {
+      "noteId": "6a4cfefc000000001603f25e",
+      "title": "",
+      "type": "video",
+      "cover": "",
+      "user": {
+        "userId": "6a48742c000000000e03e400",
+        "nickname": "白月光温澈昱.",
+        "avatar": "https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo322bidh3rnk6g5qi8egm3np00faevq0g?imageView2/2/w/80/format/jpg"
+      },
+      "likedCount": "262",
+      "xsecToken": ""
+    },
+    {
+      "noteId": "6a48d7ed0000000011005146",
+      "title": "48分钟放松散步歌单合集",
+      "type": "video",
+      "cover": "",
+      "user": {
+        "userId": "674be8f6000000001c019697",
+        "nickname": "夜色治愈馆",
+        "avatar": "https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo3222h27f1mu5g5pqbt3r735kn0obkpog?imageView2/2/w/80/format/jpg"
+      },
+      "likedCount": "43",
+      "xsecToken": ""
+    },
+    {
+      "noteId": "6a4d0417000000001101d515",
+      "title": "“清风微寒惹一厢粉黛又愁眉。”",
+      "type": "video",
+      "cover": "",
+      "user": {
+        "userId": "65256ed30000000002012842",
+        "nickname": "-Ww-",
+        "avatar": "https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo31ennhm8gm06g5p95dr9gia22h23j368?imageView2/2/w/80/format/jpg"
+      },
+      "likedCount": "562",
+      "xsecToken": ""
+    },
+    {
+      "noteId": "6a3f883a00000000110113a3",
+      "title": "那些突然爆火的音乐",
+      "type": "video",
+      "cover": "",
+      "user": {
+        "userId": "6745c8650000000001000fec",
+        "nickname": "映禾.",
+        "avatar": "https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo321n7e3vp706g5pq5p1ig83vcam7f2jg?imageView2/2/w/80/format/jpg"
+      },
+      "likedCount": "8600",
+      "xsecToken": ""
+    },
+    {
+      "noteId": "6a22d5af000000001503d796",
+      "title": "《Float》0.7★",
+      "type": "video",
+      "cover": "",
+      "user": {
+        "userId": "6710e499000000001d023113",
+        "nickname": "Syiiluailqyy2s0021",
+        "avatar": "https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo3229g0pvr7a705pogsicncc8jidegm3g?imageView2/2/w/80/format/jpg"
+      },
+      "likedCount": "2238",
+      "xsecToken": ""
+    },
+    {
+      "noteId": "6a4f60210000000006037611",
+      "title": "盘点一些只打高端局的音乐",
+      "type": "video",
+      "cover": "",
+      "user": {
+        "userId": "6791ab9e000000000d008a78",
+        "nickname": "草戒指的美丽",
+        "avatar": "https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo31t5qqmm95m005pshlef392jo1dj9p1o?imageView2/2/w/80/format/jpg"
+      },
+      "likedCount": "23",
+      "xsecToken": ""
+    },
+    {
+      "noteId": "6a4656850000000016025ec9",
+      "title": "宝子们，华语热歌歌单来啦！",
+      "type": "video",
+      "cover": "",
+      "user": {
+        "userId": "670a71b2000000001d032b28",
+        "nickname": "青竹",
+        "avatar": "https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo321v29qe9na505poae6p7eap8fgbfcg0?imageView2/2/w/80/format/jpg"
+      },
+      "likedCount": "2195",
+      "xsecToken": ""
+    },
+    {
+      "noteId": "6a3e681d000000001503d0c3",
+      "title": "推荐权威音乐",
+      "type": "video",
+      "cover": "",
+      "user": {
+        "userId": "63d603320000000026010e6d",
+        "nickname": "Tulip恋屿🌷",
+        "avatar": "https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo319p3jqtungcg5oum0cp9i3jdrubibgo?imageView2/2/w/80/format/jpg"
+      },
+      "likedCount": "104495",
+      "xsecToken": ""
+    },
+    {
+      "noteId": "6a4f62350000000006021fd2",
+      "title": "🎧 今日分享｜纯音乐歌单《花日》",
+      "type": "video",
+      "cover": "",
+      "user": {
+        "userId": "69a1720400000000210255b7",
+        "nickname": "白线向远 . 音乐电台",
+        "avatar": "https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo321vs2ael7e005qd1e828cldnrc34tk0?imageView2/2/w/80/format/jpg"
+      },
+      "likedCount": "3",
+      "xsecToken": ""
+    },
+    {
+      "noteId": "69f5ff43000000002301490d",
+      "title": "额 第一次推歌「剪了好久 官方不火就完了」",
+      "type": "video",
+      "cover": "",
+      "user": {
+        "userId": "65586af6000000000202afa5",
+        "nickname": "Zy荨延.🍀雪落栖梨枝.",
+        "avatar": "https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo31vctaq26iq605paodbr0lbt56mprsho?imageView2/2/w/80/format/jpg"
+      },
+      "likedCount": "33619",
+      "xsecToken": ""
+    },
+    {
+      "noteId": "d67ce1fa-4269-4f75-9739-0bb45fd658b6#1783597405052",
+      "title": "",
+      "type": "",
+      "cover": "",
+      "user": {
+        "userId": "",
+        "nickname": "",
+        "avatar": ""
+      },
+      "likedCount": "0",
+      "xsecToken": ""
+    },
+    {
+      "noteId": "6a48bad1000000001603fd6b",
+      "title": "盘点2026爆火歌曲🌟",
+      "type": "video",
+      "cover": "",
+      "user": {
+        "userId": "642e6c61000000001201352c",
+        "nickname": "MCL",
+        "avatar": "https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo31norsbf906005p1edhgkid9c36da8dg?imageView2/2/w/80/format/jpg"
+      },
+      "likedCount": "1183",
+      "xsecToken": ""
+    },
+    {
+      "noteId": "6a37a13800000000110108f6",
+      "title": "",
+      "type": "video",
+      "cover": "",
+      "user": {
+        "userId": "67bf06010000000008014a18",
+        "nickname": "春知树.",
+        "avatar": "https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo3226kc4pen26g5ptv0o0i2igota87lno?imageView2/2/w/80/format/jpg"
+      },
+      "likedCount": "5951",
+      "xsecToken": ""
+    },
+    {
+      "noteId": "6a486d640000000008031fda",
+      "title": "推荐适合纯爱音乐♡",
+      "type": "video",
+      "cover": "",
+      "user": {
+        "userId": "589594786a6a69715512a3b3",
+        "nickname": "愈尾",
+        "avatar": "https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo3228vsm56ne0g493kvua7h8tj47vg0c0?imageView2/2/w/80/format/jpg"
+      },
+      "likedCount": "26475",
+      "xsecToken": ""
+    },
+    {
+      "noteId": "6a4a46ee000000002100b3df",
+      "title": "暑假写作业超长歌单合集",
+      "type": "video",
+      "cover": "",
+      "user": {
+        "userId": "5aeae1e84eacab1a17f1099a",
+        "nickname": "Kerdins.",
+        "avatar": "https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo322c0qfvane6g4a513cgug2cqkavdg70?imageView2/2/w/80/format/jpg"
+      },
+      "likedCount": "10472",
+      "xsecToken": ""
+    },
+    {
+      "noteId": "6a4a11f60000000008026c71",
+      "title": "38分钟R&B音乐合集",
+      "type": "video",
+      "cover": "",
+      "user": {
+        "userId": "65935a05000000001f0137e3",
+        "nickname": "許千千",
+        "avatar": "https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo31rq54cu922605pcjb82nqdv3mdjiq1g?imageView2/2/w/80/format/jpg"
+      },
+      "likedCount": "120",
+      "xsecToken": ""
+    },
+    {
+      "noteId": "6a49e83a000000000702c735",
+      "title": "爽曲歌单一命速通！！！",
+      "type": "video",
+      "cover": "",
+      "user": {
+        "userId": "659a26290000000022013c81",
+        "nickname": "lruri^",
+        "avatar": "https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo322c076nb7ukg5pcq4okoif413j6qan8?imageView2/2/w/80/format/jpg"
+      },
+      "likedCount": "2036",
+      "xsecToken": ""
+    },
+    {
+      "noteId": "6a44e370000000001702a739",
+      "title": "《desolate》",
+      "type": "video",
+      "cover": "",
+      "user": {
+        "userId": "60d99e140000000020027687",
+        "nickname": "沉无蓿",
+        "avatar": "https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo31uvaih53jq6g5o6pjoa84tk7dnjsr1o?imageView2/2/w/80/format/jpg"
+      },
+      "likedCount": "50",
+      "xsecToken": ""
+    },
+    {
+      "noteId": "6a4f3eea0000000015026c9a",
+      "title": "这是不是你们平时在找的音乐？",
+      "type": "video",
+      "cover": "",
+      "user": {
+        "userId": "6857cb45000000001e0035fa",
+        "nickname": "爱错",
+        "avatar": "https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo322c6o4mnna5g5q2npd2ngdfqkjv64a0?imageView2/2/w/80/format/jpg"
+      },
+      "likedCount": "77",
+      "xsecToken": ""
+    },
+    {
+      "noteId": "6a4902710000000015026ec3",
+      "title": "推荐适合爆肝暑假作业的超好听治愈系歌单",
+      "type": "video",
+      "cover": "",
+      "user": {
+        "userId": "6944fe1700000000320288a1",
+        "nickname": "洛忆楠",
+        "avatar": "https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo321h255qg7o5g5qa4vobsl251misa8kg?imageView2/2/w/80/format/jpg"
+      },
+      "likedCount": "2739",
+      "xsecToken": ""
+    },
+    {
+      "noteId": "d67ce1fa-4269-4f75-9739-0bb45fd658b6#1783597405052",
+      "title": "",
+      "type": "",
+      "cover": "",
+      "user": {
+        "userId": "",
+        "nickname": "",
+        "avatar": ""
+      },
+      "likedCount": "0",
+      "xsecToken": ""
+    },
+    {
+      "noteId": "6a3e8f4f000000001702b5d1",
+      "title": "抒情 2026超好听中文歌 放松心情情歌专辑",
+      "type": "video",
+      "cover": "",
+      "user": {
+        "userId": "6025e996000000000101f0ed",
+        "nickname": "JK",
+        "avatar": "https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo31q304cbl7g005o15t6b0bs7d9qqu2g0?imageView2/2/w/80/format/jpg"
+      },
+      "likedCount": "191",
+      "xsecToken": ""
+    },
+    {
+      "noteId": "6a4cfefc000000001603f25e",
+      "title": "",
+      "type": "video",
+      "cover": "",
+      "user": {
+        "userId": "6a48742c000000000e03e400",
+        "nickname": "白月光温澈昱.",
+        "avatar": "https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo322bidh3rnk6g5qi8egm3np00faevq0g?imageView2/2/w/80/format/jpg"
+      },
+      "likedCount": "262",
+      "xsecToken": ""
+    },
+    {
+      "noteId": "6a3f883a00000000110113a3",
+      "title": "那些突然爆火的音乐",
+      "type": "video",
+      "cover": "",
+      "user": {
+        "userId": "6745c8650000000001000fec",
+        "nickname": "映禾.",
+        "avatar": "https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo321n7e3vp706g5pq5p1ig83vcam7f2jg?imageView2/2/w/80/format/jpg"
+      },
+      "likedCount": "8600",
+      "xsecToken": ""
+    },
+    {
+      "noteId": "6a29f6dd0000000016025c15",
+      "title": "",
+      "type": "video",
+      "cover": "",
+      "user": {
+        "userId": "64fa5bfc0000000004026d53",
+        "nickname": "茶言碎语",
+        "avatar": "https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo31ofgfi6j6m005p7qbfu14raj9ks3quo?imageView2/2/w/80/format/jpg"
+      },
+      "likedCount": "208",
+      "xsecToken": ""
+    },
+    {
+      "noteId": "6a4d0417000000001101d515",
+      "title": "“清风微寒惹一厢粉黛又愁眉。”",
+      "type": "video",
+      "cover": "",
+      "user": {
+        "userId": "65256ed30000000002012842",
+        "nickname": "-Ww-",
+        "avatar": "https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo31ennhm8gm06g5p95dr9gia22h23j368?imageView2/2/w/80/format/jpg"
+      },
+      "likedCount": "562",
+      "xsecToken": ""
+    }
+  ],
+  "errors": [],
+  "totalNotes": 66,
+  "totalPages": 3
+}

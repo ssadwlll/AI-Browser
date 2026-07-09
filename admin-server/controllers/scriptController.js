@@ -294,7 +294,7 @@ exports.create = async (req, res) => {
         description || meta.description || '',
         parseInt(category_id),
         version || meta.version || '1.0.0',
-        req.user.id,
+        req.user ? req.user.id : null,
         path.relative(PROJECT_ROOT, req.file.path),  // 存相对路径
         req.file.size,
         icon || 'code',
