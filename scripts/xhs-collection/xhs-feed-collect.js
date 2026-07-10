@@ -3,13 +3,13 @@
  *
  * 原理（已实测验证 2026-07-10）：
  * - x-s-common 通过 xs-common-node.js 动态生成（从 vendor-dynamic.8cd1891c.js 逆向）
- * - x-s 使用静态 XYS_ 签名复用（XYW_ 动态签名触发 300015 环境检测，不可用）
- * - 搜索 API 使用静态 XYS_ 签名（请求量低，3次/关键词）
+ * - x-s 通过 xys-sign-node.js 动态生成（mnsv2 VM 纯 Node.js 运行），静态 XYS_ 作为回退
+ * - XYW_ 动态签名触发 300015 环境检测，不可用
  * - 防风控：随机延迟 + sigCount 循环 + 单次会话限制 + 300015/300011 自动停止
  *
  * 流程（每关键词独立）：
  *   1. 搜索关键词获取笔记列表（含 xsec_token）
- *   2. 逐条采集笔记详情（静态 x-s + 动态 x-s-common）
+ *   2. 逐条采集笔记详情（动态 x-s + 动态 x-s-common）
  *   3. 保存到独立 JSON 文件并输出结果
  *   4. 进入下一关键词
  *
@@ -27,11 +27,13 @@ const path = require('path');
 const zlib = require('zlib');
 const crypto = require('crypto');
 const { generateXsCommon } = require('./xs-common-node');
+const { init: initXysSign, generateHeaders } = require('./xys-sign-node');
 
 // ======================= 签名服务配置 =======================
 
 const SIGN_SERVER_URL = 'http://127.0.0.1:3721';
 let signServerAvailable = false;  // 运行时检测
+let xysSignReady = false;         // XYS_ 动态签名是否就绪
 
 /**
  * 检测签名服务是否可用
@@ -143,41 +145,45 @@ if (!fs.existsSync(FEED_DIR)) fs.mkdirSync(FEED_DIR, { recursive: true });
 
 // Cookie（用户最新提供 2026-07-10）
 const COMMON_COOKIES = {
-  abRequestId: '51b7063a-c933-567e-ab79-0b722391e05d',
-  a1: '19c8eaa1ff3spyelsj2p2752b30l5wnu5a2iv9kfb50000150045',
-  webId: 'fb35f55f1a09fd1a36a79d8c81422ae8',
-  gid: 'yjSYd00qJq2yyjSYd00yi0jTiqMUvd1MVJUJJiDW2JDq832812EI7h888y288428JSSiSYD8',
+  abRequestId: '9c5c9773-603f-5e18-adce-9ab89adfd542',
+  a1: '19efa15e690sc7wu6do9lqimzccd66czcvd461dqa50000156674',
+  webId: '49b740c76dea2573a6fbca39210c668d',
+  gid: 'yjdi0yKyjWSdyjdi0y2dKhyfj8MSWE7Kflj1fA0A36uSS428fKKSuK888y2KKW48SdJD4y08',
   xsecappid: 'xhs-pc-web',
-  ets: '1782266352362',
+  ets: '1782312199568',
   'x-rednote-datactry': 'CN',
   'x-rednote-holderctry': 'CN',
-  webBuild: '6.31.2',
-  websectiga: '2845367ec3848418062e761c09db7caf0e8b79d132ccdd1a4f8e64a11d0cac0d',
-  sec_poison_id: 'c3b96c51-a0e6-4950-a37f-9ea86486e9a1',
-  loadts: '1783600265006',
-  unread: '{%22ub%22:%2263f6bb200000000027010748%22%2C%22ue%22:%22640745c5000000001303ed88%22%2C%22uc%22:13}',
-  web_session: '040069b8c68c0d98c54467f67a384bbf7553bd',
-  id_token: 'VjEAANhwLOxSoDzPXeRVDhHelhhunlYN+dguETDo8/MplQYvOS6o8+ARuz+oPXhk1++ArPEHn0mTGMJj+yDDSu0yXVZUpELj22z+HblhCgKsW0eCHjLP/81oXGXkkst/Qf7BZIav',
+  webBuild: '6.31.3',
+  websectiga: '8886be45f388a1ee7bf611a69f3e174cae48f1ea02c0f8ec3256031b8be9c7ee',
+  sec_poison_id: '055e33ea-dd9c-45d6-841f-f8e3bc58015c',
+  loadts: '1783636157793',
+  unread: '{%22ub%22:%226a36484a000000000f02953c%22%2C%22ue%22:%226a49eafb000000000f0175d2%22%2C%22uc%22:27}',
+  web_session: '040069bb246144698856506b65384b0dc16455',
+  id_token: 'VjEAAC/2epP81qI41FSqdcEJ4p0LhyrkdY8qJvM9x6XA18d6I8A3JKuN0EoVXPf2ilAkRZt4sqowb90yHQWq70sZ91SaKxq4XhMSgUs0cjKXWUr6M1M2hGDXV5Fskof2gRYEQOat',
 };
 
-let SEARCH_ACW_TC = '0ad6226c17836108952176343e3ad47211aef67a8af1abf13f3b33afdd42ac';
-let FEED_ACW_TC = '0ad526c017835991173548419e19e9286dd6f92597046eff63a01078089887';
+let SEARCH_ACW_TC = '0ad6226c17836367948908578e3ad8469793aa0d382af573f2c733df72e90f';
+let FEED_ACW_TC = '0a50889217836379856315327e077033f9aab2808285072f0ecdec55f9d78a';
 
-// Search v2 API 签名（用户最新提供，静态复用，请求量低 3次/关键词）
-const SEARCH_X_S = 'XYS_2UQhPsHCH0c1PUh7HjIj2erjwjQhyoPTqBPT49pjHjIj2eHjwjQgynEDJ74AHjIj2ePjwjQTJdPIPAZlg94aGLTlGMS1JBp0nLVFPokb4emk8rQ/4BktPd+awepnGDVA2bSxGFDUy0by+7iF8o+8aobsJsTBcLpGLgSI+rl/znRhGFRS4B4O408E4LYD8rzH20Qh4Bzl2bq9cL+jJL8ycAbnzeQYP0mwGdqI8BWF8AmmPrkHaMY/admPzp49PsT+c9EIqMQCLDkcpnbLP9lt/LT/Jd4nnSk0yLLIaSQQyAmOarEaLSz+G9TNP0mPGSSO/LlizFuIqBknpAmOPaHVHdWFH0ijJ9Qx8n+FHdF=';
-const SEARCH_X_S_COMMON = '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';
-const SEARCH_RAP_PARAM = 'ByQBBgAAAAEAAAAUAAADBA7uh+kAACg9AAAAgQAAAAAAAAAAbGRtMHVm5gMEVov0bE2bhYIUoxcvswAAABDyKyKT8gzcsIEgeUuuY+mLJM3hRAR2zwWLFnZaozYrRNMADvYhVlZ51inm+dSfGW1hgAl2Q2pSmO/DJEDC54YwffgGkMMDZZfS62iXlc21Z3dr/8aBEU0hTjLjDgSTaS/fq5+e28qVfzfiT5r00Lktsg0VgbajLO2janG9WdgEjjnY49JF1hsbtJuUCJoE3FVPfMDGYPO+k5GSAR0nIuBeSnLOhelKZmzBuQ+HIWSDQfM+CmDsTkcfcv7zpPqA1t0vFX13BER/BN/4CHrC11l5cZOe3N5FveNVRBBI3sTBSdwVV3KGke7XN3PtwY3TU3iRd96OVQPDlD7sIUNzL9JBJjCDOyzGjWESctHmyLbPXDoZ4sIO0QNyv57ZDxeDWaJcL39mt5R6djFVw4G5SmJhWkVL75EEdeAVDn/146q+qvVUiQB1sN0+jxZlQLNeTvLLwbM/Dw8sUgWi6FO9mJEoLbaK0bgF+IjDyNcTELccJSbs9GoM8DunTs4CQAWFDTn9GAvTeYYohTcUUch9wyVtT90Z4IZW+H/kSTfFQ3pttBQ7U38XwylGtsiMruBpHHgLFM/2FNyZOIEmr7SviDPJ+ceUGKU9GGYJSE0YoovwW0O4MhtMHyVHkmBhKmTzjaILOs2OV+sGBX5o9AHgbTsotRldy1Nocpmn9s5S0YrknsdKQKK7q+Vbf4rI0DXKUAVzqzXKupOQzMBPndBwwKDiZA5zf8KeTH+FhPtsWdQn1AZ+Ql7NT9AP3E1hBaKYL9k9uZCKUogpxa8NCV5gTnwTo1wTM7s5Rnatb5Jw3g6xGHqUjDKzjQ88X4Ga4je0iL/e5ZKhC2k4VSeblyNT8YE6WTX/lwv+NBB6uq+l+SCcZU9PQg68qbdSaJdh+BWb4wno61FuJvUKGrgLg4ylFwF1iTBvpLS+HB4EFh0FbSI8eu9XpcPmHYrrRz1ida+ZZwwojEk44wRvRqltZrc3fYdVi+F4GJ2EaSv9K7YRdrRzlDsO1bbd8zBEh7hd/q4lTpoAAAL8';
+// Search v2 API 签名（动态生成优先，静态值作为回退）
+const SEARCH_X_S = 'XYS_2UQhPsHCH0c1PUh7HjIj2erjwjQhyoPTqBPT49pjHjIj2eHjwjQgynEDJ74AHjIj2ePjwjQTJdPIPAZlg94aGLTlqgkcyAb6PBSmLB+b4emk8rL6JURG/d+awepn8e4x2bSonLDUy0bl+FDF8oYt4dSGL9H7znQGLgSI+sTtzM+i+9zpzeLIJA8ayFG3/SmaGMmVn/G7LFYNpnE0/LTyJAmp4r83aBzVcDIIqLI3NFkmPrkHaMY/admnzUTTPbz+c9EIqMQCLDkcpnbLP9lrzDT/Jfznnfl0yLLIaSQQyAmOarEaLSz+qSclp0zMz9p/G0+98dki/L8PJdQLzaHVHdWFH0ijJ9Qx8n+FHdF=';
+const SEARCH_X_S_COMMON = '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';
+const SEARCH_RAP_PARAM = 'ByQBBgAAAAEAAAAUAAACZOSXHp4AACg9AAAAVQAAAAAAAAAAN2RybDJyyqJ5yRR0ytvyVO8fHtnVCAAAABDvgy/FcTbVE7BYynasnU+6HuKdCHOJ/IQ35xx9/ZgDfQj4OqApfuYz/mtQDaug8BY4D+Ux1wJe1tqbyTAawGFH9GVlT1ISWXtUeped8jAq52F6cCrOdZtVPVW0L1q3SufR7kUOC134N5uGYx1fH1686cMCfJJ2hVPViqHGuJYOlykZ6Fl9cX/bWaK+J6LaZ4FUUvbQs5MQueCtdL7boqvtPzHb0LadmhbxezuFZnAVFqqQUeqwkR8BoMHiybKyAwXL9m5H9Ik0dkZY1mB8lCGrTDuRsfHDUFP/ATuj5qr/iLjMymDr3HFnnq0UEVwfu4DIwHwUAlbeHOJDWFHkq6dtNG9tgIOLCjqGVQ1Lrhu1u0+R2bWnlRqXc5GuX6hAbhwm0VkVZwrLwbAtBJ3/QAAn02o3P4a+PDgbpfb5Q+5CDjG4yHNYxCfr2IGx0wrszX21nqXHNOkMLOR4rIHs8rQWWU6RJXqs97tEWM2lvxinhByfKm9HVgPxJzdWrCzlKmepEzUEdmrg3aIcflRKrjKANvMq2Pr7f77U5/YjRKy7DpcJtx58DYH/ELaXFfdoPUI2RG4D/t4xMa5Ll0Ogh2TnhWl5UtYLXXG/QcYXNaDY5ofBY47x2eb7DiGdP+tzLonBX2dK5hhn5uzLH+sz1FTXgZkUcWkwchCMqu1AtYHWtZ+2x7u6gxh072YkfwrjYJ11M2pwMs4eGSOphjTd5Y3tNeMAmBSzCbaYg2zzBilHMXZybINSywhHjLupeRFmx8DHBN+ylJCvKhubYbtqf0xdhHA25MOPxGNn8bfYTcaujAAAAlI=';
 
-// Feed API 签名（静态 XYS_ 复用，XYW_ 动态签名触发 300015 环境检测不可用）
-// x-s-common 动态生成（xs-common-node.js），x-s 静态复用
-const FEED_X_S = 'XYS_2UQhPsHCH0c1PUh7HjIj2erjwjQhyoPTqBPT49pjHjIj2eHjwjQgynEDJ74AHjIj2ePjwjQTJdPIPAZlg94aGLTlLnkyq0SNafzrPoSb4emk8rQ/4BktPd+awepnLsRx2bSxGFDUy0bA+FDF8eYB4043P74LJ0G6LgSI+rl/znRhGFRS4B4O408E4LYD8rzH20Qh4Bzl2bq9cL+jJL8ycAbnzeQYP0mwGdqI8BWF8AmmPrkHaMY/admPzp49PsT+c9EIqMQCLDkcpnbLP9II4DT/Jd4nnSk0yLLIaSQQyAmOarEaLSz+G0Y+PgzF2/47qn4HN7PFzfTSPgkNLsHVHdWFH0ijJ9Qx8n+FHdF=';
-const FEED_RAP_PARAM = 'ByQBBAAAAAEAAAAUAAACBOsMpU8AACg9AAAAWQAAAAAAAAAAcml4MyvJPwHgP2jn0gq16EBy9aIAAAAQDEEmGkLCeWXD8u+orGeQxznZqvBugRo6CpWDktlqsJ5Ebl19XyGrFRx8qMk7Xwlu7fZQbYkNppIdK/JwugOheNA/2jN8OJq9q+6fLH6CwNeTC8qF3pHkq+0AjPX7Pi30dNRN2rtiQ/V9ziwKZnG/ZC3Ttm8WkHW1XbwhIvBvFbTCZbGUD8aP5EEM9L6dLKZhUgpoE0sf3e5Vbkjz3IM+6USLr17NqJo8bfYdaHWU80zbPD6Dymw2ao6MvYqxiH56mtO5ROhzp9d1niWexlJiOnbVUkxPkhjazKrZP+1f+NOaO0VBtsDTj8ztlPAzEfwaH+RTr1sFpIOvTNE/LWCm/xUS4UI1ZSyhbWMo8e1pCR5AThFIAgNSOqfRzi9tzHQa9zOyyio8iHWQWthlGYq89tVTjvkENmWjJC8EIjCCZ98Y630t+l/uAHXG42Qxi0yBKUeEBLMoW7IcAbKgZjJVJvkWP2dO+8O9NgqvW9bRaoBB+RgeujtI90uBhmdQ+AOS0jNoApEg9CmOOh4g9v8yFsIidbu+i/gwshsfRhBmm3PpROlRFy3Mj9EkSCdYeGkuzElWafMdPuR2kw7L0cy3gVPVxRryjmtQI5GXyyoHSBIdavEdDnP4tUK2XOecbtTzQoGr1rgPZfU7d8Qf2NG8vn2P15XeKp+pAkj4/gQMqDMAAAIA';
+// Feed API 签名（动态生成优先，静态值作为回退）
+// x-s: xys-sign-node.js 动态生成，x-s-common: xs-common-node.js 动态生成
+const FEED_X_S = 'XYS_2UQhPsHCH0c1PUh7HjIj2erjwjQhyoPTqBPT49pjHjIj2eHjwjQgynEDJ74AHjIj2ePjwjQTJdPIPAZlg94aGLTlq/YDGDpOtUTN89+b4emk8rL6JURG/d+awepnzf4x2bSonLDUy0bA+FDF8bb3qBSH8LGI+bP7LgSI+sTtzM+i+9zpzeLIJA8ayFG3/SmaGMmVn/G7LFYNpnE0/LTyJAmp4r83aBzVcDIIqLI3NFkmPrkHaMY/admnzUTTPbz+c9EIqMQCLDkcpnbLP9lrzDT/Jfznnfl0yLLIaSQQyAmOarEaLSz+G7YoP/+SnbbswbSSz0qhLoGU+LDF4sHVHdWFH0ijJ9Qx8n+FHdF=';
+const FEED_RAP_PARAM = 'ByQBBAAAAAEAAAAUAAACBNb3h1oAACg9AAAAXAAAAAAAAAAAdnRveRJMVMSEolCwPm4YMbqwG60AAAAQKGHZOeuHtLz+8YuKVRyh/F07DXwWT8hvbd13+tJV/ziTFp9xryY9XijRNP17PntjG94rhB94ZICYaiOnSoBQYvntlOQe2KgUFy55LMNPYGpuLVQpjjQmUcdTzYeKe/2b+FEGeGHmstJ4oZQic8Q2NtykH56uchNqXF8hYFeOKC8YvoAu7OjEWplzP87vE+ooIfTgGFahCH7HO6ecif0A4SHSh+SzaQOIZ428twJ5D5usCFLtlAaqQJK27XiRCioMV6Dm8VzIRjchn2RcJk0sp+SBzY0c8spii+7Mt7GxKZ5DEMa4op+8G6Kpi5vCypk3mREgmYy5hlzvoJughmxXJeXyTRbrEbOw4dlLZG9HQJdM7fp9mOmoKUK4zjgFTrE/6WmjknF0P9tLTCqAwfAbOj8j3aCi+rqyUcYRmTrS6QEJEfAD6CFT/qvBGZq9QUknHpkLoLp35pJXcMsiM0T36bz0sl2ylOcCT6fdJyh0BoqgI5VGDTv0a5VImjzeltP/1wtUiPx+neCKXC5q1fL6E/Sz4Mnfqh5eYiHUxmY1HNR8d5A22jZU97TiIpLDe+vfFGEYdehz977fSUOtQoJL6WxPXr9YCxAUcMeya5AAYxWx5XLL6LjqiMWWz6hiiqG0TXtZQGnQWje+/6sbgtsdZlwhh8dqoT7kXAg6tSBt/UMAAAIA';
 
 const KEYWORDS = [
   '美食', '旅游', '穿搭', '护肤', '健身',
   '家居', '数码', '摄影', '读书', '电影',
   '音乐', '游戏', '职场', '考研', '留学',
   '宠物', '育儿', '婚礼', '装修', '理财',
+  '美妆', '口红', '香水', '包包', '球鞋',
+  '露营', '徒步', '滑雪', '冲浪', '潜水',
+  '咖啡', '烘焙', '探店', '自驾', '民宿',
+  '手账', '插画', '书法', '插花', '园艺',
 ];
 
 // 从第几个关键词开始采集（用于断点续采）
@@ -188,10 +194,13 @@ const PAGE_SIZE = 20;
 const SEARCH_DELAY = 1000;
 const FEED_DELAY_MIN = 4000;      // 详情采集最小间隔
 const FEED_DELAY_MAX = 7000;      // 详情采集最大间隔（随机抖动）
-const FEED_RETRY_DELAY = 10000;   // 限流重试等待
+const FEED_RETRY_DELAY = 70000;   // 限流重试等待（70s）
+const CONSECUTIVE_FAIL_PAUSE = 200000; // 连续3次失败暂停（200s）
+const BATCH_SIZE = 400;           // 每 N 条详情暂停一次
+const BATCH_PAUSE_MIN = 60000;    // 批次暂停最小时间（60s）
+const BATCH_PAUSE_MAX = 120000;   // 批次暂停最大时间（120s）
 const KEYWORD_PAUSE_MIN = 15000;  // 关键词间最小暂停
 const KEYWORD_PAUSE_MAX = 30000;  // 关键词间最大暂停（随机抖动）
-const MAX_KEYWORDS_PER_SESSION = 5; // 单次最多采集关键词数（防风控）
 
 // ======================= 工具函数 =======================
 
@@ -243,14 +252,30 @@ function httpPost(host, apiPath, headers, bodyStr) {
 
 // ======================= 搜索 API =======================
 
-function fetchSearch(keyword, page) {
+async function fetchSearch(keyword, page) {
   const body = {
     keyword, page, page_size: PAGE_SIZE,
     search_id: randomId(21), sort: 'general', note_type: 0,
     ext_flags: [], geo: '', image_formats: ['jpg', 'webp', 'avif'],
     message_id: 'sending', session_id: genSessionId(),
   };
-  return httpPost('so.xiaohongshu.com', '/api/sns/web/v2/search/notes', {
+  const bodyStr = JSON.stringify(body);
+  const apiPath = '/api/sns/web/v2/search/notes';
+
+  // 动态生成 x-s（优先），回退静态
+  let xS = SEARCH_X_S;
+  let xT = String(Date.now());
+  if (xysSignReady) {
+    try {
+      const sign = await generateHeaders(apiPath, bodyStr);
+      xS = sign['X-s'];
+      xT = sign['X-t'];
+    } catch (e) {
+      log(`  [搜索] 动态 x-s 失败，回退静态: ${e.message}`);
+    }
+  }
+
+  return httpPost('so.xiaohongshu.com', apiPath, {
     'accept': 'application/json, text/plain, */*',
     'accept-encoding': 'gzip, deflate, br, zstd',
     'accept-language': 'zh-CN,zh;q=0.9',
@@ -264,15 +289,18 @@ function fetchSearch(keyword, page) {
     'sec-fetch-dest': 'empty', 'sec-fetch-mode': 'cors', 'sec-fetch-site': 'same-site',
     'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36',
     'x-b3-traceid': randomHex(8), 'x-rap-param': SEARCH_RAP_PARAM,
-    'x-s': SEARCH_X_S, 'x-s-common': SEARCH_X_S_COMMON,
-    'x-t': String(Date.now()), 'x-xray-traceid': randomHex(16),
-  }, JSON.stringify(body));
+    'x-s': xS, 'x-s-common': SEARCH_X_S_COMMON,
+    'x-t': xT, 'x-xray-traceid': randomHex(16),
+  }, bodyStr);
 }
 
 // ======================= Feed 详情 API =======================
 
 // sigCount 模拟真实浏览器的签名计数（保持在低值，避免被风控检测）
 let feedSigCount = Math.floor(Math.random() * 5) + 1; // 起始 1-5
+
+// 全局详情采集计数（跨关键词，用于触发批次暂停）
+let totalDetailsCollected = 0;
 
 function fetchFeed(noteId, xsecToken) {
   const body = {
@@ -289,25 +317,27 @@ function fetchFeed(noteId, xsecToken) {
   feedSigCount++;
   if (feedSigCount > 30) feedSigCount = Math.floor(Math.random() * 5) + 1; // 到30后重置
 
-  // === 采集策略（2026-07-10 最终验证）===
+  // === 采集策略（2026-07-10）===
   // XYW_ 动态签名（浏览器内 _webmsxyw + fetch）→ 300015 环境检测，不可用
   //   原因：executeJavaScript 调用 _webmsxyw 生成的 XYW_ payload 环境指纹
   //         与正常用户交互时不同，服务端可识别
-  // 静态 XYS_ + 动态 x-s-common → 957 次调用 0 签名错误，验证有效
-  //   x-s: 静态 XYS_ 复用（不绑定请求体，可复用）
+  // 动态 XYS_ x-s + 动态 x-s-common（纯 Node.js mnsv2 VM）
+  //   x-s: xys-sign-node.js 每次动态生成（绑定请求体），静态 XYS_ 作为回退
   //   x-s-common: xs-common-node.js 每次动态生成（绑定 URL+cookie+sigCount）
   // 签名服务仅用于 cookie 同步（获取浏览器最新 a1 等_cookie）
   return fetchFeedFallback(noteId, xsecToken, bodyStr);
 }
 
 /**
- * 回退方案：静态 XYS_ x-s + 动态 x-s-common（Node.js 直接请求）
+ * 采集方案：动态 x-s + 动态 x-s-common（Node.js 直接请求）
  */
-function fetchFeedFallback(noteId, xsecToken, bodyStr) {
+async function fetchFeedFallback(noteId, xsecToken, bodyStr) {
+  const apiPath = '/api/sns/web/v1/feed';
+
   // 动态生成 x-s-common（纯 Node.js 算法，每次请求唯一）
   const dynamicXsc = generateXsCommon({
     platform: 'PC',
-    url: '/api/sns/web/v1/feed',
+    url: apiPath,
     cookieA1: COMMON_COOKIES.a1,
     fingerprint: '',
     version: '4.3.7',
@@ -315,7 +345,20 @@ function fetchFeedFallback(noteId, xsecToken, bodyStr) {
     sigCount: feedSigCount,
   });
 
-  return httpPost('edith.xiaohongshu.com', '/api/sns/web/v1/feed', {
+  // 动态生成 x-s（优先），回退静态
+  let xS = FEED_X_S;
+  let xT = String(Date.now());
+  if (xysSignReady) {
+    try {
+      const sign = await generateHeaders(apiPath, bodyStr);
+      xS = sign['X-s'];
+      xT = sign['X-t'];
+    } catch (e) {
+      log(`  [详情] 动态 x-s 失败，回退静态: ${e.message}`);
+    }
+  }
+
+  return httpPost('edith.xiaohongshu.com', apiPath, {
     'accept': 'application/json, text/plain, */*',
     'accept-encoding': 'gzip, deflate, br, zstd',
     'accept-language': 'zh-CN,zh;q=0.9',
@@ -329,9 +372,9 @@ function fetchFeedFallback(noteId, xsecToken, bodyStr) {
     'sec-fetch-dest': 'empty', 'sec-fetch-mode': 'cors', 'sec-fetch-site': 'same-site',
     'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36',
     'x-b3-traceid': randomHex(8), 'x-rap-param': FEED_RAP_PARAM,
-    'x-s': FEED_X_S,
+    'x-s': xS,
     'x-s-common': dynamicXsc,
-    'x-t': String(Date.now()), 'x-xray-traceid': randomHex(16),
+    'x-t': xT, 'x-xray-traceid': randomHex(16),
     'xy-direction': '18',
   }, bodyStr);
 }
@@ -420,7 +463,7 @@ async function collectKeyword(keyword, keywordIndex) {
       }
     } else if (resp.code === 300013) {
       // 限流：等待后重试一次
-      log(`  [详情] ${i + 1}/${notes.length} 限流，等待 ${FEED_RETRY_DELAY}ms 重试...`);
+      log(`  [详情] ${i + 1}/${notes.length} 限流，等待 ${FEED_RETRY_DELAY / 1000}s 重试...`);
       await sleep(FEED_RETRY_DELAY);
       const retry = await fetchFeed(note.noteId, note.xsecToken);
       if (retry.code === 0) {
@@ -433,8 +476,8 @@ async function collectKeyword(keyword, keywordIndex) {
         failures.push({ noteId: note.noteId, xsecToken: note.xsecToken, code: retry.code, msg: retry.msg || '重试失败' });
         log(`  [详情] 重试仍失败: code=${retry.code} msg=${retry.msg || ''}`);
         if (consecutiveFail >= 3) {
-          log(`  [详情] 连续 ${consecutiveFail} 次失败，暂停 15s`);
-          await sleep(15000);
+          log(`  [详情] 连续 ${consecutiveFail} 次失败，暂停 ${CONSECUTIVE_FAIL_PAUSE / 1000}s`);
+          await sleep(CONSECUTIVE_FAIL_PAUSE);
           consecutiveFail = 0;
         }
       }
@@ -460,6 +503,14 @@ async function collectKeyword(keyword, keywordIndex) {
     }
 
     await sleep(randomDelay(FEED_DELAY_MIN, FEED_DELAY_MAX));
+
+    // 每 BATCH_SIZE 条详情，随机长暂停（防风控）
+    totalDetailsCollected++;
+    if (totalDetailsCollected % BATCH_SIZE === 0) {
+      const batchPause = randomDelay(BATCH_PAUSE_MIN, BATCH_PAUSE_MAX);
+      log(`  [详情] 已采集 ${totalDetailsCollected} 条，批次暂停 ${batchPause / 1000}s...`);
+      await sleep(batchPause);
+    }
   }
 
   // Step 3: 保存到独立文件
@@ -505,8 +556,8 @@ async function main() {
 
   log('====================================');
   log('小红书笔记详情批量采集（按关键词）');
-  log(`搜索API: so.xiaohongshu.com v2 (静态 XYS_ 签名)`);
-  log(`详情API: edith.xiaohongshu.com feed (静态 XYS_ x-s + 动态 x-s-common)`);
+  log(`搜索API: so.xiaohongshu.com v2 (动态 XYS_ x-s + 静态 x-s-common)`);
+  log(`详情API: edith.xiaohongshu.com feed (动态 x-s + 动态 x-s-common)`);
   if (signServerAvailable) {
     log(`  签名服务: ${SIGN_SERVER_URL} ✅ 已连接（仅用于 cookie 同步）`);
 
@@ -528,25 +579,29 @@ async function main() {
   } else {
     log(`  签名服务: ${SIGN_SERVER_URL} ❌ 未连接（使用硬编码 cookies）`);
   }
+
+  // 初始化 XYS_ 动态签名环境（纯 Node.js mnsv2 VM）
+  try {
+    const cookieStr = buildCookieString(SEARCH_ACW_TC);
+    await initXysSign({ cookie: cookieStr });
+    xysSignReady = true;
+    log(`  XYS_ 动态签名: ✅ 已初始化（mnsv2 VM 纯 Node.js）`);
+  } catch (e) {
+    xysSignReady = false;
+    log(`  XYS_ 动态签名: ⚠️ 初始化失败 (${e.message})，回退静态 XYS_`);
+  }
+
   log(`详情间隔: ${FEED_DELAY_MIN}-${FEED_DELAY_MAX}ms (随机) | 关键词间: ${KEYWORD_PAUSE_MIN}-${KEYWORD_PAUSE_MAX}ms (随机)`);
-  log(`单次最多: ${MAX_KEYWORDS_PER_SESSION} 个关键词`);
+  log(`批次暂停: 每 ${BATCH_SIZE} 条暂停 ${BATCH_PAUSE_MIN / 1000}-${BATCH_PAUSE_MAX / 1000}s | 限流重试: ${FEED_RETRY_DELAY / 1000}s | 连续失败暂停: ${CONSECUTIVE_FAIL_PAUSE / 1000}s`);
   if (START_FROM_INDEX > 0) {
     log(`从第 ${START_FROM_INDEX + 1} 个关键词继续采集: "${KEYWORDS[START_FROM_INDEX]}"`);
   }
   log('====================================');
 
   const summary = [];
-  let sessionCount = 0;
 
   for (let i = START_FROM_INDEX; i < KEYWORDS.length; i++) {
-    if (sessionCount >= MAX_KEYWORDS_PER_SESSION) {
-      log(`\n⚠️ 已达到单次最多 ${MAX_KEYWORDS_PER_SESSION} 个关键词限制，停止采集`);
-      log(`   下次运行: set START_INDEX=${i} && node xhs-feed-collect.js`);
-      break;
-    }
-
     const result = await collectKeyword(KEYWORDS[i], i);
-    sessionCount++;
     summary.push({
       keyword: KEYWORDS[i],
       notes: result.notes.length,
@@ -561,9 +616,9 @@ async function main() {
       break;
     }
 
-    if (i < KEYWORDS.length - 1 && sessionCount < MAX_KEYWORDS_PER_SESSION) {
+    if (i < KEYWORDS.length - 1) {
       const pauseMs = randomDelay(KEYWORD_PAUSE_MIN, KEYWORD_PAUSE_MAX);
-      log(`\n  关键词间暂停 ${pauseMs}ms...`);
+      log(`\n  关键词间暂停 ${pauseMs / 1000}s...`);
       await sleep(pauseMs);
     }
   }
