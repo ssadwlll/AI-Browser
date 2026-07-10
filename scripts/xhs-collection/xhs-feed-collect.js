@@ -184,6 +184,10 @@ const KEYWORDS = [
   '露营', '徒步', '滑雪', '冲浪', '潜水',
   '咖啡', '烘焙', '探店', '自驾', '民宿',
   '手账', '插画', '书法', '插花', '园艺',
+  '减肥', '瑜伽', '发型', '美甲', '配饰',
+  '手表', '眼镜', '帽子', '围巾', '首饰',
+  '冰箱', '洗衣机', '扫地机', '空气净化器', '扫地机器人',
+  '电视机', '投影仪', '耳机', '音响', '键盘',
 ];
 
 // 从第几个关键词开始采集（用于断点续采）
@@ -191,16 +195,16 @@ const START_FROM_INDEX = process.env.START_INDEX ? parseInt(process.env.START_IN
 
 const PAGES_PER_KEYWORD = 3;
 const PAGE_SIZE = 20;
-const SEARCH_DELAY = 1000;
-const FEED_DELAY_MIN = 4000;      // 详情采集最小间隔
-const FEED_DELAY_MAX = 7000;      // 详情采集最大间隔（随机抖动）
-const FEED_RETRY_DELAY = 70000;   // 限流重试等待（70s）
-const CONSECUTIVE_FAIL_PAUSE = 200000; // 连续3次失败暂停（200s）
-const BATCH_SIZE = 400;           // 每 N 条详情暂停一次
-const BATCH_PAUSE_MIN = 60000;    // 批次暂停最小时间（60s）
-const BATCH_PAUSE_MAX = 120000;   // 批次暂停最大时间（120s）
-const KEYWORD_PAUSE_MIN = 15000;  // 关键词间最小暂停
-const KEYWORD_PAUSE_MAX = 30000;  // 关键词间最大暂停（随机抖动）
+const SEARCH_DELAY = 1500;        // 搜索间隔加大到1.5s
+const FEED_DELAY_MIN = 6000;      // 详情采集最小间隔加大到6s
+const FEED_DELAY_MAX = 12000;     // 详情采集最大间隔加大到12s（更大随机抖动）
+const FEED_RETRY_DELAY = 90000;   // 限流重试等待加大到90s
+const CONSECUTIVE_FAIL_PAUSE = 300000; // 连续3次失败暂停加大到300s（5分钟）
+const BATCH_SIZE = 100;           // 每100条暂停一次（降低批次大小，更频繁暂停）
+const BATCH_PAUSE_MIN = 90000;    // 批次暂停最小时间加大到90s（1.5分钟）
+const BATCH_PAUSE_MAX = 180000;   // 批次暂停最大时间加大到180s（3分钟）
+const KEYWORD_PAUSE_MIN = 30000;  // 关键词间最小暂停加大到30s
+const KEYWORD_PAUSE_MAX = 60000;  // 关键词间最大暂停加大到60s（1分钟）
 
 // ======================= 工具函数 =======================
 
@@ -316,7 +320,7 @@ let searchSigCount = Math.floor(Math.random() * 3) + 1; // 搜索签名计数
 // 全局详情采集计数（跨关键词，用于触发批次暂停）
 let totalDetailsCollected = 0;
 
-function fetchFeed(noteId, xsecToken) {
+async function fetchFeed(noteId, xsecToken) {
   const body = {
     source_note_id: noteId,
     image_formats: ['jpg', 'webp', 'avif'],
@@ -326,19 +330,41 @@ function fetchFeed(noteId, xsecToken) {
   };
 
   const bodyStr = JSON.stringify(body);
+  const apiPath = '/api/sns/web/v1/feed';
 
   // sigCount 递增但不无限增长（模拟真实浏览器，偶尔重置）
   feedSigCount++;
-  if (feedSigCount > 30) feedSigCount = Math.floor(Math.random() * 5) + 1; // 到30后重置
+  if (feedSigCount > 30) feedSigCount = Math.floor(Math.random() * 5) + 1;
 
-  // === 采集策略（2026-07-10）===
-  // XYW_ 动态签名（浏览器内 _webmsxyw + fetch）→ 300015 环境检测，不可用
-  //   原因：executeJavaScript 调用 _webmsxyw 生成的 XYW_ payload 环境指纹
-  //         与正常用户交互时不同，服务端可识别
-  // 动态 XYS_ x-s + 动态 x-s-common（纯 Node.js mnsv2 VM）
-  //   x-s: xys-sign-node.js 每次动态生成（绑定请求体），静态 XYS_ 作为回退
-  //   x-s-common: xs-common-node.js 每次动态生成（绑定 URL+cookie+sigCount）
-  // 签名服务仅用于 cookie 同步（获取浏览器最新 a1 等_cookie）
+  // 动态生成 x-s-common（传入浏览器 fetch 使用）
+  const dynamicXsc = generateXsCommon({
+    platform: 'PC',
+    url: apiPath,
+    cookieA1: COMMON_COOKIES.a1,
+    fingerprint: '',
+    version: '4.3.7',
+    dsl: '',
+    sigCount: feedSigCount,
+  });
+
+  // === 采集策略（2026-07-10 修复）===
+  // BrowserView fetch（签名服务 /fetch 端点）：
+  //   x-s: 浏览器内 _webmsxyw 生成 XYW_（真实环境，不触发 300015）
+  //   fetch: 浏览器内发起，credentials:'include'，真实 Chrome TLS 指纹
+  //   x-s-common: Node.js xs-common-node.js 生成，传入浏览器
+  //   → 解决 Node.js TLS 指纹被聚类检测导致 ~300 条后风控
+  //
+  // 回退：Node.js 直接请求（XYS_ 动态 x-s + 动态 x-s-common）
+  if (signServerAvailable) {
+    const result = await browserFetch(apiPath, body, dynamicXsc, FEED_RAP_PARAM);
+    if (result.ok) {
+      return result.data;
+    }
+    if (result.error) {
+      log(`  [详情] BrowserView fetch 失败: ${result.error}，回退 Node.js`);
+    }
+  }
+
   return fetchFeedFallback(noteId, xsecToken, bodyStr);
 }
 
@@ -439,7 +465,34 @@ async function collectKeyword(keyword, keywordIndex) {
     const resp = await fetchSearch(keyword, page);
     if (resp.code !== 0) {
       log(`  [搜索] page ${page} 错误: code=${resp.code} msg=${resp.msg || ''}`);
-      if (resp.code === -100) { log(`  ⛔ Cookie被标记！`); return { notes: [], details: [], stopped: true }; }
+      if (resp.code === -100) {
+        log(`  [搜索] 登录已过期(-100)，尝试刷新 cookies...`);
+        if (signServerAvailable) {
+          const freshCookies = await getBrowserCookies();
+          if (freshCookies && freshCookies.a1) {
+            Object.assign(COMMON_COOKIES, freshCookies);
+            if (freshCookies.acw_tc) { SEARCH_ACW_TC = freshCookies.acw_tc; FEED_ACW_TC = freshCookies.acw_tc; }
+            log(`  [搜索] cookies 已刷新，重试 page ${page}`);
+            const retryResp = await fetchSearch(keyword, page);
+            if (retryResp.code === 0) {
+              const retryItems = retryResp.data?.items || [];
+              for (const item of retryItems) {
+                const nc = item.note_card || {};
+                const noteId = item.id || nc.note_id;
+                const xsecToken = item.xsec_token || nc.xsec_token || '';
+                if (noteId && xsecToken && noteId.length < 30) {
+                  notes.push({ noteId, xsecToken, keyword, title: nc.display_title || '', type: nc.type || '' });
+                }
+              }
+              log(`  [搜索] page ${page} 重试成功: ${retryItems.length} 条`);
+              await sleep(randomDelay(1000, 2000));
+              continue;
+            }
+          }
+        }
+        log(`  ⛔ 登录已过期且无法刷新，停止采集`);
+        return { notes, details: [], stopped: true };
+      }
       await sleep(randomDelay(2000, 4000));
       continue;
     }
@@ -496,7 +549,24 @@ async function collectKeyword(keyword, keywordIndex) {
         }
       }
     } else if (resp.code === -100) {
-      log(`  ⛔ Cookie被标记！停止采集`);
+      log(`  [详情] 登录已过期(-100)，尝试刷新 cookies...`);
+      if (signServerAvailable) {
+        const freshCookies = await getBrowserCookies();
+        if (freshCookies && freshCookies.a1) {
+          Object.assign(COMMON_COOKIES, freshCookies);
+          if (freshCookies.acw_tc) { SEARCH_ACW_TC = freshCookies.acw_tc; FEED_ACW_TC = freshCookies.acw_tc; }
+          log(`  [详情] cookies 已刷新，重试 ${note.noteId}`);
+          const retry = await fetchFeed(note.noteId, note.xsecToken);
+          if (retry.code === 0) {
+            details.push(extractDetail(retry, note));
+            success++;
+            consecutiveFail = 0;
+            await sleep(randomDelay(FEED_DELAY_MIN, FEED_DELAY_MAX));
+            continue;
+          }
+        }
+      }
+      log(`  ⛔ 登录已过期且无法刷新，停止采集`);
       return { notes, details, failures, stopped: true };
     } else if (resp.code === 300011 && resp.msg && resp.msg.includes('账号异常')) {
       // 300011 + "账号异常" = 账号被风控，必须停止
@@ -570,25 +640,28 @@ async function main() {
 
   log('====================================');
   log('小红书笔记详情批量采集（按关键词）');
-  log(`搜索API: so.xiaohongshu.com v2 (动态 XYS_ x-s + 静态 x-s-common)`);
-  log(`详情API: edith.xiaohongshu.com feed (动态 x-s + 动态 x-s-common)`);
+  log(`搜索API: so.xiaohongshu.com v2 (动态 XYS_ x-s + 动态 x-s-common)`);
+  log(`详情API: edith.xiaohongshu.com feed (BrowserView fetch + 动态 x-s-common)`);
   if (signServerAvailable) {
-    log(`  签名服务: ${SIGN_SERVER_URL} ✅ 已连接（仅用于 cookie 同步）`);
-
-    // 从浏览器获取最新 cookies，覆盖硬编码值（确保 x-s-common 的 a1 匹配）
-    const browserCookies = await getBrowserCookies();
-    if (browserCookies && browserCookies.a1) {
-      Object.assign(COMMON_COOKIES, browserCookies);
-      log(`  浏览器 cookies 已同步 (a1: ${COMMON_COOKIES.a1.substring(0, 15)}...)`);
-
-      // 同时更新 acw_tc（浏览器中可能有不同的值）
-      if (browserCookies.acw_tc) {
-        SEARCH_ACW_TC = browserCookies.acw_tc;
-        FEED_ACW_TC = browserCookies.acw_tc;
-        log(`  acw_tc 已同步: ${browserCookies.acw_tc.substring(0, 20)}...`);
+    log(`  签名服务: ${SIGN_SERVER_URL} ✅ 已连接（cookie同步 + BrowserView fetch）`);
+    let cookieSynced = false;
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      const browserCookies = await getBrowserCookies();
+      if (browserCookies && browserCookies.a1 && browserCookies.web_session) {
+        Object.assign(COMMON_COOKIES, browserCookies);
+        if (browserCookies.acw_tc) {
+          SEARCH_ACW_TC = browserCookies.acw_tc;
+          FEED_ACW_TC = browserCookies.acw_tc;
+        }
+        log(`  Cookie同步成功 (第${attempt}次, a1: ${COMMON_COOKIES.a1.substring(0, 15)}...)`);
+        cookieSynced = true;
+        break;
       }
-    } else {
-      log(`  ⚠️ 无法获取浏览器 cookies，使用硬编码值（可能导致 x-s-common 不匹配）`);
+      log(`  Cookie同步第${attempt}次: cookies不完整，3s后重试...`);
+      await sleep(3000);
+    }
+    if (!cookieSynced) {
+      log(`  ⚠️ Cookie同步失败，使用硬编码值（可能导致 -100 错误）`);
     }
   } else {
     log(`  签名服务: ${SIGN_SERVER_URL} ❌ 未连接（使用硬编码 cookies）`);
@@ -628,6 +701,16 @@ async function main() {
       log(`\n⛔ 采集被中断，已完成 ${i + 1}/${KEYWORDS.length} 个关键词`);
       log(`   下次运行（换新cookie后）: set START_INDEX=${i} && node xhs-feed-collect.js`);
       break;
+    }
+
+    // 每5个关键词刷新一次 cookies（防止长时间采集后 cookie 过期）
+    if (signServerAvailable && (i + 1) % 5 === 0 && i < KEYWORDS.length - 1) {
+      const freshCookies = await getBrowserCookies();
+      if (freshCookies && freshCookies.a1) {
+        Object.assign(COMMON_COOKIES, freshCookies);
+        if (freshCookies.acw_tc) { SEARCH_ACW_TC = freshCookies.acw_tc; FEED_ACW_TC = freshCookies.acw_tc; }
+        log(`  [维护] cookies 已刷新 (每5关键词)`);
+      }
     }
 
     if (i < KEYWORDS.length - 1) {
