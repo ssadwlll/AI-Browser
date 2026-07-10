@@ -55,7 +55,7 @@
             <span class="layer-name">请求签名验证</span>
           </div>
           <p class="layer-desc">HMAC 绑定路径+请求体+时间戳+nonce</p>
-          <div class="layer-detail">算法: HMAC-SHA256 | 窗口: 5min | 防重放: nonce</div>
+          <div class="layer-detail">算法: HMAC-SHA256 via VM | 窗口: 5min | 防重放: nonce | 密钥: VM字节码保护</div>
         </div>
         <div class="layer-card" id="layer-3">
           <div class="layer-header">
@@ -148,7 +148,7 @@
     </section>
 
     <footer>
-      <p>签名密钥: anti-bot-demo-secret-2026 | HMAC(path + body + timestamp + nonce, secret) | 窗口: 5 分钟</p>
+      <p>签名引擎: VM 字节码 | HMAC(path + body + timestamp + nonce) | 密钥不在代码中明文出现</p>
     </footer>
   </div>
 

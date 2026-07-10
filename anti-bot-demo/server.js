@@ -26,13 +26,14 @@
 const express = require('express');
 const crypto = require('crypto');
 const path = require('path');
+const { vmSign } = require('./vm-sign');
 
 const app = express();
 const PORT = 3210;
 
 // ======================= 配置 =======================
-
-const SIGN_SECRET = 'anti-bot-demo-secret-2026';
+// 密钥不再明文存放 — 由 vm-sign.js 的 VM 字节码在运行时动态解码
+// 攻击者无法通过搜索 "secret" 找到密钥，需要逆向 VM 指令集
 const TIMESTAMP_WINDOW = 5 * 60 * 1000;  // 签名时间窗口 5 分钟
 const BURST_LIMIT = 8;                    // 突发限制：5 秒内最多 8 次
 const BURST_WINDOW = 5 * 1000;
@@ -57,6 +58,11 @@ const stats = {
 
 function hmacSha256(data, secret) {
   return crypto.createHmac('sha256', secret).update(data, 'utf8').digest('hex');
+}
+
+// VM 签名验证：服务端用 VM 字节码重新计算签名（密钥不直接出现在代码中）
+function verifySignature(path, body, ts, nonce) {
+  return vmSign(path, body, ts, nonce);
 }
 
 function logRequest(entry) {
@@ -152,8 +158,8 @@ function signatureVerify(req, res, next) {
     keep.forEach(n => usedNonces.add(n));
   }
 
-  // HMAC 验证：签名 = HMAC-SHA256(path + body + timestamp + nonce, secret)
-  const expectedSig = hmacSha256(req.path + req.rawBody + ts + nonce, SIGN_SECRET);
+  // HMAC 验证：通过 VM 字节码重新计算签名（密钥不在代码中明文出现）
+  const expectedSig = verifySignature(req.path, req.rawBody, ts, nonce);
   if (sig !== expectedSig) {
     recordBlock(1002, '签名验证失败');
     return res.status(403).json({ code: 1002, msg: '签名验证失败（HMAC 不匹配）', layer: 'signature' });
@@ -390,7 +396,7 @@ app.listen(PORT, () => {
   console.log(`  服务地址: http://localhost:${PORT}`);
   console.log(`  保护 API: POST /api/data`);
   console.log(`  统计面板: GET  /api/stats`);
-  console.log(`  签名密钥: ${SIGN_SECRET}`);
+  console.log(`  签名引擎: VM 字节码 (密钥不在代码中明文出现)`);
   console.log(`----------------------------------------`);
   console.log(`  防御层级:`);
   console.log(`    L1 HTTP 请求头指纹 — 缺头检测 + UA 一致性`);
