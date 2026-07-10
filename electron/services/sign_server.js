@@ -598,17 +598,21 @@ class SignServer {
     function safeNum(v) { if (v === null || v === undefined) return 0; var n = Number(v); return isNaN(n) ? 0 : n; }
 
     function getNoteElements() {
-      var els = document.querySelectorAll('section.note-item, [class*="note-item"]');
+      var els = document.querySelectorAll('section.note-item');
       if (els.length === 0) {
-        els = document.querySelectorAll('.feeds-page .note-item, .feeds-container section');
+        els = document.querySelectorAll('[class*="note-item"]');
       }
       return Array.from(els).filter(function(el) {
-        return !el.querySelector('.query-note-wrapper, .query-note-item');
+        // 过滤广告卡片（"大家都在搜"推荐区块）
+        if (el.querySelector('.query-note-wrapper, .query-note-item, .query-note-header')) return false;
+        // 必须有 cover 链接才是正常笔记
+        if (!el.querySelector('a.cover, a[class*="cover"]')) return false;
+        return true;
       });
     }
 
     function getNoteId(el) {
-      var link = el.querySelector('a[href*="/search_result/"], a[href*="/explore/"], a.cover');
+      var link = el.querySelector('a.cover, a[href*="/search_result/"], a[href*="/explore/"]');
       if (link) {
         var match = link.href.match(/\\/(?:search_result|explore)\\/([a-zA-Z0-9]+)/);
         if (match) return match[1];
@@ -635,14 +639,36 @@ class SignServer {
       }
     }
 
+    // 完整事件链点击（mousedown → mouseup → click），模拟真实人类点击
+    async function humanClick(targetEl) {
+      var rect = targetEl.getBoundingClientRect();
+      var cx = rect.left + rect.width * (0.3 + Math.random() * 0.4);
+      var cy = rect.top + rect.height * (0.3 + Math.random() * 0.4);
+      var opts = { clientX: cx, clientY: cy, bubbles: true, cancelable: true, view: window };
+      targetEl.dispatchEvent(new MouseEvent('mousedown', opts));
+      await sleep(30 + Math.random() * 50);
+      targetEl.dispatchEvent(new MouseEvent('mouseup', opts));
+      await sleep(10 + Math.random() * 30);
+      targetEl.dispatchEvent(new MouseEvent('click', opts));
+    }
+
+    // 检测详情弹窗是否打开（精确选择器，避免误匹配搜索页元素）
+    function isDetailOpen() {
+      // 详情弹窗的关闭按钮
+      var closeBtn = document.querySelector('.close-circle, .close-mask-dark, [class*="close-circle"], [class*="close-mask"]');
+      // 详情弹窗的内容容器
+      var detail = document.querySelector('.note-scroller, #detail-desc, #detail-title, [class*="note-detail"]');
+      // 详情弹窗的遮罩层（区分搜索页的遮罩）
+      var mask = document.querySelector('.close-mask-dark, [class*="note-detail-mask"]');
+      return !!(closeBtn || detail || mask);
+    }
+
     async function waitForDetailOpen(timeout) {
       timeout = timeout || 10000;
       var start = Date.now();
       while (Date.now() - start < timeout) {
-        var mask = document.querySelector('.close-mask-dark, .mask, [class*="overlay"]');
-        var detail = document.querySelector('[class*="note-detail"], .note-scroller, #detail-desc, #detail-title');
-        if (mask || detail) {
-          await sleep(500 + Math.random() * 300);
+        if (isDetailOpen()) {
+          await sleep(600 + Math.random() * 400);
           return true;
         }
         await sleep(250);
@@ -650,27 +676,55 @@ class SignServer {
       return false;
     }
 
+    // 关闭详情弹窗（多种方式 + 验证关闭）
     async function closeDetail() {
-      var closeBtn = document.querySelector('.close-mask-dark, .close-circle, [class*="close-mask"]');
+      if (!isDetailOpen()) return;
+
+      // 方式1: 点击关闭按钮（完整事件链）
+      var closeBtn = document.querySelector('.close-circle, .close-mask-dark, [class*="close-circle"], [class*="close-mask"]');
       if (closeBtn) {
-        closeBtn.click();
-      } else {
-        document.dispatchEvent(new KeyboardEvent('keydown', {
-          key: 'Escape', code: 'Escape', keyCode: 27, which: 27, bubbles: true
-        }));
-        await sleep(200);
-        var altClose = document.querySelector('[class*="close-modal"], [class*="close-btn"]');
-        if (altClose) altClose.click();
+        await humanClick(closeBtn);
       }
+
+      await sleep(300);
+
+      // 方式2: 如果还没关闭，按 Escape
+      if (isDetailOpen()) {
+        document.dispatchEvent(new KeyboardEvent('keydown', {
+          key: 'Escape', code: 'Escape', keyCode: 27, which: 27, bubbles: true, cancelable: true
+        }));
+        document.dispatchEvent(new KeyboardEvent('keyup', {
+          key: 'Escape', code: 'Escape', keyCode: 27, which: 27, bubbles: true, cancelable: true
+        }));
+      }
+
+      await sleep(300);
+
+      // 方式3: 如果还没关闭，点击遮罩层
+      if (isDetailOpen()) {
+        var mask = document.querySelector('.close-mask-dark, [class*="note-detail-mask"], [class*="overlay"]');
+        if (mask) {
+          await humanClick(mask);
+        }
+      }
+
+      // 等待弹窗完全消失
       var start = Date.now();
-      while (Date.now() - start < 6000) {
-        if (!document.querySelector('.close-mask-dark, [class*="note-detail"]')) {
-          await sleep(200);
-          break;
+      while (Date.now() - start < 5000) {
+        if (!isDetailOpen()) {
+          await sleep(300);
+          return;
         }
         await sleep(200);
       }
-      await sleep(300 + Math.random() * 200);
+
+      // 最终手段：如果5秒后还在，尝试再按一次 Escape
+      if (isDetailOpen()) {
+        document.dispatchEvent(new KeyboardEvent('keydown', {
+          key: 'Escape', code: 'Escape', keyCode: 27, which: 27, bubbles: true, cancelable: true
+        }));
+        await sleep(500);
+      }
     }
 
     function extractFromSSR(noteId) {
@@ -770,6 +824,12 @@ class SignServer {
     }
 
     try {
+      // 开始前先关闭可能残留的弹窗（上一次采集可能没关好）
+      if (isDetailOpen()) {
+        await closeDetail();
+        await sleep(500);
+      }
+
       var notes = getNoteElements();
       var noteCount = notes.length;
       if (targetIndex >= notes.length) {
@@ -778,20 +838,23 @@ class SignServer {
       var noteEl = notes[targetIndex];
       var noteId = getNoteId(noteEl);
       noteEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      await sleep(500 + Math.random() * 400);
-      var coverLink = noteEl.querySelector('a.cover') || noteEl.querySelector('a.title, a[href*="/search_result/"]') || noteEl.querySelector('a');
+      await sleep(600 + Math.random() * 400);
+      var coverLink = noteEl.querySelector('a.cover, a[class*="cover"]') || noteEl.querySelector('a[href*="/search_result/"]') || noteEl.querySelector('a');
       if (!coverLink) return { ok: false, error: '找不到笔记链接', noteCount: noteCount };
       await humanMouseMove(coverLink);
-      await sleep(150 + Math.random() * 250);
-      coverLink.click();
+      await sleep(200 + Math.random() * 300);
+      // 完整事件链点击（mousedown → mouseup → click）
+      await humanClick(coverLink);
       var opened = await waitForDetailOpen(10000);
       if (!opened) {
         return { ok: false, error: '详情弹窗未打开(超时)', noteId: noteId, noteCount: noteCount };
       }
-      await sleep(800 + Math.random() * 500);
+      await sleep(1000 + Math.random() * 500);
       var data = extractFromSSR(noteId);
       if (!data) { data = extractFromDOM(); }
       await closeDetail();
+      // 关闭后额外等待，确保 DOM 完全恢复
+      await sleep(400 + Math.random() * 300);
       return { ok: true, data: data, noteId: noteId, noteCount: noteCount };
     } catch(e) {
       try { await closeDetail(); } catch(ee) {}
