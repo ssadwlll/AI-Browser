@@ -1,102 +1,127 @@
 /**
  * anti-bot-demo/vm-sign.js
  *
- * 轻量级 VM 字节码签名模块 — 模拟小红书 mnsv2 的 VM 保护思路
+ * v3: 真正的二进制字节码 VM — 算法不再以 JS 源码形式存在
  *
- * 核心思路：
- *   1. 签名密钥不直接出现在代码中，而是拆分编码后嵌入字符串池
- *   2. 字节码由自研 VM 解释执行，攻击者无法直接阅读算法逻辑
- *   3. VM 运行时动态重组密钥 + 计算 HMAC
- *   4. 动态挑战盐：服务端每次会话下发随机盐，混入密钥派生
- *      即使 VM 代码被完全逆向，没有盐值也无法生成有效签名
+ * 核心变化 (v2 → v3):
+ *   v2 问题: generateObfuscatedClientVM() 返回的是直接实现算法的 JS 代码
+ *            AI 读取 _0x 变量名后能理解 atob + HMAC 流程，10 秒破解
+ *   v3 修复: generateObfuscatedClientVM() 返回通用 VM 解释器 + 二进制字节码
+ *            解释器是通用的 while+switch，不包含任何算法逻辑
+ *            算法完全编码在 61 字节字节码中，AI 必须反汇编才能理解
  *
- * 安全层次：
- *   明文密钥:        F12 → 搜索 "secret" → 10 秒破解
- *   VM 字节码 (v1):  逆向 VM → 提取密钥 → 1-2 小时 (已过时)
- *   VM + 动态盐 (v2): 逆向 VM + 提取基础密钥 + 每次获取盐 → 需持续交互
- *   小红书 VM:        逆向两层嵌套 VM + 233K 字节码 → 2+ 天
+ * v3 防护层次:
+ *   1. 通用 VM 解释器: AI 可读，但只学到 opcode 定义，不知道算法
+ *   2. 二进制字节码: 61 字节，含垃圾指令/跳转/环境检测/反调试
+ *   3. 控制流混淆: JMP 跳过垃圾块，PUSH/POP 干扰，诱饵代码路径
+ *   4. 环境检测: ENV_CHECK 验证 window/document/navigator/screen
+ *   5. 反调试: DBG_CHECK 通过时间差检测 debugger 暂停
+ *   6. 动态挑战盐: per-session 随机盐，5 分钟过期 (v2 保留)
  *
- * v2 改进：
- *   - 移除 /api/vm-engine 公开端点，VM 代码内嵌在页面 HTML 中（混淆）
- *   - 新增 /api/challenge 端点，下发 per-session 随机盐（5 分钟过期）
- *   - 密钥 = decodeKey(STR_POOL) + sessionSalt，两部分缺一不可
- *   - 攻击者即使逆向 VM，仍需持续调用 /api/challenge 获取盐值
+ * AI 破解 v3 需要:
+ *   1. 阅读 VM 解释器 → 学习 18 种 opcode 的语义
+ *   2. 编写反汇编器 → 将 61 字节十六进制转为可读指令
+ *   3. 分析字节码 → 区分真实指令与垃圾指令 (NOP/POP/PUSH_INT)
+ *   4. 追踪跳转 → 理解 JMP 跳过的垃圾块
+ *   5. 提取算法 → DECODE_KEY → LOAD → CONCAT4 → HMAC → RETURN
+ *   6. 提取密钥 → 从 STR_POOL 反向 base64 解码
+ *   对比 v2 (AI 直接读 JS): v3 至少需要人工分析 + 反汇编
  */
 
 'use strict';
 
 const crypto = require('crypto');
 
-// ======================= VM 指令集 =======================
+// ======================= v3 指令集 (18 opcodes) =======================
 //
-// 每条指令 = 1 字节 opcode + 可变操作数
-//
-// 0x01 PUSH_STR <hi:1> <lo:1>  从字符串池压入字符串
-// 0x04 LOAD    <idx:1>         从寄存器压入栈（R0-R7 为外部参数）
-// 0x08 DECODE_KEY              解码重组密钥 → 存入 R7
-// 0x10 CONCAT4                 弹出4个值，按相反顺序拼接（栈顶最后）
-// 0x20 HMAC                    弹出 key 和 data，计算 HMAC-SHA256
-// 0x07 RETURN                  返回栈顶
+// opcode  助记符       操作数      说明
+// 0x01    PUSH_STR    <hi><lo>    压入 STR_POOL[(hi<<8)|lo]
+// 0x02    PUSH_INT    <val>       压入整数
+// 0x03    POP                     弹出并丢弃栈顶
+// 0x04    LOAD        <idx>       压入 registers[idx]
+// 0x05    STORE       <idx>       弹出存入 registers[idx]
+// 0x06    JMP         <off>       pc += off (前向跳转)
+// 0x07    JMP_IF      <off>       弹出条件，为真则 pc += off
+// 0x08    DECODE_KEY              重组密钥 → R7 (baseKey + salt)
+// 0x09    CONCAT2                 弹出 a,b → 压入 a+b
+// 0x0A    CONCAT4                 弹出 a,b,c,d → 压入 a+b+c+d
+// 0x0B    HMAC                    弹出 key,data → 压入 HMAC-SHA256(key,data)
+// 0x0C    ENV_CHECK   <idx>       检查环境对象 [window,document,navigator,screen]
+// 0x0D    XOR_DECODE  <idx>       XOR 解码 STR_POOL[idx] (key=0x5A)
+// 0x0E    RETURN                  返回栈顶
+// 0x0F    NOP                     空操作 (垃圾指令)
+// 0x10    DBG_CHECK               反调试: 检测执行时间差
+// 0x11    CMP_EQ                  弹出 a,b → 压入 (a===b)
+// 0x12    HASH                    弹出 data → 压入 SHA256(data)
 
-// ======================= 密钥编码 =======================
-//
-// 原密钥: anti-bot-demo-secret-2026
-// 拆分:   "anti-bot-" | "demo-secr" | "et-2026"
-// 编码:   base64(段).split('').reverse().join('')
-// STR_POOL 中故意打乱顺序，运行时按 ORDER 数组重组
+// ======================= 密钥编码 (同 v2) =======================
 
 const KEY_RAW_PARTS = ['anti-bot-', 'demo-secr', 'et-2026'];
 const KEY_ENCODED = KEY_RAW_PARTS.map(p =>
   Buffer.from(p, 'utf8').toString('base64').split('').reverse().join('')
 );
 
-// 字符串池：编码后的密钥片段 + 重组顺序
-// 索引 0-2: 密钥片段（打乱顺序）
-// 索引 3: 重组顺序（控制字符，指示从 STR_POOL 的哪些索引取值，按什么顺序）
+// ======================= 字符串池 (v3: 7 条目) =======================
+//
+// 索引 0-2: 密钥片段（打乱顺序，base64 逆转编码）
+// 索引 3:   重组顺序 [1, 2, 0]
+// 索引 4-6: 垃圾诱饵字符串（干扰分析）
+
 const STR_POOL = [
-  KEY_ENCODED[2],   // 索引0: "et-2026" 的编码（故意放前面）
-  KEY_ENCODED[0],   // 索引1: "anti-bot-" 的编码
-  KEY_ENCODED[1],   // 索引2: "demo-secr" 的编码
-  '\x01\x02\x00',   // 索引3: 重组顺序 [1, 2, 0] → anti-bot- + demo-secr + et-2026
+  KEY_ENCODED[2],   // 0: "et-2026" 编码
+  KEY_ENCODED[0],   // 1: "anti-bot-" 编码
+  KEY_ENCODED[1],   // 2: "demo-secr" 编码
+  '\x01\x02\x00',   // 3: 重组顺序 [1, 2, 0]
+  'k7Px2mQ9rT3v',   // 4: 垃圾诱饵
+  'jB5cF1yD8wL2',   // 5: 垃圾诱饵
+  'nH6gV4xK9pM7',   // 6: 垃圾诱饵
 ];
 
-// ======================= 字节码 =======================
+// ======================= 字节码 (v3: 61 字节) =======================
 //
-// 程序逻辑:
-//   DECODE_KEY              // 解码密钥 → R7
-//   LOAD 0                  // 压入 path (外部参数 R0)
-//   LOAD 1                  // 压入 body  (外部参数 R1)
-//   LOAD 2                  // 压入 ts     (外部参数 R2)
-//   LOAD 3                  // 压入 nonce  (外部参数 R3)
-//   CONCAT4                 // 拼接: path + body + ts + nonce
-//   PUSH_STR 0 0            // 压入 STR_POOL[0]（占位，实际用 R7）
-//   ... 不对，应该直接用 R7
-//
-// 修正后的程序:
-//   DECODE_KEY              // R7 = 重组后的密钥
-//   LOAD 0                  // 栈: [path]
-//   LOAD 1                  // 栈: [path, body]
-//   LOAD 2                  // 栈: [path, body, ts]
-//   LOAD 3                  // 栈: [path, body, ts, nonce]
-//   CONCAT4                 // 栈: [path+body+ts+nonce]
-//   LOAD 7                  // 栈: [data, key]
-//   HMAC                    // 栈: [signature]
-//   RETURN                  // 返回 signature
-//
-// 字节码编码:
-//   0x08                    DECODE_KEY
-//   0x04 0x00               LOAD 0
-//   0x04 0x01               LOAD 1
-//   0x04 0x02               LOAD 2
-//   0x04 0x03               LOAD 3
-//   0x10                    CONCAT4
-//   0x04 0x07               LOAD 7
-//   0x20                    HMAC
-//   0x07                    RETURN
+// 反汇编:
+//   pc  hex         指令               说明
+//   0   0C 00       ENV_CHECK window    环境检测
+//   2   06 04       JMP +4             → 跳到 pc=8
+//   4   0F          NOP                 ┐ 垃圾
+//   5   02 39       PUSH_INT 57         │
+//   7   03          POP                 ┘
+//   8   0C 01       ENV_CHECK document  环境检测
+//  10   06 02       JMP +2             → 跳到 pc=14
+//  12   0F          NOP                 ┐ 垃圾
+//  13   0F          NOP                 ┘
+//  14   0C 02       ENV_CHECK navigator 环境检测
+//  16   0C 03       ENV_CHECK screen    环境检测
+//  18   10          DBG_CHECK           反调试检测
+//  19   06 08       JMP +8             → 跳到 pc=29
+//  21   01 00 04    PUSH_STR 4          ┐ 诱饵块
+//  24   04 05       LOAD R5             │ (全部跳过)
+//  26   09          CONCAT2             │
+//  27   05 06       STORE R6            │
+//  29   02 48       PUSH_INT 72         ┐ 垃圾 (执行但无效果)
+//  31   03          POP                 ┘
+//  32   0F          NOP
+//  33   08          DECODE_KEY          R7 = baseKey + salt
+//  34   04 00       LOAD R0             栈: [path]
+//  36   04 01       LOAD R1             栈: [path, body]
+//  38   06 01       JMP +1             → 跳到 pc=41
+//  40   0F          NOP                 ┐ 垃圾
+//  41   04 02       LOAD R2             栈: [path, body, ts]
+//  43   04 03       LOAD R3             栈: [path, body, ts, nonce]
+//  45   0A          CONCAT4             栈: [path+body+ts+nonce]
+//  46   01 00 05    PUSH_STR 5          ┐ 垃圾
+//  49   03          POP                 ┘
+//  50   02 63       PUSH_INT 99         ┐ 垃圾
+//  52   03          POP                 ┘
+//  53   01 00 06    PUSH_STR 6          ┐ 垃圾
+//  56   03          POP                 ┘
+//  57   04 07       LOAD R7             栈: [data, key]
+//  59   0B          HMAC                栈: [signature]
+//  60   0E          RETURN              返回 signature
 
-const BYTECODE_HEX = '0804000401040204031004072007';
+const BYTECODE_HEX = '0c0006040f0239030c0106020f0f0c020c0310060801000404050905060248030f080400040106010f040204030a010005030263030100060304070b0e';
 
-// ======================= VM 解释器 =======================
+// ======================= VM 解释器 (服务端) =======================
 
 class SimpleVM {
   constructor(bytecodeHex, strPool) {
@@ -105,6 +130,7 @@ class SimpleVM {
     this.pc = 0;
     this.stack = [];
     this.registers = new Array(8).fill(null);
+    this.startTime = Date.now();
   }
 
   decodeKey() {
@@ -117,14 +143,11 @@ class SimpleVM {
       parts.push(Buffer.from(reversed, 'base64').toString('utf8'));
     }
     const baseKey = parts.join('');
-    // 动态挑战盐：R4 存放服务端下发的 per-session salt
-    // 最终密钥 = baseKey + salt，即使 VM 被完全逆向，没有盐也无法签名
     const salt = this.registers[4] || '';
     return baseKey + salt;
   }
 
   run(args) {
-    // 外部参数载入 R0-R4 (R4 = 动态盐)
     for (let i = 0; i < Math.min(args.length, 5); i++) {
       this.registers[i] = String(args[i]);
     }
@@ -134,21 +157,47 @@ class SimpleVM {
 
       switch (op) {
         case 0x01: { // PUSH_STR <hi> <lo>
-          const offset = (this.bytecode[this.pc] << 8) | this.bytecode[this.pc + 1];
-          this.pc += 2;
-          this.stack.push(this.strPool[offset]);
+          const hi = this.bytecode[this.pc++];
+          const lo = this.bytecode[this.pc++];
+          this.stack.push(this.strPool[(hi << 8) | lo]);
+          break;
+        }
+        case 0x02: { // PUSH_INT <val>
+          this.stack.push(this.bytecode[this.pc++]);
+          break;
+        }
+        case 0x03: { // POP
+          this.stack.pop();
           break;
         }
         case 0x04: { // LOAD <idx>
-          const idx = this.bytecode[this.pc++];
-          this.stack.push(this.registers[idx]);
+          this.stack.push(this.registers[this.bytecode[this.pc++]]);
+          break;
+        }
+        case 0x05: { // STORE <idx>
+          this.registers[this.bytecode[this.pc++]] = this.stack.pop();
+          break;
+        }
+        case 0x06: { // JMP <off>
+          this.pc += this.bytecode[this.pc++];
+          break;
+        }
+        case 0x07: { // JMP_IF <off>
+          const off = this.bytecode[this.pc++];
+          if (this.stack.pop()) this.pc += off;
           break;
         }
         case 0x08: { // DECODE_KEY
           this.registers[7] = this.decodeKey();
           break;
         }
-        case 0x10: { // CONCAT4 — 弹出4个值，按入栈顺序拼接
+        case 0x09: { // CONCAT2
+          const b = this.stack.pop();
+          const a = this.stack.pop();
+          this.stack.push(a + b);
+          break;
+        }
+        case 0x0A: { // CONCAT4
           const d = this.stack.pop();
           const c = this.stack.pop();
           const b = this.stack.pop();
@@ -156,15 +205,47 @@ class SimpleVM {
           this.stack.push(a + b + c + d);
           break;
         }
-        case 0x20: { // HMAC
+        case 0x0B: { // HMAC
           const key = this.stack.pop();
           const data = this.stack.pop();
           const sig = crypto.createHmac('sha256', key).update(data, 'utf8').digest('hex');
           this.stack.push(sig);
           break;
         }
-        case 0x07: { // RETURN
+        case 0x0C: { // ENV_CHECK <idx> — 服务端跳过
+          this.pc++; // 跳过操作数
+          break;
+        }
+        case 0x0D: { // XOR_DECODE <idx>
+          const idx = this.bytecode[this.pc++];
+          const encoded = this.strPool[idx];
+          let decoded = '';
+          for (let i = 0; i < encoded.length; i++) {
+            decoded += String.fromCharCode(encoded.charCodeAt(i) ^ 0x5A);
+          }
+          this.stack.push(decoded);
+          break;
+        }
+        case 0x0E: { // RETURN
           return this.stack.pop();
+        }
+        case 0x0F: { // NOP
+          break;
+        }
+        case 0x10: { // DBG_CHECK — 服务端跳过
+          break;
+        }
+        case 0x11: { // CMP_EQ
+          const b = this.stack.pop();
+          const a = this.stack.pop();
+          this.stack.push(a === b);
+          break;
+        }
+        case 0x12: { // HASH
+          const data = this.stack.pop();
+          const hash = crypto.createHash('sha256').update(data, 'utf8').digest('hex');
+          this.stack.push(hash);
+          break;
         }
         default:
           throw new Error(`未知 opcode: 0x${op.toString(16).padStart(2, '0')} at pc=${this.pc - 1}`);
@@ -182,12 +263,24 @@ function vmSign(path, body, timestamp, nonce, salt) {
 }
 
 /**
- * 生成浏览器端混淆 VM 引擎代码
- * - 变量名 _0x 前缀混淆
- * - STR_POOL 全量 hex 转义
- * - 单行压缩，无注释
- * - 接受 5 参数 (path, body, ts, nonce, salt)，salt 追加到解码后的密钥
- * - 使用 atob + crypto.subtle (浏览器原生 API)
+ * 生成浏览器端 VM 引擎代码 (v3 核心)
+ *
+ * v3 关键变化: 返回通用 VM 解释器 + 二进制字节码，而非直接算法 JS
+ *
+ * AI 能看到: while+switch 解释器 (通用，不含算法)
+ * AI 看不到: 算法逻辑 (编码在 61 字节字节码中)
+ *
+ * 结构:
+ *   (function(){
+ *     var POOL = [hex-escaped strings];
+ *     var BC = "bytecode hex";
+ *     var VM = parse(BC);
+ *     function decodeKey(r) { ... }
+ *     var ENV = [window, document, navigator, screen];
+ *     return async function(path, body, ts, nonce, salt) {
+ *       // 通用 VM 解释器: while + switch(18 opcodes)
+ *     }
+ *   })()
  */
 function generateObfuscatedClientVM() {
   function hexEscape(s) {
@@ -198,7 +291,9 @@ function generateObfuscatedClientVM() {
     return r + '"';
   }
   const poolStr = STR_POOL.map(hexEscape).join(',');
-  return `(function(){var _0x4a=[${poolStr}];function _0x1d(){var _0x9e=[];for(var _0x1f=0;_0x1f<_0x4a[3].length;_0x1f++){_0x9e.push(_0x4a[3].charCodeAt(_0x1f));}var _0x2a=[];for(var _0x3b=0;_0x3b<_0x9e.length;_0x3b++){var _0x5c=_0x4a[_0x9e[_0x3b]];_0x2a.push(atob(_0x5c.split("").reverse().join("")));}return _0x2a.join("");}return async function(_0x11,_0x22,_0x33,_0x44,_0x55){var _0x6f=_0x1d()+(_0x55||"");var _0x7d=_0x11+_0x22+_0x33+_0x44;var _0x8e=new TextEncoder();var _0x9f=await crypto.subtle.importKey("raw",_0x8e.encode(_0x6f),{name:"HMAC",hash:"SHA-256"},false,["sign"]);var _0xa0=await crypto.subtle.sign("HMAC",_0x9f,_0x8e.encode(_0x7d));var _0xb1=[];var _0xc2=new Uint8Array(_0xa0);for(var _0xd3=0;_0xd3<_0xc2.length;_0xd3++){_0xb1.push(_0xc2[_0xd3].toString(16).padStart(2,"0"));}return _0xb1.join("");};})()`;
+
+  // 通用 VM 解释器 — 不含算法逻辑，算法在字节码中
+  return `(function(){var _0xP=[${poolStr}];var _0xB="${BYTECODE_HEX}";var _0xV=new Uint8Array(_0xB.length/2);for(var _0xi=0;_0xi<_0xB.length;_0xi+=2){_0xV[_0xi/2]=parseInt(_0xB.substr(_0xi,2),16);}function _0xDK(_0xr){var _0xo=[];for(var _0xi=0;_0xi<_0xP[3].length;_0xi++){_0xo.push(_0xP[3].charCodeAt(_0xi));}var _0xp=[];for(var _0xj=0;_0xj<_0xo.length;_0xj++){_0xp.push(atob(_0xP[_0xo[_0xj]].split("").reverse().join("")));}return _0xp.join("")+(_0xr[4]||"");}var _0xE=[window,document,navigator,screen];return async function(_0xa0,_0xa1,_0xa2,_0xa3,_0xa4){var _0xR=[_0xa0,_0xa1,_0xa2,_0xa3,_0xa4,null,null,null];var _0xS=[];var _0xpc=0;var _0xT=performance.now();while(_0xpc<_0xV.length){var _0xop=_0xV[_0xpc++];switch(_0xop){case 1:{var _0xh=_0xV[_0xpc++];var _0xl=_0xV[_0xpc++];_0xS.push(_0xP[(_0xh<<8)|_0xl]);break;}case 2:{_0xS.push(_0xV[_0xpc++]);break;}case 3:{_0xS.pop();break;}case 4:{_0xS.push(_0xR[_0xV[_0xpc++]]);break;}case 5:{_0xR[_0xV[_0xpc++]]=_0xS.pop();break;}case 6:{_0xpc+=_0xV[_0xpc++];break;}case 7:{var _0xf=_0xV[_0xpc++];if(_0xS.pop()){_0xpc+=_0xf;}break;}case 8:{_0xR[7]=_0xDK(_0xR);break;}case 9:{var _0xb=_0xS.pop();var _0xa=_0xS.pop();_0xS.push(_0xa+_0xb);break;}case 10:{var _0xd=_0xS.pop();var _0xc=_0xS.pop();var _0xb2=_0xS.pop();var _0xa2=_0xS.pop();_0xS.push(_0xa2+_0xb2+_0xc+_0xd);break;}case 11:{var _0xk=_0xS.pop();var _0xda=_0xS.pop();var _0xe=new TextEncoder();var _0xck=await crypto.subtle.importKey("raw",_0xe.encode(_0xk),{name:"HMAC",hash:"SHA-256"},false,["sign"]);var _0xsg=await crypto.subtle.sign("HMAC",_0xck,_0xe.encode(_0xda));var _0xh2=[];var _0xbt=new Uint8Array(_0xsg);for(var _0xj2=0;_0xj2<_0xbt.length;_0xj2++){_0xh2.push(_0xbt[_0xj2].toString(16).padStart(2,"0"));}_0xS.push(_0xh2.join(""));break;}case 12:{var _0xei=_0xV[_0xpc++];if(!_0xE[_0xei]){throw new Error("env check failed");}break;}case 13:{var _0xdi=_0xV[_0xpc++];var _0xds=_0xP[_0xdi];var _0xdr="";for(var _0xdk=0;_0xdk<_0xds.length;_0xdk++){_0xdr+=String.fromCharCode(_0xds.charCodeAt(_0xdk)^90);}_0xS.push(_0xdr);break;}case 14:{return _0xS.pop();}case 15:{break;}case 16:{if(performance.now()-_0xT>5000){throw new Error("debug detected");}break;}case 17:{var _0xbb=_0xS.pop();var _0xaa=_0xS.pop();_0xS.push(_0xaa===_0xbb);break;}case 18:{var _0xhd=_0xS.pop();var _0xhe=new TextEncoder();var _0xhh=await crypto.subtle.digest("SHA-256",_0xhe.encode(_0xhd));var _0xhr=[];var _0xhb=new Uint8Array(_0xhh);for(var _0xhi=0;_0xhi<_0xhb.length;_0xhi++){_0xhr.push(_0xhb[_0xhi].toString(16).padStart(2,"0"));}_0xS.push(_0xhr.join(""));break;}default:throw new Error("invalid opcode");}}}return _0xS.pop();};})()`;
 }
 
 module.exports = { vmSign, generateObfuscatedClientVM, SimpleVM, BYTECODE_HEX, STR_POOL };
