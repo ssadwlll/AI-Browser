@@ -190,7 +190,7 @@ async function simulateHumanBehavior(notes) {
 
   // 随机选一条笔记导航过去（产生 page_view + metrics_report + collect 事件）
   const note = notes[Math.floor(Math.random() * notes.length)];
-  const noteUrl = `https://www.xiaohongshu.com/explore/${note.noteId}?xsec_token=${note.xsecToken}&xsec_source=pc_search`;
+  const noteUrl = `https://www.xiaohongshu.com/explore/${note.noteId}?xsec_token=${note.xsecToken}&xsec_source=pc_search&source=web_explore_feed`;
   log(`  [行为] 模拟浏览笔记: ${note.noteId}`);
 
   const navResult = await browserNavigate(noteUrl, randomDelay(3000, 6000));
@@ -272,6 +272,11 @@ const KEYWORDS = [
   '手表', '眼镜', '帽子', '围巾', '首饰',
   '冰箱', '洗衣机', '扫地机', '空气净化器', '扫地机器人',
   '电视机', '投影仪', '耳机', '音响', '键盘',
+  '手机', '平板', '笔记本', '路由器', '充电宝',
+  '面膜', '精华液', '防晒霜', '粉底液', '卸妆水',
+  '沙发', '床垫', '窗帘', '地毯', '台灯',
+  '烤箱', '微波炉', '电饭煲', '破壁机', '咖啡机',
+  '童装', '玩具', '绘本', '纸尿裤', '奶粉',
 ];
 
 // 从第几个关键词开始采集（用于断点续采）
