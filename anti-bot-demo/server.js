@@ -384,6 +384,61 @@ app.post('/api/reset', (req, res) => {
   res.json({ code: 0, msg: '已重置所有数据' });
 });
 
+// VM 引擎代码下发 — 客户端从服务端获取，避免手动硬编码出错
+app.get('/api/vm-engine', (req, res) => {
+  const { STR_POOL, BYTECODE_HEX } = require('./vm-sign');
+  // 返回浏览器端可执行的 VM 引擎代码
+  // 字符串池中的非 ASCII 字符用 unicode 转义，确保传输安全
+  const safePool = STR_POOL.map(s => {
+    let escaped = '';
+    for (let i = 0; i < s.length; i++) {
+      const code = s.charCodeAt(i);
+      if (code < 32 || code > 126) {
+        escaped += '\\u' + code.toString(16).padStart(4, '0');
+      } else if (code === 92) { // 反斜杠
+        escaped += '\\\\';
+      } else if (code === 34) { // 双引号
+        escaped += '\\"';
+      } else {
+        escaped += s[i];
+      }
+    }
+    return '"' + escaped + '"';
+  });
+
+  const clientCode = `
+(function(){
+  var _s=[${safePool.join(',')}];
+  function decodeKey(){
+    var order=[];
+    for(var i=0;i<_s[3].length;i++){order.push(_s[3].charCodeAt(i));}
+    var parts=[];
+    for(var j=0;j<order.length;j++){
+      var enc=_s[order[j]];
+      var reversed=enc.split('').reverse().join('');
+      parts.push(atob(reversed));
+    }
+    return parts.join('');
+  }
+  return async function(path, body, ts, nonce){
+    var key = decodeKey();
+    var data = path + body + ts + nonce;
+    var enc = new TextEncoder();
+    var cryptoKey = await crypto.subtle.importKey('raw', enc.encode(key), {name:'HMAC', hash:'SHA-256'}, false, ['sign']);
+    var sig = await crypto.subtle.sign('HMAC', cryptoKey, enc.encode(data));
+    var hexSig = [];
+    var bytes = new Uint8Array(sig);
+    for (var i = 0; i < bytes.length; i++) {
+      hexSig.push(bytes[i].toString(16).padStart(2, '0'));
+    }
+    return hexSig.join('');
+  };
+})()
+`;
+  res.set('Content-Type', 'application/javascript');
+  res.send(clientCode);
+});
+
 // 静态文件
 app.use(express.static(path.join(__dirname, 'public')));
 
