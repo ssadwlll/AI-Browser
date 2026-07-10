@@ -420,30 +420,56 @@ class SignServer {
 
           try {
             console.log(`[SignServer] 导航: ${navUrl}`)
-            // loadURL 带超时保护（页面加载最多等 10s）
-            const navPromise = bv.webContents.loadURL(navUrl, { userAgent: bv.webContents.getUserAgent() })
-            const timeoutPromise = new Promise((_, reject) =>
-              setTimeout(() => reject(new Error('导航超时(10s)')), 10000)
-            )
-            await Promise.race([navPromise, timeoutPromise])
-            // 等待页面加载 + 产生行为事件
-            await new Promise(r => setTimeout(r, waitMs || 3000))
+            const beforeUrl = bv.webContents.getURL()
+
+            // 方案1: 优先用 executeJavaScript 设置 location.href（最可靠）
+            // 这会触发浏览器原生导航 + 小红书前端路由 + 所有行为上报
+            await bv.webContents.executeJavaScript(`window.location.href = ${JSON.stringify(navUrl)};`, true)
+
+            // 等待页面开始导航（location.href 设置后浏览器异步加载）
+            await new Promise(r => setTimeout(r, 2000))
+
+            // 等待页面加载完成（did-finish-load 或超时）
+            const waitFinish = new Promise((resolve) => {
+              const timer = setTimeout(() => {
+                bv.webContents.removeListener('did-finish-load', handler)
+                resolve('timeout')
+              }, (waitMs || 3000) + 5000)
+              const handler = () => {
+                clearTimeout(timer)
+                resolve('loaded')
+              }
+              bv.webContents.once('did-finish-load', handler)
+            })
+            await waitFinish
+
+            // 额外等待页面 JS 执行（行为上报需要时间）
+            await new Promise(r => setTimeout(r, 2000))
+
             const finalUrl = bv.webContents.getURL()
-            console.log(`[SignServer] 导航成功: ${finalUrl}`)
-            res.writeHead(200)
-            res.end(JSON.stringify({ ok: true, url: finalUrl }))
-          } catch (e) {
-            // 导航失败也可能是页面重定向导致 loadURL reject，检查当前 URL
-            const currentUrl = bv.webContents.getURL()
-            if (currentUrl && currentUrl.includes('xiaohongshu.com')) {
-              console.log(`[SignServer] 导航后URL(视为成功): ${currentUrl}`)
+            const navigated = finalUrl !== beforeUrl
+            console.log(`[SignServer] 导航结果: before=${beforeUrl?.substring(0, 60)} final=${finalUrl?.substring(0, 60)} navigated=${navigated}`)
+
+            if (navigated) {
               res.writeHead(200)
-              res.end(JSON.stringify({ ok: true, url: currentUrl }))
+              res.end(JSON.stringify({ ok: true, url: finalUrl }))
             } else {
-              console.error('[SignServer] 导航失败:', e.message)
-              res.writeHead(200) // 返回 200 避免采集脚本中断
-              res.end(JSON.stringify({ ok: false, error: e.message, url: currentUrl }))
+              // URL 没变，尝试 loadURL 兜底
+              try {
+                await bv.webContents.loadURL(navUrl)
+                await new Promise(r => setTimeout(r, waitMs || 3000))
+                const finalUrl2 = bv.webContents.getURL()
+                res.writeHead(200)
+                res.end(JSON.stringify({ ok: finalUrl2 !== beforeUrl, url: finalUrl2 }))
+              } catch (e2) {
+                res.writeHead(200)
+                res.end(JSON.stringify({ ok: false, error: '导航未生效: ' + e2.message }))
+              }
             }
+          } catch (e) {
+            console.error('[SignServer] 导航失败:', e.message)
+            res.writeHead(200)
+            res.end(JSON.stringify({ ok: false, error: e.message }))
           }
           return
         }

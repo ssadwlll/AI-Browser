@@ -202,6 +202,7 @@ async function simulateHumanBehavior(notes) {
     await browserScroll();
     return;
   }
+  log(`  [行为] 已导航到: ${(navResult.url || '').substring(0, 50)}...`);
 
   // 模拟滚动 2-3 次（产生 scroll 事件）
   await sleep(randomDelay(1000, 2000));
