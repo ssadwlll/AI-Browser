@@ -179,7 +179,7 @@ class SignServer {
         // 返回: { ok, status, data }
         if (req.method === 'POST' && url.pathname === '/fetch') {
           const body = await this._readBody(req)
-          const { apiPath, body: reqBody, method, xsc, rapParam } = JSON.parse(body)
+          const { apiPath, body: reqBody, method, xsc, rapParam, xs, xt } = JSON.parse(body)
 
           if (!apiPath) {
             res.writeHead(400)
@@ -203,21 +203,31 @@ class SignServer {
           }
 
           // 在浏览器页面内执行：签名 → fetch 请求 → 返回结果
-          // xsc: x-s-common（由调用方通过 xs-common-node.js 生成，_webmsxyw 不生成它）
+          // xs/xt: 外部传入的 XYS_ 签名（xys-sign-node.js 生成，不触发 300015）
+          // xsc: x-s-common（由调用方通过 xs-common-node.js 生成）
           // rapParam: x-rap-param（由调用方传入）
+          // 若未传入 xs，则回退 _webmsxyw 生成 XYW_（可能触发 300015）
           const fetchScript = `
-(function(apiPath, bodyStr, method, xsc, rapParam) {
+(function(apiPath, bodyStr, method, xsc, rapParam, extXs, extXt) {
   return (async function() {
     try {
-      // 1. 生成签名
-      if (typeof window._webmsxyw !== 'function') {
-        return { ok: false, error: '_webmsxyw 不可用' }
-      }
-      var params = undefined;
-      if (bodyStr) { try { params = JSON.parse(bodyStr); } catch(e) {} }
-      var signResult = window._webmsxyw(apiPath, params);
-      if (!signResult || !signResult['X-s']) {
-        return { ok: false, error: '签名生成失败' }
+      // 1. 签名：优先用外部传入的 XYS_，否则回退 _webmsxyw
+      var xS, xT;
+      if (extXs) {
+        xS = extXs;
+        xT = extXt || String(Date.now());
+      } else {
+        if (typeof window._webmsxyw !== 'function') {
+          return { ok: false, error: '_webmsxyw 不可用且未传入 xs' }
+        }
+        var params = undefined;
+        if (bodyStr) { try { params = JSON.parse(bodyStr); } catch(e) {} }
+        var signResult = window._webmsxyw(apiPath, params);
+        if (!signResult || !signResult['X-s']) {
+          return { ok: false, error: '签名生成失败' }
+        }
+        xS = signResult['X-s'];
+        xT = signResult['X-t'] || String(Date.now());
       }
 
       // 2. 生成随机 traceId（与真实浏览器一致）
@@ -232,19 +242,15 @@ class SignServer {
       var headers = {
         'accept': 'application/json, text/plain, */*',
         'content-type': 'application/json;charset=UTF-8',
-        'x-s': signResult['X-s'],
-        'x-t': signResult['X-t'] || String(Date.now()),
+        'x-s': xS,
+        'x-t': xT,
         'x-b3-traceid': randHex(16),
         'x-xray-traceid': randHex(32),
         'xy-direction': '18',
       }
-      // x-s-common: _webmsxyw 不生成，由调用方传入
       if (xsc) {
         headers['x-s-common'] = xsc
-      } else if (signResult['X-s-common']) {
-        headers['x-s-common'] = signResult['X-s-common']
       }
-      // x-rap-param: 由调用方传入
       if (rapParam) {
         headers['x-rap-param'] = rapParam
       }
@@ -254,7 +260,7 @@ class SignServer {
       var fetchOpts = {
         method: method || 'POST',
         headers: headers,
-        credentials: 'include',  // 自动带上 cookies
+        credentials: 'include',
       }
       if (bodyStr && (method || 'POST') !== 'GET') {
         fetchOpts.body = bodyStr
@@ -274,7 +280,7 @@ class SignServer {
       return { ok: false, error: e.message }
     }
   })()
-})(__API_PATH__, __BODY_STR__, __METHOD__, __XSC__, __RAP_PARAM__)
+})(__API_PATH__, __BODY_STR__, __METHOD__, __XSC__, __RAP_PARAM__, __EXT_XS__, __EXT_XT__)
 `
 
           const script = fetchScript
@@ -283,6 +289,8 @@ class SignServer {
             .replace('__METHOD__', JSON.stringify(method || 'POST'))
             .replace('__XSC__', JSON.stringify(xsc || ''))
             .replace('__RAP_PARAM__', JSON.stringify(rapParam || ''))
+            .replace('__EXT_XS__', JSON.stringify(xs || ''))
+            .replace('__EXT_XT__', JSON.stringify(xt || ''))
 
           console.log(`[SignServer] 浏览器内 fetch: ${method || 'POST'} ${apiPath}`)
           const result = await wc.executeJavaScript(script, true)

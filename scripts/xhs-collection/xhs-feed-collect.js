@@ -76,12 +76,12 @@ function getBrowserCookies() {
 }
 
 /**
- * 通过签名服务在浏览器内发起 API 请求（签名+请求全在浏览器中完成）
- * 避免 Node.js 的 TLS/HTTP 指纹被服务端检测
+ * 通过签名服务在浏览器内发起 API 请求
+ * XYS_ 签名由 Node.js 生成（不触发 300015），请求通过浏览器 fetch 发出（真实 Chrome TLS）
  */
-function browserFetch(apiPath, bodyObj, xsc, rapParam) {
+function browserFetch(apiPath, bodyObj, xsc, rapParam, xs, xt) {
   return new Promise((resolve) => {
-    const bodyData = JSON.stringify({ apiPath, body: bodyObj, method: 'POST', xsc, rapParam });
+    const bodyData = JSON.stringify({ apiPath, body: bodyObj, method: 'POST', xsc, rapParam, xs, xt });
     const req = http.request(`${SIGN_SERVER_URL}/fetch`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(bodyData) },
@@ -347,16 +347,29 @@ async function fetchFeed(noteId, xsecToken) {
     sigCount: feedSigCount,
   });
 
-  // === 采集策略（2026-07-10 修复）===
-  // BrowserView fetch（签名服务 /fetch 端点）：
-  //   x-s: 浏览器内 _webmsxyw 生成 XYW_（真实环境，不触发 300015）
+  // 动态生成 XYS_ x-s（xys-sign-node.js，不触发 300015）
+  let dynamicXs = null;
+  let dynamicXt = null;
+  if (xysSignReady) {
+    try {
+      const sign = await generateHeaders(apiPath, bodyStr);
+      dynamicXs = sign['X-s'];
+      dynamicXt = sign['X-t'];
+    } catch (e) {
+      log(`  [详情] 动态 x-s 失败: ${e.message}`);
+    }
+  }
+
+  // === 采集策略（2026-07-10 修复 v2）===
+  // XYS_ 签名（Node.js 生成）+ 浏览器 fetch（真实 Chrome TLS）
+  //   x-s: XYS_ 格式（xys-sign-node.js 生成，不触发 300015）
   //   fetch: 浏览器内发起，credentials:'include'，真实 Chrome TLS 指纹
-  //   x-s-common: Node.js xs-common-node.js 生成，传入浏览器
-  //   → 解决 Node.js TLS 指纹被聚类检测导致 ~300 条后风控
+  //   x-s-common: Node.js xs-common-node.js 生成
+  //   → XYS_ 不触发环境检测 + Chrome TLS 不被聚类检测
   //
-  // 回退：Node.js 直接请求（XYS_ 动态 x-s + 动态 x-s-common）
+  // 回退：Node.js 直接请求（XYS_ + Node.js TLS）
   if (signServerAvailable) {
-    const result = await browserFetch(apiPath, body, dynamicXsc, FEED_RAP_PARAM);
+    const result = await browserFetch(apiPath, body, dynamicXsc, FEED_RAP_PARAM, dynamicXs, dynamicXt);
     if (result.ok) {
       return result.data;
     }
