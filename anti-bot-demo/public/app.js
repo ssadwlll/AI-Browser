@@ -6,16 +6,19 @@
 
 'use strict';
 
-// VM 签名引擎 — 从服务端动态加载，避免硬编码出错
-// 服务端 /api/vm-engine 返回混淆后的 VM 代码，密钥不在客户端代码中明文出现
-let VM_ENGINE = null;
+// VM 签名引擎 — 由服务端内嵌在 HTML 页面中 (window.__VM_ENGINE__)
+// 不再通过公开 API 端点获取，混淆后嵌入页面源码
+// 签名还需要动态挑战盐 (sessionSalt)，由 /api/challenge 下发，5 分钟过期
 
-async function loadVMEngine() {
-  if (VM_ENGINE) return VM_ENGINE;
-  const resp = await fetch('/api/vm-engine');
-  const code = await resp.text();
-  VM_ENGINE = eval(code);
-  return VM_ENGINE;
+let sessionSalt = null;
+let sessionId = null;
+
+async function fetchChallenge() {
+  const resp = await fetch('/api/challenge');
+  const data = await resp.json();
+  sessionId = data.sessionId;
+  sessionSalt = data.salt;
+  return data;
 }
 
 const API_URL = '/api/data';
@@ -25,8 +28,8 @@ const RESET_URL = '/api/reset';
 // ======================= 签名工具 =======================
 
 async function vmSign(path, body, timestamp, nonce) {
-  const engine = await loadVMEngine();
-  return engine(path, body, timestamp, nonce);
+  if (!sessionSalt) await fetchChallenge();
+  return window.__VM_ENGINE__(path, body, timestamp, nonce, sessionSalt);
 }
 
 function randomNonce() {
@@ -151,6 +154,7 @@ function fullHeaders(ts, nonce, signature, sigCountVal) {
     'x-signature': signature,
     'x-timestamp': ts,
     'x-nonce': nonce,
+    'x-session-id': sessionId || '',
     'x-device-id': deviceId,
     'x-fingerprint': fingerprint,
     'x-sig-count': String(sigCountVal),
@@ -165,6 +169,7 @@ function minimalHeaders(ts, nonce, signature, sigCountVal) {
     'x-signature': signature,
     'x-timestamp': ts,
     'x-nonce': nonce,
+    'x-session-id': sessionId || '',
     'x-device-id': deviceId,
     'x-fingerprint': fingerprint,
     'x-sig-count': String(sigCountVal),
@@ -178,6 +183,14 @@ async function sendRequest(mode, index) {
   try {
     const resp = await fetch(API_URL, { method: 'POST', headers, body });
     const data = await resp.json();
+    // 盐过期自动刷新并重试一次
+    if (data.code === 1011 && index === 0) {
+      await fetchChallenge();
+      const { body: body2, headers: headers2 } = await buildRequest(mode, index);
+      const resp2 = await fetch(API_URL, { method: 'POST', headers: headers2, body: body2 });
+      const data2 = await resp2.json();
+      return { status: resp2.status, data: data2, mode, index };
+    }
     return { status: resp.status, data, mode, index };
   } catch (e) {
     return { status: 0, data: { code: -1, msg: e.message }, mode, index };
@@ -337,6 +350,8 @@ async function refreshStats() {
         1007: '自动化行为模式',
         1008: '缺少必要请求头',
         1009: '可疑 User-Agent',
+        1010: '缺少会话标识',
+        1011: '会话已过期',
       };
       reasonsList.innerHTML = reasons
         .sort((a, b) => b[1] - a[1])
@@ -374,5 +389,5 @@ document.getElementById('btn-reset').addEventListener('click', resetData);
 // 定时刷新统计
 setInterval(() => { if (testRunning) refreshStats(); }, 2000);
 
-// 初始加载
-refreshStats();
+// 初始加载 — 先获取挑战令牌，再刷新统计
+fetchChallenge().then(() => refreshStats());

@@ -7,16 +7,20 @@
  *   1. 签名密钥不直接出现在代码中，而是拆分编码后嵌入字符串池
  *   2. 字节码由自研 VM 解释执行，攻击者无法直接阅读算法逻辑
  *   3. VM 运行时动态重组密钥 + 计算 HMAC
+ *   4. 动态挑战盐：服务端每次会话下发随机盐，混入密钥派生
+ *      即使 VM 代码被完全逆向，没有盐值也无法生成有效签名
  *
- * 对比小红书 mnsv2:
- *   小红书: 233081 hex 字节码 + 自研 VM + 26 项依赖 → 逆向需 2+ 天
- *   本 demo: ~100 hex 字节码 + 简化 VM → 逆向需 1-2 小时
- *   生产建议: 字节码 5000+ 字符 + 控制流混淆 → 逆向需 1+ 天
+ * 安全层次：
+ *   明文密钥:        F12 → 搜索 "secret" → 10 秒破解
+ *   VM 字节码 (v1):  逆向 VM → 提取密钥 → 1-2 小时 (已过时)
+ *   VM + 动态盐 (v2): 逆向 VM + 提取基础密钥 + 每次获取盐 → 需持续交互
+ *   小红书 VM:        逆向两层嵌套 VM + 233K 字节码 → 2+ 天
  *
- * 攻击难度对比:
- *   明文密钥:   F12 → 搜索 "secret" → 10 秒破解
- *   VM 字节码:  逆向 VM 指令集 → 理解字节码 → 提取密钥 → 1-2 小时
- *   小红书 VM:  逆向两层嵌套 VM + 233K 字节码 → 2+ 天
+ * v2 改进：
+ *   - 移除 /api/vm-engine 公开端点，VM 代码内嵌在页面 HTML 中（混淆）
+ *   - 新增 /api/challenge 端点，下发 per-session 随机盐（5 分钟过期）
+ *   - 密钥 = decodeKey(STR_POOL) + sessionSalt，两部分缺一不可
+ *   - 攻击者即使逆向 VM，仍需持续调用 /api/challenge 获取盐值
  */
 
 'use strict';
@@ -112,12 +116,16 @@ class SimpleVM {
       const reversed = encoded.split('').reverse().join('');
       parts.push(Buffer.from(reversed, 'base64').toString('utf8'));
     }
-    return parts.join('');
+    const baseKey = parts.join('');
+    // 动态挑战盐：R4 存放服务端下发的 per-session salt
+    // 最终密钥 = baseKey + salt，即使 VM 被完全逆向，没有盐也无法签名
+    const salt = this.registers[4] || '';
+    return baseKey + salt;
   }
 
   run(args) {
-    // 外部参数载入 R0-R3
-    for (let i = 0; i < Math.min(args.length, 4); i++) {
+    // 外部参数载入 R0-R4 (R4 = 动态盐)
+    for (let i = 0; i < Math.min(args.length, 5); i++) {
       this.registers[i] = String(args[i]);
     }
 
@@ -168,49 +176,29 @@ class SimpleVM {
 
 // ======================= 对外接口 =======================
 
-function vmSign(path, body, timestamp, nonce) {
+function vmSign(path, body, timestamp, nonce, salt) {
   const vm = new SimpleVM(BYTECODE_HEX, STR_POOL);
-  return vm.run([path, body, timestamp, nonce]);
+  return vm.run([path, body, timestamp, nonce, salt]);
 }
 
 /**
- * 生成客户端 VM 引擎代码（混淆后的 JS）
- * 客户端拿到的不是密钥，而是字节码 + 字符串池 + VM 解释器
+ * 生成浏览器端混淆 VM 引擎代码
+ * - 变量名 _0x 前缀混淆
+ * - STR_POOL 全量 hex 转义
+ * - 单行压缩，无注释
+ * - 接受 5 参数 (path, body, ts, nonce, salt)，salt 追加到解码后的密钥
+ * - 使用 atob + crypto.subtle (浏览器原生 API)
  */
-function generateClientVM() {
-  return `
-(function(){
-  var _s=${JSON.stringify(STR_POOL)};
-  var _b=Buffer.from("${BYTECODE_HEX}","hex");
-  function _V(){
-    this.pc=0;this.st=[];this.r=new Array(8).fill(null);
+function generateObfuscatedClientVM() {
+  function hexEscape(s) {
+    let r = '"';
+    for (let i = 0; i < s.length; i++) {
+      r += '\\x' + s.charCodeAt(i).toString(16).padStart(2, '0');
+    }
+    return r + '"';
   }
-  _V.prototype._dk=function(){
-    var o=Buffer.from(_s[3]),p=[];
-    for(var i=0;i<o.length;i++){
-      var v=_s[o[i]];
-      p.push(Buffer.from(v.split("").reverse().join(""),"base64").toString());
-    }
-    return p.join("");
-  };
-  _V.prototype.run=function(a){
-    for(var i=0;i<a.length&&i<4;i++)this.r[i]=String(a[i]);
-    while(this.pc<_b.length){
-      var op=_b[this.pc++];
-      switch(op){
-        case 4:var idx=_b[this.pc++];this.st.push(this.r[idx]);break;
-        case 8:this.r[7]=this._dk();break;
-        case 16:var d=this.st.pop(),c=this.st.pop(),b=this.st.pop(),a2=this.st.pop();this.st.push(a2+b+c+d);break;
-        case 32:var k=this.st.pop(),dt=this.st.pop();this.st.push(require("crypto").createHmac("sha256",k).update(dt,"utf8").digest("hex"));break;
-        case 7:return this.st.pop();
-        default:throw new Error("e:"+op);
-      }
-    }
-    return this.st.pop();
-  };
-  return function(p,b,t,n){return new _V().run([p,b,t,n])};
-})()
-`;
+  const poolStr = STR_POOL.map(hexEscape).join(',');
+  return `(function(){var _0x4a=[${poolStr}];function _0x1d(){var _0x9e=[];for(var _0x1f=0;_0x1f<_0x4a[3].length;_0x1f++){_0x9e.push(_0x4a[3].charCodeAt(_0x1f));}var _0x2a=[];for(var _0x3b=0;_0x3b<_0x9e.length;_0x3b++){var _0x5c=_0x4a[_0x9e[_0x3b]];_0x2a.push(atob(_0x5c.split("").reverse().join("")));}return _0x2a.join("");}return async function(_0x11,_0x22,_0x33,_0x44,_0x55){var _0x6f=_0x1d()+(_0x55||"");var _0x7d=_0x11+_0x22+_0x33+_0x44;var _0x8e=new TextEncoder();var _0x9f=await crypto.subtle.importKey("raw",_0x8e.encode(_0x6f),{name:"HMAC",hash:"SHA-256"},false,["sign"]);var _0xa0=await crypto.subtle.sign("HMAC",_0x9f,_0x8e.encode(_0x7d));var _0xb1=[];var _0xc2=new Uint8Array(_0xa0);for(var _0xd3=0;_0xd3<_0xc2.length;_0xd3++){_0xb1.push(_0xc2[_0xd3].toString(16).padStart(2,"0"));}return _0xb1.join("");};})()`;
 }
 
-module.exports = { vmSign, generateClientVM, SimpleVM, BYTECODE_HEX, STR_POOL };
+module.exports = { vmSign, generateObfuscatedClientVM, SimpleVM, BYTECODE_HEX, STR_POOL };

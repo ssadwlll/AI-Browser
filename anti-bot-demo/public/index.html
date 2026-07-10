@@ -55,7 +55,7 @@
             <span class="layer-name">请求签名验证</span>
           </div>
           <p class="layer-desc">HMAC 绑定路径+请求体+时间戳+nonce</p>
-          <div class="layer-detail">算法: HMAC-SHA256 via VM | 窗口: 5min | 防重放: nonce | 密钥: VM字节码保护</div>
+          <div class="layer-detail">算法: HMAC-SHA256 via VM | 窗口: 5min | 防重放: nonce | 密钥: VM字节码 + 动态挑战盐</div>
         </div>
         <div class="layer-card" id="layer-3">
           <div class="layer-header">
@@ -148,10 +148,12 @@
     </section>
 
     <footer>
-      <p>签名引擎: VM 字节码 | HMAC(path + body + timestamp + nonce) | 密钥不在代码中明文出现</p>
+      <p>签名引擎: VM 字节码 + 动态挑战盐 | HMAC(path + body + ts + nonce) | 密钥不在代码中明文出现 | 无公开算法端点</p>
     </footer>
   </div>
 
+  <!-- VM 引擎代码由服务端注入此处（混淆后内嵌，不通过公开 API 暴露） -->
+  <script>window.__VM_ENGINE__ = {{VM_CODE}};</script>
   <script src="app.js"></script>
 </body>
 </html>
