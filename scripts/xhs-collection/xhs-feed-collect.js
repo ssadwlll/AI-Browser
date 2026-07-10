@@ -146,7 +146,7 @@ function browserNavigate(url, waitMs = 3000) {
     const req = http.request(`${SIGN_SERVER_URL}/navigate`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(bodyData) },
-      timeout: 15000,
+      timeout: 30000,  // 导航可能较慢，给 30s
     }, (res) => {
       let data = '';
       res.on('data', c => data += c);
@@ -154,8 +154,8 @@ function browserNavigate(url, waitMs = 3000) {
         try { resolve(JSON.parse(data)); } catch { resolve({ ok: false }); }
       });
     });
-    req.on('error', () => resolve({ ok: false }));
-    req.on('timeout', () => { req.destroy(); resolve({ ok: false }); });
+    req.on('error', (e) => resolve({ ok: false, error: e.message }));
+    req.on('timeout', () => { req.destroy(); resolve({ ok: false, error: '超时' }); });
     req.write(bodyData);
     req.end();
   });
@@ -195,7 +195,11 @@ async function simulateHumanBehavior(notes) {
 
   const navResult = await browserNavigate(noteUrl, randomDelay(3000, 6000));
   if (!navResult.ok) {
-    log(`  [行为] 导航失败，继续采集`);
+    log(`  [行为] 导航失败: ${navResult.error || '未知'}，尝试直接滚动当前页面`);
+    // 导航失败时，直接在当前页面滚动也能产生 collect 事件
+    await browserScroll();
+    await sleep(randomDelay(500, 1000));
+    await browserScroll();
     return;
   }
 
@@ -208,7 +212,10 @@ async function simulateHumanBehavior(notes) {
   // 导航回搜索页（产生 page_leave + history/report_web 事件）
   await sleep(randomDelay(1000, 2000));
   const searchUrl = `https://www.xiaohongshu.com/search_result?keyword=${encodeURIComponent(note.keyword)}&source=web_explore_feed`;
-  await browserNavigate(searchUrl, randomDelay(2000, 4000));
+  const backResult = await browserNavigate(searchUrl, randomDelay(2000, 4000));
+  if (!backResult.ok) {
+    log(`  [行为] 返回搜索页失败: ${backResult.error || '未知'}（不影响采集）`);
+  }
 
   log(`  [行为] 行为模拟完成`);
 }

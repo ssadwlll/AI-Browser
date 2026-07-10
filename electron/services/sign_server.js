@@ -420,15 +420,30 @@ class SignServer {
 
           try {
             console.log(`[SignServer] 导航: ${navUrl}`)
-            await bv.webContents.loadURL(navUrl, { userAgent: bv.webContents.getUserAgent() })
+            // loadURL 带超时保护（页面加载最多等 10s）
+            const navPromise = bv.webContents.loadURL(navUrl, { userAgent: bv.webContents.getUserAgent() })
+            const timeoutPromise = new Promise((_, reject) =>
+              setTimeout(() => reject(new Error('导航超时(10s)')), 10000)
+            )
+            await Promise.race([navPromise, timeoutPromise])
             // 等待页面加载 + 产生行为事件
             await new Promise(r => setTimeout(r, waitMs || 3000))
+            const finalUrl = bv.webContents.getURL()
+            console.log(`[SignServer] 导航成功: ${finalUrl}`)
             res.writeHead(200)
-            res.end(JSON.stringify({ ok: true, url: bv.webContents.getURL() }))
+            res.end(JSON.stringify({ ok: true, url: finalUrl }))
           } catch (e) {
-            console.error('[SignServer] 导航失败:', e.message)
-            res.writeHead(500)
-            res.end(JSON.stringify({ error: e.message }))
+            // 导航失败也可能是页面重定向导致 loadURL reject，检查当前 URL
+            const currentUrl = bv.webContents.getURL()
+            if (currentUrl && currentUrl.includes('xiaohongshu.com')) {
+              console.log(`[SignServer] 导航后URL(视为成功): ${currentUrl}`)
+              res.writeHead(200)
+              res.end(JSON.stringify({ ok: true, url: currentUrl }))
+            } else {
+              console.error('[SignServer] 导航失败:', e.message)
+              res.writeHead(200) // 返回 200 避免采集脚本中断
+              res.end(JSON.stringify({ ok: false, error: e.message, url: currentUrl }))
+            }
           }
           return
         }
