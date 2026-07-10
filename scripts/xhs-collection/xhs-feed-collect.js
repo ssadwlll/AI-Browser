@@ -182,6 +182,26 @@ function browserScroll() {
 }
 
 /**
+ * 完整行为模拟（鼠标移动+滚动，一次性产生丰富行为事件）
+ */
+function browserSimulate() {
+  return new Promise((resolve) => {
+    const req = http.request(`${SIGN_SERVER_URL}/simulate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      timeout: 10000,
+    }, (res) => {
+      let data = '';
+      res.on('data', c => data += c);
+      res.on('end', () => { try { resolve(JSON.parse(data)); } catch { resolve({ ok: false }); } });
+    });
+    req.on('error', () => resolve({ ok: false }));
+    req.on('timeout', () => { req.destroy(); resolve({ ok: false }); });
+    req.end();
+  });
+}
+
+/**
  * 模拟人类行为：导航到笔记详情页 + 滚动 + 停留
  * 每采集 N 条详情后执行一次，让浏览器产生真实行为事件
  */
@@ -193,22 +213,22 @@ async function simulateHumanBehavior(notes) {
   const noteUrl = `https://www.xiaohongshu.com/explore/${note.noteId}?xsec_token=${note.xsecToken}&xsec_source=pc_search&source=web_explore_feed`;
   log(`  [行为] 模拟浏览笔记: ${note.noteId}`);
 
+  // 导航前先在当前页面模拟鼠标+滚动（产生行为事件）
+  await browserSimulate();
+
   const navResult = await browserNavigate(noteUrl, randomDelay(3000, 6000));
   if (!navResult.ok) {
-    log(`  [行为] 导航失败: ${navResult.error || '未知'}，尝试直接滚动当前页面`);
-    // 导航失败时，直接在当前页面滚动也能产生 collect 事件
-    await browserScroll();
-    await sleep(randomDelay(500, 1000));
-    await browserScroll();
+    log(`  [行为] 导航失败: ${navResult.error || '未知'}，在当前页面模拟行为`);
+    await browserSimulate();
     return;
   }
   log(`  [行为] 已导航到: ${(navResult.url || '').substring(0, 50)}...`);
 
-  // 模拟滚动 2-3 次（产生 scroll 事件）
+  // 在笔记详情页模拟鼠标移动+滚动（产生 scroll + mousemove 事件）
   await sleep(randomDelay(1000, 2000));
-  await browserScroll();
+  await browserSimulate();
   await sleep(randomDelay(800, 1500));
-  await browserScroll();
+  await browserSimulate();
 
   // 导航回搜索页（产生 page_leave + history/report_web 事件）
   await sleep(randomDelay(1000, 2000));
@@ -731,9 +751,9 @@ async function collectKeyword(keyword, keywordIndex) {
 
     await sleep(randomDelay(FEED_DELAY_MIN, FEED_DELAY_MAX));
 
-    // 每 50 条模拟一次人类行为（导航笔记页+滚动+返回搜索页）
+    // 每 20 条模拟一次人类行为（导航笔记页+滚动+返回搜索页）
     totalDetailsCollected++;
-    if (totalDetailsCollected % 50 === 0) {
+    if (totalDetailsCollected % 20 === 0) {
       log(`  [详情] 已采集 ${totalDetailsCollected} 条，模拟人类行为...`);
       await simulateHumanBehavior(notes);
     }

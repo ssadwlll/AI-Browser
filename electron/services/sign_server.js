@@ -491,8 +491,59 @@ class SignServer {
             res.writeHead(200)
             res.end(JSON.stringify({ ok: true }))
           } catch (e) {
-            res.writeHead(500)
+            res.writeHead(200)
             res.end(JSON.stringify({ error: e.message }))
+          }
+          return
+        }
+
+        // POST /simulate — 完整行为模拟（鼠标移动+滚动+点击空白）
+        // 一次调用产生丰富的 collect 行为事件
+        if (req.method === 'POST' && url.pathname === '/simulate') {
+          const bv = this.getBrowserView()
+          if (!bv) {
+            res.writeHead(200)
+            res.end(JSON.stringify({ ok: false, error: '无活动标签页' }))
+            return
+          }
+          try {
+            // 注入完整的鼠标+滚动行为模拟脚本
+            await bv.webContents.executeJavaScript(`
+              (function() {
+                // 1. 模拟鼠标移动（产生 mousemove 事件）
+                var events = [];
+                var startX = 200 + Math.random() * 800;
+                var startY = 200 + Math.random() * 400;
+                for (var i = 0; i < 8; i++) {
+                  var x = startX + (Math.random() - 0.5) * 300;
+                  var y = startY + (Math.random() - 0.5) * 200;
+                  events.push({ type: 'mousemove', x: x, y: y });
+                }
+                // 2. 模拟滚动
+                for (var i = 0; i < 3; i++) {
+                  events.push({ type: 'scroll', dy: 100 + Math.random() * 400 });
+                }
+                // 3. 逐个触发
+                events.forEach(function(e, idx) {
+                  setTimeout(function() {
+                    if (e.type === 'mousemove') {
+                      var evt = new MouseEvent('mousemove', { clientX: e.x, clientY: e.y, bubbles: true });
+                      document.dispatchEvent(evt);
+                    } else if (e.type === 'scroll') {
+                      window.scrollBy(0, e.dy);
+                    }
+                  }, idx * 200 + Math.random() * 100);
+                });
+                return true;
+              })()
+            `, true)
+            // 等待事件全部触发完
+            await new Promise(r => setTimeout(r, 2500))
+            res.writeHead(200)
+            res.end(JSON.stringify({ ok: true }))
+          } catch (e) {
+            res.writeHead(200)
+            res.end(JSON.stringify({ ok: false, error: e.message }))
           }
           return
         }
