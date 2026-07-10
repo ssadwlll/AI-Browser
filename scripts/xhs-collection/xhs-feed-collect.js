@@ -137,6 +137,82 @@ function getDynamicSign(apiPath, bodyStr) {
   });
 }
 
+/**
+ * 导航浏览器到笔记详情页（产生真实行为事件：collect/metrics_report/history）
+ */
+function browserNavigate(url, waitMs = 3000) {
+  return new Promise((resolve) => {
+    const bodyData = JSON.stringify({ url, waitMs });
+    const req = http.request(`${SIGN_SERVER_URL}/navigate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(bodyData) },
+      timeout: 15000,
+    }, (res) => {
+      let data = '';
+      res.on('data', c => data += c);
+      res.on('end', () => {
+        try { resolve(JSON.parse(data)); } catch { resolve({ ok: false }); }
+      });
+    });
+    req.on('error', () => resolve({ ok: false }));
+    req.on('timeout', () => { req.destroy(); resolve({ ok: false }); });
+    req.write(bodyData);
+    req.end();
+  });
+}
+
+/**
+ * 模拟页面滚动（产生 collect 行为事件）
+ */
+function browserScroll() {
+  return new Promise((resolve) => {
+    const req = http.request(`${SIGN_SERVER_URL}/scroll`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      timeout: 5000,
+    }, (res) => {
+      let data = '';
+      res.on('data', c => data += c);
+      res.on('end', () => { try { resolve(JSON.parse(data)); } catch { resolve({ ok: false }); } });
+    });
+    req.on('error', () => resolve({ ok: false }));
+    req.on('timeout', () => { req.destroy(); resolve({ ok: false }); });
+    req.end();
+  });
+}
+
+/**
+ * 模拟人类行为：导航到笔记详情页 + 滚动 + 停留
+ * 每采集 N 条详情后执行一次，让浏览器产生真实行为事件
+ */
+async function simulateHumanBehavior(notes) {
+  if (!signServerAvailable || notes.length === 0) return;
+
+  // 随机选一条笔记导航过去（产生 page_view + metrics_report + collect 事件）
+  const note = notes[Math.floor(Math.random() * notes.length)];
+  const noteUrl = `https://www.xiaohongshu.com/explore/${note.noteId}?xsec_token=${note.xsecToken}&xsec_source=pc_search`;
+  log(`  [行为] 模拟浏览笔记: ${note.noteId}`);
+
+  const navResult = await browserNavigate(noteUrl, randomDelay(3000, 6000));
+  if (!navResult.ok) {
+    log(`  [行为] 导航失败，继续采集`);
+    return;
+  }
+
+  // 模拟滚动 2-3 次（产生 scroll 事件）
+  await sleep(randomDelay(1000, 2000));
+  await browserScroll();
+  await sleep(randomDelay(800, 1500));
+  await browserScroll();
+
+  // 导航回搜索页（产生 page_leave + history/report_web 事件）
+  await sleep(randomDelay(1000, 2000));
+  const searchUrl = `https://www.xiaohongshu.com/search_result?keyword=${encodeURIComponent(note.keyword)}&source=web_explore_feed`;
+  await browserNavigate(searchUrl, randomDelay(2000, 4000));
+
+  log(`  [行为] 行为模拟完成`);
+}
+
 // ======================= 配置 =======================
 
 const OUTPUT_DIR = path.join(__dirname, 'data');
@@ -642,8 +718,14 @@ async function collectKeyword(keyword, keywordIndex) {
 
     await sleep(randomDelay(FEED_DELAY_MIN, FEED_DELAY_MAX));
 
-    // 每 BATCH_SIZE 条详情，随机长暂停（防风控）
+    // 每 50 条模拟一次人类行为（导航笔记页+滚动+返回搜索页）
     totalDetailsCollected++;
+    if (totalDetailsCollected % 50 === 0) {
+      log(`  [详情] 已采集 ${totalDetailsCollected} 条，模拟人类行为...`);
+      await simulateHumanBehavior(notes);
+    }
+
+    // 每 BATCH_SIZE 条详情，随机长暂停（防风控）
     if (totalDetailsCollected % BATCH_SIZE === 0) {
       const batchPause = randomDelay(BATCH_PAUSE_MIN, BATCH_PAUSE_MAX);
       log(`  [详情] 已采集 ${totalDetailsCollected} 条，批次暂停 ${batchPause / 1000}s...`);

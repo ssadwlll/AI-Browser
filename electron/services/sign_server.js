@@ -399,6 +399,63 @@ class SignServer {
           return
         }
 
+        // POST /navigate — 导航浏览器到指定 URL（产生真实行为事件）
+        // 请求体: { url, waitMs }
+        if (req.method === 'POST' && url.pathname === '/navigate') {
+          const body = await this._readBody(req)
+          const { url: navUrl, waitMs } = JSON.parse(body)
+
+          if (!navUrl) {
+            res.writeHead(400)
+            res.end(JSON.stringify({ error: '缺少 url' }))
+            return
+          }
+
+          const bv = this.getBrowserView()
+          if (!bv) {
+            res.writeHead(500)
+            res.end(JSON.stringify({ error: '无活动标签页' }))
+            return
+          }
+
+          try {
+            console.log(`[SignServer] 导航: ${navUrl}`)
+            await bv.webContents.loadURL(navUrl, { userAgent: bv.webContents.getUserAgent() })
+            // 等待页面加载 + 产生行为事件
+            await new Promise(r => setTimeout(r, waitMs || 3000))
+            res.writeHead(200)
+            res.end(JSON.stringify({ ok: true, url: bv.webContents.getURL() }))
+          } catch (e) {
+            console.error('[SignServer] 导航失败:', e.message)
+            res.writeHead(500)
+            res.end(JSON.stringify({ error: e.message }))
+          }
+          return
+        }
+
+        // POST /scroll — 在当前页面模拟滚动（产生 collect 行为事件）
+        if (req.method === 'POST' && url.pathname === '/scroll') {
+          const bv = this.getBrowserView()
+          if (!bv) {
+            res.writeHead(500)
+            res.end(JSON.stringify({ error: '无活动标签页' }))
+            return
+          }
+          try {
+            await bv.webContents.executeJavaScript(`
+              window.scrollBy(0, ${Math.floor(200 + Math.random() * 600)});
+              true
+            `, true)
+            await new Promise(r => setTimeout(r, 500))
+            res.writeHead(200)
+            res.end(JSON.stringify({ ok: true }))
+          } catch (e) {
+            res.writeHead(500)
+            res.end(JSON.stringify({ error: e.message }))
+          }
+          return
+        }
+
         // 未知路由
         res.writeHead(404)
         res.end(JSON.stringify({ error: 'Unknown route: ' + req.method + ' ' + url.pathname }))
