@@ -577,6 +577,114 @@ class SignServer {
           return
         }
 
+        // POST /click-explore-note — 在首页点击推荐笔记（用于异常恢复）
+        // 流程：找到第一个笔记 → 鼠标移动 → 点击 → 等待详情打开 → 滚动 → 关闭 → 返回首页
+        if (req.method === 'POST' && url.pathname === '/click-explore-note') {
+          const bv = this.getBrowserView()
+          if (!bv) {
+            res.writeHead(200)
+            res.end(JSON.stringify({ ok: false, error: '无活动标签页' }))
+            return
+          }
+          try {
+            const result = await bv.webContents.executeJavaScript(`
+              (async function() {
+                function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+                // 等待笔记元素出现
+                var noteEl = null;
+                for (var i = 0; i < 10; i++) {
+                  noteEl = document.querySelector('section.note-item a.cover, section.note-item a[href*="/explore/"], a[href*="/explore/"]');
+                  if (noteEl) break;
+                  await sleep(500);
+                }
+                if (!noteEl) return { ok: false, error: '未找到推荐笔记' };
+
+                // 滚动到可见
+                noteEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                await sleep(500 + Math.random() * 300);
+
+                // 获取目标位置
+                var rect = noteEl.getBoundingClientRect();
+                var tx = rect.left + rect.width * (0.3 + Math.random() * 0.4);
+                var ty = rect.top + rect.height * (0.3 + Math.random() * 0.4);
+
+                // 贝塞尔曲线鼠标移动
+                var sx = window.innerWidth * (0.15 + Math.random() * 0.7);
+                var sy = window.innerHeight * (0.15 + Math.random() * 0.7);
+                var steps = 6 + Math.floor(Math.random() * 8);
+                for (var i = 0; i <= steps; i++) {
+                  var t = i / steps;
+                  var ease = t < 0.5 ? 2*t*t : -1+(4-2*t)*t;
+                  var cx = sx + (tx - sx) * ease + (Math.random()-0.5) * 25;
+                  var cy = sy + (ty - sy) * ease + (Math.random()-0.5) * 25;
+                  document.dispatchEvent(new MouseEvent('mousemove', {
+                    clientX: cx, clientY: cy, bubbles: true, cancelable: true, view: window
+                  }));
+                  await sleep(12 + Math.random() * 30);
+                }
+
+                await sleep(150 + Math.random() * 250);
+
+                // 点击笔记
+                noteEl.dispatchEvent(new MouseEvent('mousedown', {
+                  clientX: tx, clientY: ty, bubbles: true, cancelable: true, view: window
+                }));
+                await sleep(40 + Math.random() * 80);
+                noteEl.dispatchEvent(new MouseEvent('mouseup', {
+                  clientX: tx, clientY: ty, bubbles: true, cancelable: true, view: window
+                }));
+                await sleep(20 + Math.random() * 40);
+                noteEl.dispatchEvent(new MouseEvent('click', {
+                  clientX: tx, clientY: ty, bubbles: true, cancelable: true, view: window
+                }));
+                try { noteEl.click(); } catch(e) {}
+
+                // 等待详情页打开
+                var opened = false;
+                for (var i = 0; i < 20; i++) {
+                  var mask = document.querySelector('.close-mask-dark');
+                  var detail = document.querySelector('[class*="note-detail"], .note-scroller, #detail-desc');
+                  if (mask || detail) { opened = true; break; }
+                  await sleep(300);
+                }
+
+                if (opened) {
+                  // 在详情页停留+滚动（模拟阅读）
+                  await sleep(1000 + Math.random() * 1000);
+                  for (var i = 0; i < 3; i++) {
+                    window.scrollBy({ top: 200 + Math.random() * 300, behavior: 'smooth' });
+                    await sleep(500 + Math.random() * 500);
+                  }
+                  await sleep(800 + Math.random() * 600);
+
+                  // 关闭详情
+                  var closeBtn = document.querySelector('.close-mask-dark');
+                  if (closeBtn) {
+                    closeBtn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+                    try { closeBtn.click(); } catch(e) {}
+                  } else {
+                    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', bubbles: true }));
+                  }
+                  await sleep(500);
+                }
+
+                return { ok: true, opened: opened };
+              })()
+            `, true)
+
+            await new Promise(r => setTimeout(r, 1000))
+            console.log(`[SignServer] 点击推荐笔记: ok=${result.ok} opened=${result.opened}`)
+            res.writeHead(200)
+            res.end(JSON.stringify(result))
+          } catch (e) {
+            console.error('[SignServer] 点击推荐笔记失败:', e.message)
+            res.writeHead(200)
+            res.end(JSON.stringify({ ok: false, error: e.message }))
+          }
+          return
+        }
+
         // 未知路由
         res.writeHead(404)
         res.end(JSON.stringify({ error: 'Unknown route: ' + req.method + ' ' + url.pathname }))
@@ -597,6 +705,10 @@ class SignServer {
       console.log(`[SignServer]   POST /mnsv2         — 调用浏览器 mnsv2（用于 XYS_ 动态签名）`)
       console.log(`[SignServer]   GET  /cookies      — 获取浏览器 cookies`)
       console.log(`[SignServer]   GET  /user-agent   — 获取浏览器 UA`)
+      console.log(`[SignServer]   POST /navigate     — 导航到指定 URL`)
+      console.log(`[SignServer]   POST /scroll       — 页面滚动`)
+      console.log(`[SignServer]   POST /simulate     — 行为模拟（鼠标+滚动）`)
+      console.log(`[SignServer]   POST /click-explore-note — 首页点击推荐笔记（异常恢复）`)
     })
 
     this.server.on('error', (e) => {

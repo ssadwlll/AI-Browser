@@ -241,6 +241,99 @@ async function simulateHumanBehavior(notes) {
   log(`  [行为] 行为模拟完成`);
 }
 
+/**
+ * 导航到首页并点击推荐笔记（产生真实浏览行为，用于异常恢复）
+ * 通过 sign_server /click-explore-note 端点在浏览器中执行
+ */
+function browserClickExploreNote() {
+  return new Promise((resolve) => {
+    const req = http.request(`${SIGN_SERVER_URL}/click-explore-note`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      timeout: 30000,
+    }, (res) => {
+      let data = '';
+      res.on('data', c => data += c);
+      res.on('end', () => { try { resolve(JSON.parse(data)); } catch { resolve({ ok: false }); } });
+    });
+    req.on('error', () => resolve({ ok: false }));
+    req.on('timeout', () => { req.destroy(); resolve({ ok: false, error: '超时' }); });
+    req.end();
+  });
+}
+
+/**
+ * 智能异常恢复（账号被风控时自动尝试恢复）
+ * 流程：等待5分钟 → 暂停行为线程 → 导航到首页点击推荐笔记 → 尝试采集验证
+ *   成功：重置异常计数，继续采集
+ *   失败：等待10分钟，进入下一次检测（第三次直接结束）
+ * @param {object} note - 用于验证采集的笔记 { noteId, xsecToken }
+ * @returns {boolean} true=恢复成功可继续采集, false=达到上限需停止
+ */
+let accountAnomalyCount = 0;
+
+async function recoverFromAnomaly(note) {
+  accountAnomalyCount++;
+  log(`  [恢复] 检测到账号异常（第 ${accountAnomalyCount}/3 次）`);
+
+  if (accountAnomalyCount >= 3) {
+    log(`  ⛔ 第3次账号异常，采集结束`);
+    return false;
+  }
+
+  // 第1次等待5分钟，第2次等待10分钟
+  const waitMinutes = accountAnomalyCount === 1 ? 5 : 10;
+  log(`  [恢复] 等待 ${waitMinutes} 分钟后尝试恢复...`);
+  await sleep(waitMinutes * 60 * 1000);
+
+  // 暂停行为线程（恢复期间由采集线程接管浏览器操作）
+  behaviorPaused = true;
+  log(`  [恢复] 行为线程已暂停，开始恢复操作`);
+
+  try {
+    // 导航到首页
+    log(`  [恢复] 导航到首页...`);
+    const navResult = await browserNavigate('https://www.xiaohongshu.com', randomDelay(3000, 5000));
+    if (!navResult.ok) {
+      log(`  [恢复] 导航首页失败: ${navResult.error || '未知'}`);
+    }
+    await sleep(randomDelay(2000, 3000));
+
+    // 点击推荐笔记（产生真实浏览行为）
+    log(`  [恢复] 点击首页推荐笔记...`);
+    const clickResult = await browserClickExploreNote();
+    if (clickResult.ok) {
+      log(`  [恢复] 推荐笔记点击成功，已产生浏览行为`);
+    } else {
+      log(`  [恢复] 推荐笔记点击失败: ${clickResult.error || '未知'}，在首页模拟行为`);
+      await browserSimulate();
+    }
+
+    // 等待行为事件上报
+    await sleep(randomDelay(3000, 5000));
+
+    // 尝试采集验证（用触发异常的笔记重试）
+    if (note && note.noteId && note.xsecToken) {
+      log(`  [恢复] 尝试采集笔记验证恢复: ${note.noteId}`);
+      const testResp = await fetchFeed(note.noteId, note.xsecToken);
+      if (testResp.code === 0) {
+        log(`  [恢复] ✅ 采集成功，账号已恢复，重置异常计数`);
+        accountAnomalyCount = 0;
+        return true;
+      }
+      log(`  [恢复] ❌ 采集仍失败: code=${testResp.code} msg=${testResp.msg || ''}`);
+    } else {
+      log(`  [恢复] 无可用笔记验证，假设恢复失败`);
+    }
+
+    return true; // 未达到3次上限，继续采集（下一次异常会再次计数）
+  } finally {
+    // 恢复行为线程
+    behaviorPaused = false;
+    log(`  [恢复] 行为线程已恢复`);
+  }
+}
+
 // ======================= 配置 =======================
 
 const OUTPUT_DIR = path.join(__dirname, 'data');
@@ -368,6 +461,7 @@ function httpPost(host, apiPath, headers, bodyStr) {
 const sharedNotes = [];        // 行为线程消费的笔记池
 let collectionRunning = true;  // 采集线程运行标志
 let behaviorNoteCount = 0;     // 行为线程计数
+let behaviorPaused = false;    // 行为线程暂停标志（异常恢复时暂停）
 
 // ======================= 行为线程（浏览器行为模拟，后台循环） =======================
 
@@ -379,6 +473,12 @@ async function behaviorLoop() {
   log('[行为] 行为线程启动（后台循环）');
 
   while (collectionRunning) {
+    // 行为线程被暂停（异常恢复期间由采集线程接管浏览器）
+    if (behaviorPaused) {
+      await sleep(2000);
+      continue;
+    }
+
     // 池为空：在当前页面做微移动，等待采集线程推送
     if (sharedNotes.length === 0) {
       await browserSimulate();
@@ -685,9 +785,26 @@ async function collectKeyword(keyword, keywordIndex) {
       log(`  ⛔ 登录已过期(-100)，停止采集`);
       return { notes, details, failures, stopped: true };
     } else if (resp.code === 300011 && resp.msg && resp.msg.includes('账号异常')) {
-      // 300011 + "账号异常" = 账号被风控，必须停止
-      log(`  ⛔ 账号被风控（账号异常）！停止采集`);
-      return { notes, details, failures, stopped: true };
+      // 300011 + "账号异常" = 账号被风控，尝试智能恢复
+      log(`  ⚠️ 账号异常（300011），启动智能恢复...`);
+      const recovered = await recoverFromAnomaly(note);
+      if (!recovered) {
+        log(`  ⛔ 账号异常恢复失败（达到上限），停止采集`);
+        return { notes, details, failures, stopped: true };
+      }
+      // 恢复后重试当前笔记
+      const retry = await fetchFeed(note.noteId, note.xsecToken);
+      if (retry.code === 0) {
+        details.push(extractDetail(retry, note));
+        success++;
+        consecutiveFail = 0;
+        log(`  [详情] 恢复后重试成功`);
+      } else {
+        fail++;
+        consecutiveFail++;
+        failures.push({ noteId: note.noteId, xsecToken: note.xsecToken, code: retry.code, msg: retry.msg || '恢复后重试失败' });
+        log(`  [详情] 恢复后重试仍失败: code=${retry.code}`);
+      }
     } else if (resp.code === 300015) {
       // 300015 = 环境检测，等待后重试一次（不刷新 cookie）
       log(`  ⚠️ 触发环境检测（300015），等待30s后重试一次...`);
