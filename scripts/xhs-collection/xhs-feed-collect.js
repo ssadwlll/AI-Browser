@@ -751,11 +751,14 @@ async function collectKeyword(keyword, keywordIndex) {
 
     await sleep(randomDelay(FEED_DELAY_MIN, FEED_DELAY_MAX));
 
-    // 每 20 条模拟一次人类行为（导航笔记页+滚动+返回搜索页）
+    // 每 8 条模拟一次人类行为（参考验证过的采集脚本节奏）
     totalDetailsCollected++;
-    if (totalDetailsCollected % 20 === 0) {
+    if (totalDetailsCollected % 8 === 0) {
       log(`  [详情] 已采集 ${totalDetailsCollected} 条，模拟人类行为...`);
       await simulateHumanBehavior(notes);
+    } else {
+      // 非行为模拟轮次，快速微移动一下（模拟活人）
+      await browserSimulate();
     }
 
     // 每 BATCH_SIZE 条详情，随机长暂停（防风控）

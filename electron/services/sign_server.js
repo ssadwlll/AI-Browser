@@ -497,8 +497,8 @@ class SignServer {
           return
         }
 
-        // POST /simulate — 完整行为模拟（鼠标移动+滚动+点击空白）
-        // 一次调用产生丰富的 collect 行为事件
+        // POST /simulate — 完整行为模拟（参考验证过的采集脚本）
+        // 贝塞尔曲线鼠标移动 + 分步滚动 + 微移动
         if (req.method === 'POST' && url.pathname === '/simulate') {
           const bv = this.getBrowserView()
           if (!bv) {
@@ -507,38 +507,67 @@ class SignServer {
             return
           }
           try {
-            // 注入完整的鼠标+滚动行为模拟脚本
             await bv.webContents.executeJavaScript(`
-              (function() {
-                // 1. 模拟鼠标移动（产生 mousemove 事件）
-                var events = [];
-                var startX = 200 + Math.random() * 800;
-                var startY = 200 + Math.random() * 400;
-                for (var i = 0; i < 8; i++) {
-                  var x = startX + (Math.random() - 0.5) * 300;
-                  var y = startY + (Math.random() - 0.5) * 200;
-                  events.push({ type: 'mousemove', x: x, y: y });
+              (async function() {
+                function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+                // 1. 贝塞尔曲线人类化鼠标移动
+                async function humanMouseMove(tx, ty) {
+                  var sx = window.innerWidth * (0.15 + Math.random() * 0.7);
+                  var sy = window.innerHeight * (0.15 + Math.random() * 0.7);
+                  var steps = 6 + Math.floor(Math.random() * 8);
+                  for (var i = 0; i <= steps; i++) {
+                    var t = i / steps;
+                    var ease = t < 0.5 ? 2*t*t : -1+(4-2*t)*t;
+                    var cx = sx + (tx - sx) * ease + (Math.random()-0.5) * 25;
+                    var cy = sy + (ty - sy) * ease + (Math.random()-0.5) * 25;
+                    document.dispatchEvent(new MouseEvent('mousemove', {
+                      clientX: cx, clientY: cy, bubbles: true, cancelable: true, view: window
+                    }));
+                    await sleep(12 + Math.random() * 30);
+                  }
                 }
-                // 2. 模拟滚动
-                for (var i = 0; i < 3; i++) {
-                  events.push({ type: 'scroll', dy: 100 + Math.random() * 400 });
+
+                // 2. 人类化滚动（分步 + 抖动）
+                async function humanScroll(px) {
+                  var jitter = (Math.random() - 0.5) * 80;
+                  var amount = px + jitter;
+                  var steps = 3 + Math.floor(Math.random() * 5);
+                  var perStep = amount / steps;
+                  for (var i = 0; i < steps; i++) {
+                    window.scrollBy({ top: perStep + (Math.random()-0.5)*40, behavior: 'smooth' });
+                    await sleep(60 + Math.random() * 130);
+                  }
                 }
-                // 3. 逐个触发
-                events.forEach(function(e, idx) {
-                  setTimeout(function() {
-                    if (e.type === 'mousemove') {
-                      var evt = new MouseEvent('mousemove', { clientX: e.x, clientY: e.y, bubbles: true });
-                      document.dispatchEvent(evt);
-                    } else if (e.type === 'scroll') {
-                      window.scrollBy(0, e.dy);
-                    }
-                  }, idx * 200 + Math.random() * 100);
-                });
+
+                // 3. 微移动（模拟活人）
+                async function microMovement() {
+                  var dx = (Math.random() - 0.5) * 30;
+                  var dy = (Math.random() - 0.5) * 30;
+                  document.dispatchEvent(new MouseEvent('mousemove', {
+                    clientX: window.innerWidth/2 + dx,
+                    clientY: window.innerHeight/2 + dy,
+                    bubbles: true, view: window
+                  }));
+                }
+
+                // 执行：鼠标移动到随机位置 → 滚动 → 微移动 → 再滚动
+                var tx = 200 + Math.random() * 800;
+                var ty = 200 + Math.random() * 400;
+                await humanMouseMove(tx, ty);
+                await sleep(150 + Math.random() * 250);
+                await humanScroll(300 + Math.random() * 400);
+                await sleep(200 + Math.random() * 300);
+                await microMovement();
+                await sleep(100 + Math.random() * 200);
+                await humanScroll(200 + Math.random() * 300);
+                await sleep(150 + Math.random() * 200);
+                await microMovement();
+
                 return true;
               })()
             `, true)
-            // 等待事件全部触发完
-            await new Promise(r => setTimeout(r, 2500))
+            await new Promise(r => setTimeout(r, 3000))
             res.writeHead(200)
             res.end(JSON.stringify({ ok: true }))
           } catch (e) {
