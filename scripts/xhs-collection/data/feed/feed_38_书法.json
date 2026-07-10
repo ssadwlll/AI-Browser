@@ -1,0 +1,4109 @@
+{
+  "keyword": "书法",
+  "collectedAt": "2026-07-10T02:58:28.850Z",
+  "totalNotes": 64,
+  "successCount": 60,
+  "failCount": 4,
+  "details": [
+    {
+      "noteId": "6721dd62000000001b02e70b",
+      "keyword": "书法",
+      "xsecToken": "AB7G7-2VJ9VxBhTL92aizIqx_aLyrjEXaEea0_Ex4hmCY=",
+      "title": "赵孟頫真的太强了，越练越上头越写越爱写",
+      "desc": "人生难得几日闲，清茶一壶煮流年。\n忘却人间三千事，心宽无处不桃源。\n#今日书法练习[话题]# #我的书法分享[话题]# #每日练字打卡[话题]# #写字是一种生活[话题]# #书法时间到[话题]# #赵孟頫[话题]# #见字如面[话题]#",
+      "type": "normal",
+      "tagList": [
+        {
+          "id": "6183f17c00000000010033c9",
+          "name": "今日书法练习",
+          "type": "topic"
+        },
+        {
+          "id": "5eb3985f0000000001004280",
+          "name": "我的书法分享",
+          "type": "topic"
+        },
+        {
+          "id": "59449ba5cd30d845ea0e146b",
+          "name": "每日练字打卡",
+          "type": "topic"
+        },
+        {
+          "id": "5bff9cf7a209fd000162c599",
+          "name": "写字是一种生活",
+          "type": "topic"
+        },
+        {
+          "id": "63427f7c000000000101c865",
+          "name": "书法时间到",
+          "type": "topic"
+        },
+        {
+          "type": "topic",
+          "id": "5d348140000000000f001571",
+          "name": "赵孟頫"
+        },
+        {
+          "id": "5c3ded8c000000000d005fca",
+          "name": "见字如面",
+          "type": "topic"
+        }
+      ],
+      "user": {
+        "userId": "5a41b34111be102f366bd5d2",
+        "nickname": "小鱼书法",
+        "avatar": "https://sns-avatar-qc.xhscdn.com/avatar/62678f701694b30a593b463f.jpg"
+      },
+      "interactInfo": {
+        "likedCount": "6819",
+        "collectedCount": "4651",
+        "commentCount": "288",
+        "shareCount": "694"
+      },
+      "imageList": [
+        {
+          "url": "",
+          "width": 3538,
+          "height": 4716
+        },
+        {
+          "url": "",
+          "width": 3538,
+          "height": 4716
+        },
+        {
+          "url": "",
+          "width": 3538,
+          "height": 4716
+        },
+        {
+          "url": "",
+          "width": 3538,
+          "height": 4716
+        },
+        {
+          "url": "",
+          "width": 3538,
+          "height": 4716
+        },
+        {
+          "url": "",
+          "width": 3538,
+          "height": 4716
+        }
+      ],
+      "time": 1730272610000,
+      "lastUpdateTime": 1730272611000,
+      "shareInfo": {
+        "un_share": false
+      }
+    },
+    {
+      "noteId": "67aafb26000000002901c590",
+      "keyword": "书法",
+      "xsecToken": "ABRGbVil-_OMfxNj-vB4T6UWSOHQtueTWiUuHvHnmFj-w=",
+      "title": "搭子们今天体验乱搭的快乐",
+      "desc": "#自学书法[话题]# #零基础学习书法[话题]# #贵在坚持[话题]#",
+      "type": "video",
+      "tagList": [
+        {
+          "id": "5d307e6f000000000f009483",
+          "name": "自学书法",
+          "type": "topic"
+        },
+        {
+          "id": "618b2940000000000101df09",
+          "name": "零基础学习书法",
+          "type": "topic"
+        },
+        {
+          "id": "5c56f1a3000000000e015559",
+          "name": "贵在坚持",
+          "type": "topic"
+        }
+      ],
+      "user": {
+        "userId": "5daac07e00000000010049f7",
+        "nickname": "小墨爱书法",
+        "avatar": "https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo30pcacsfnjs605ndao1v08ifnllkumr8"
+      },
+      "interactInfo": {
+        "likedCount": "10万+",
+        "collectedCount": "2万",
+        "commentCount": "1041",
+        "shareCount": "2601"
+      },
+      "imageList": [
+        {
+          "url": "",
+          "width": 1080,
+          "height": 1440
+        }
+      ],
+      "time": 1739258662000,
+      "lastUpdateTime": 1739258663000,
+      "shareInfo": {
+        "un_share": false
+      }
+    },
+    {
+      "noteId": "68d3de06000000000e00c0eb",
+      "keyword": "书法",
+      "xsecToken": "ABfUNzI22swWEVNxKZXLhCQDX446k7nyxHo83kFfJDjyw=",
+      "title": "我发现，起号失败的书法博主都有这些共性",
+      "desc": "做书法号3个月涨粉5000+，回头看那些没做起来的号，发现失败的原因真的太相似了...今天把踩过的坑扒开给你们看，新手别再重蹈覆辙!🤫\n1️⃣内容太“散”，没有价值锚点\n✅今天发一张临帖作业，明天晒新买的毛笔，后天录个写字的快镜头。粉丝根本不知道关注你能获得什么。\n✅我前期就犯过这错，后来专注“零基础楷书入门”，每条视频封面都打上“小白也能懂的书法课”标签，现在粉丝刷到就知道：“哦，是那个教入门干货的老师。”\n\t\n2️⃣只晒“成果”，没有“过程共鸣”\n✅一幅写好的漂亮字是基础，但光发“看我写的多好看”，粉丝看几次就无感了。\n✅换个角度：拍自己写崩了的瞬间（“练了100遍的‘永’字，还是像一坨墨疙瘩”）、洗笔洗到满手黑的狼狈（“书法生的手，没有干净的可能”）。\n\t\n3️⃣太“仙气”，忘了“烟火气”\n✅总想着展示“书法家”状态：环境必须雅致，作品必须完美。但真实的书法练习哪有天天出精品？\n✅我经常拍墨滴到纸上、字写歪了懊恼捶桌的场景，配文“今日书法状态：人菜瘾大”，反而评论区炸了，大家都在晒自己的“翻车”作品。这种“不完美”才是最强的粘合剂。\n\t\n4️⃣不会“抓热点”，但爱“追热点”\n✅看到别人发“挑战瘦金体”就跟着写，看到“用毛笔写流行歌词”也跟风，结果热点过了，你的视频还没什么流量。\n\t\n5️⃣舍不得“出声”，少了“人格魅力”\n✅总觉得“粉丝是来看字的，我不用说话”，但书法号的核心是“人+字”的情感与知识传递。\n✅多说说这个字的结构技巧，那个笔画的历史渊源，粉丝留言突然变多：“老师讲得真清楚”、“听你说话很治愈”。漂亮的字是敲门砖，你的讲解和陪伴才是留住粉丝的关键。\n\t\n6️⃣数据差就“灰心”，不懂“复盘优化”\n✅发了10条视频没流量就放弃，却没想过：是不是封面太暗？标题太文艺不够直接？内容太枯燥没人能看完？\n\t\n其实书法号真的不难做，毕竟大家对传统文化有天然的亲近感。但比起“展示书法”，更重要的是“让粉丝透过书法看到你”——你的教学方法、你的坚持、你对书法的理解和热爱，才是让别人持续关注你的理由。#热点[话题]# #书法[话题]# #书法老师[话题]# #硬笔书法[话题]# #书法的力量[话题]# #书法时间到[话题]# #如何做博主[话题]# #书法是一种生活状态[话题]# #软笔书法[话题]# #毛笔字[话题]#",
+      "type": "normal",
+      "tagList": [
+        {
+          "id": "5c46829d000000000e009c0a",
+          "name": "热点",
+          "type": "topic"
+        },
+        {
+          "name": "书法",
+          "type": "topic",
+          "id": "5be3a82e695ea90001e82ad9"
+        },
+        {
+          "id": "5f1915a50000000001006652",
+          "name": "书法老师",
+          "type": "topic"
+        },
+        {
+          "id": "5bec0dd8c3c3cb0001b80762",
+          "name": "硬笔书法",
+          "type": "topic"
+        },
+        {
+          "id": "60e94fc2000000000101ed3b",
+          "name": "书法的力量",
+          "type": "topic"
+        },
+        {
+          "id": "63427f7c000000000101c865",
+          "name": "书法时间到",
+          "type": "topic"
+        },
+        {
+          "id": "600b1d5b000000000100b1d8",
+          "name": "如何做博主",
+          "type": "topic"
+        },
+        {
+          "id": "626653830000000001006176",
+          "name": "书法是一种生活状态",
+          "type": "topic"
+        },
+        {
+          "id": "5cda3753000000000e00d7c3",
+          "name": "软笔书法",
+          "type": "topic"
+        },
+        {
+          "id": "5be5307c17dadd0001ac2b23",
+          "name": "毛笔字",
+          "type": "topic"
+        }
+      ],
+      "user": {
+        "userId": "670cd36c000000000d027392",
+        "nickname": "书法小栀",
+        "avatar": "https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo31matj30qmg705pocqdm3cssidlu3ss0"
+      },
+      "interactInfo": {
+        "likedCount": "612",
+        "collectedCount": "661",
+        "commentCount": "34",
+        "shareCount": "133"
+      },
+      "imageList": [
+        {
+          "url": "",
+          "width": 1235,
+          "height": 1680
+        }
+      ],
+      "time": 1758715398000,
+      "lastUpdateTime": 1758715399000,
+      "shareInfo": {
+        "un_share": false
+      }
+    },
+    {
+      "noteId": "69e219ca000000001f0061b5",
+      "keyword": "书法",
+      "xsecToken": "ABcZn6smJc1yEK3LO4j_3RnC7tiC4HT7ExnHQmmF2em00=",
+      "title": "",
+      "desc": "书法日常",
+      "type": "normal",
+      "tagList": [],
+      "user": {
+        "userId": "665fc9e7000000000700687f",
+        "nickname": "有利就有我",
+        "avatar": "https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo31rd2fn30no005pivp7jhoq3v5mtgjrg"
+      },
+      "interactInfo": {
+        "likedCount": "1288",
+        "collectedCount": "41",
+        "commentCount": "106",
+        "shareCount": "3"
+      },
+      "imageList": [
+        {
+          "url": "",
+          "width": 960,
+          "height": 1282
+        }
+      ],
+      "time": 1776425419000,
+      "lastUpdateTime": 1776425419000,
+      "shareInfo": {
+        "un_share": false
+      }
+    },
+    {
+      "noteId": "66fe90d2000000001902d70e",
+      "keyword": "书法",
+      "xsecToken": "AByxhZewYntYAJvIAGgKY9Zz9eWPTmmvsV_wHHOyD12M8=",
+      "title": "一秒认识书法！",
+      "desc": "新手小白想学书法，是不是无从下手，快来看这篇！\n#书法教学[话题]# #书法入门[话题]# #书法培训[话题]# #提高艺术鉴赏水平[话题]#  #书法[话题]# #书法练习打卡[话题]# #书法日课[话题]# #书法时间到[话题]# #书法的力量[话题]# #搞的就是艺术[话题]#",
+      "type": "normal",
+      "tagList": [
+        {
+          "id": "5c6b5191000000000d032bb0",
+          "name": "书法教学",
+          "type": "topic"
+        },
+        {
+          "name": "书法入门",
+          "type": "topic",
+          "id": "5cfeefe9000000000d01b1be"
+        },
+        {
+          "id": "5c835b9e000000000e00f66a",
+          "name": "书法培训",
+          "type": "topic"
+        },
+        {
+          "id": "6125191d0000000001007f77",
+          "name": "提高艺术鉴赏水平",
+          "type": "topic"
+        },
+        {
+          "id": "5be3a82e695ea90001e82ad9",
+          "name": "书法",
+          "type": "topic"
+        },
+        {
+          "name": "书法练习打卡",
+          "type": "topic",
+          "id": "5ddbd0750000000001007700"
+        },
+        {
+          "name": "书法日课",
+          "type": "topic",
+          "id": "5c1c99410000000009006e74"
+        },
+        {
+          "name": "书法时间到",
+          "type": "topic",
+          "id": "63427f7c000000000101c865"
+        },
+        {
+          "id": "60e94fc2000000000101ed3b",
+          "name": "书法的力量",
+          "type": "topic"
+        },
+        {
+          "id": "63761cf400000000010020d2",
+          "name": "搞的就是艺术",
+          "type": "topic"
+        }
+      ],
+      "user": {
+        "userId": "66d96280000000001d020dcb",
+        "nickname": "冰心书法",
+        "avatar": "https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo31topo71t6o605pmpca07c3ebklldet8"
+      },
+      "interactInfo": {
+        "likedCount": "1.4万",
+        "collectedCount": "1.1万",
+        "commentCount": "232",
+        "shareCount": "665"
+      },
+      "imageList": [
+        {
+          "url": "",
+          "width": 1242,
+          "height": 1660
+        },
+        {
+          "url": "",
+          "width": 1242,
+          "height": 1660
+        },
+        {
+          "url": "",
+          "width": 1242,
+          "height": 1660
+        },
+        {
+          "url": "",
+          "width": 1242,
+          "height": 1660
+        },
+        {
+          "url": "",
+          "width": 1242,
+          "height": 1660
+        }
+      ],
+      "time": 1727959250000,
+      "lastUpdateTime": 1727959251000,
+      "shareInfo": {
+        "un_share": false
+      }
+    },
+    {
+      "noteId": "69a3d8b20000000028020fad",
+      "keyword": "书法",
+      "xsecToken": "ABnK25_KLc1qrazzPZomLT0_xTYoKHb4V4mweFEU_ZV7A=",
+      "title": "三种书体的《陋室铭》",
+      "desc": "陈国昭用行书、楷书和草书三种书体创作刘禹锡的《陋室铭》#书法[话题]# #陋室铭[话题]#",
+      "type": "normal",
+      "tagList": [
+        {
+          "id": "5be3a82e695ea90001e82ad9",
+          "name": "书法",
+          "type": "topic"
+        },
+        {
+          "id": "5e76bed10000000001009048",
+          "name": "陋室铭",
+          "type": "topic"
+        }
+      ],
+      "user": {
+        "userId": "558e3ff3f5a2634941b372e0",
+        "nickname": "字曰",
+        "avatar": "https://sns-avatar-qc.xhscdn.com/avatar/5e0445e72863550001f8fe05.jpg"
+      },
+      "interactInfo": {
+        "likedCount": "1315",
+        "collectedCount": "890",
+        "commentCount": "38",
+        "shareCount": "237"
+      },
+      "imageList": [
+        {
+          "url": "",
+          "width": 1400,
+          "height": 2065
+        },
+        {
+          "url": "",
+          "width": 1127,
+          "height": 2048
+        },
+        {
+          "url": "",
+          "width": 1218,
+          "height": 1744
+        }
+      ],
+      "time": 1772355639000,
+      "lastUpdateTime": 1772345522000,
+      "shareInfo": {
+        "un_share": false
+      }
+    },
+    {
+      "noteId": "6900261d000000000501238b",
+      "keyword": "书法",
+      "xsecToken": "ABfZkuWMCVm_x3M1YTzGpF_RolgJn5VLbDJorfx-QLxmc=",
+      "title": "相逢已是上上签，何须相思煮余年。",
+      "desc": "#书法日课[话题]# #相见便是缘[话题]# #写字是一种态度[话题]# #小楷[话题]##诗词的浪漫[话题]#",
+      "type": "normal",
+      "tagList": [
+        {
+          "type": "topic",
+          "id": "5c1c99410000000009006e74",
+          "name": "书法日课"
+        },
+        {
+          "name": "相见便是缘",
+          "type": "topic",
+          "id": "63d4a4a400000000010097d2"
+        },
+        {
+          "id": "5f112566000000000101e631",
+          "name": "写字是一种态度",
+          "type": "topic"
+        },
+        {
+          "id": "5bfb8a7fd71bbf0001cbc5fd",
+          "name": "小楷",
+          "type": "topic"
+        },
+        {
+          "id": "630ae6cf0000000001001441",
+          "name": "诗词的浪漫",
+          "type": "topic"
+        }
+      ],
+      "user": {
+        "userId": "63d71796000000002702831f",
+        "nickname": "宁之爱书写",
+        "avatar": "https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo31k091e9fj4505oun2ub9t0ovm525gl8"
+      },
+      "interactInfo": {
+        "likedCount": "3042",
+        "collectedCount": "1313",
+        "commentCount": "351",
+        "shareCount": "121"
+      },
+      "imageList": [
+        {
+          "url": "",
+          "width": 1682,
+          "height": 3892
+        }
+      ],
+      "time": 1761617437000,
+      "lastUpdateTime": 1761617513000,
+      "shareInfo": {
+        "un_share": false
+      }
+    },
+    {
+      "noteId": "69e384430000000023022bfc",
+      "keyword": "书法",
+      "xsecToken": "ABrEf3--OwDiKCn6EQB3IDfeSJgzUi8_To2WMECrU9jfk=",
+      "title": "练习书法",
+      "desc": "#感恩父母[话题]# #愿天下所有的父母身体健康[话题]# #愿天下父母健康长寿[话题]# #愿天下所有老人都健康长寿[话题]# #家人最重要[话题]# #愿所有人平安健康[话题]# #身体健康[话题]# #书法作品[话题]# #身体健康才是福[话题]# #父母健康[话题]#",
+      "type": "normal",
+      "tagList": [
+        {
+          "id": "5c3204360000000009027925",
+          "name": "感恩父母",
+          "type": "topic"
+        },
+        {
+          "id": "61d26d4700000000010007bd",
+          "name": "愿天下所有的父母身体健康",
+          "type": "topic"
+        },
+        {
+          "id": "611f57cd000000000100140e",
+          "name": "愿天下父母健康长寿",
+          "type": "topic"
+        },
+        {
+          "id": "625a43740000000001007392",
+          "name": "愿天下所有老人都健康长寿",
+          "type": "topic"
+        },
+        {
+          "name": "家人最重要",
+          "type": "topic",
+          "id": "5c21bf0d000000000301193c"
+        },
+        {
+          "type": "topic",
+          "id": "610752030000000001003280",
+          "name": "愿所有人平安健康"
+        },
+        {
+          "id": "5be43351f4fc960001f969e1",
+          "name": "身体健康",
+          "type": "topic"
+        },
+        {
+          "id": "5c43ce2b000000000f0352f6",
+          "name": "书法作品",
+          "type": "topic"
+        },
+        {
+          "id": "6333b48c000000000101f96e",
+          "name": "身体健康才是福",
+          "type": "topic"
+        },
+        {
+          "id": "5bfd57e32698c300014d3b02",
+          "name": "父母健康",
+          "type": "topic"
+        }
+      ],
+      "user": {
+        "userId": "6713b9b7000000001d032c57",
+        "nickname": "松松的潦草小狗",
+        "avatar": "https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo31scusghq5c005pojn6rneb2n1pnvp6o"
+      },
+      "interactInfo": {
+        "likedCount": "249",
+        "collectedCount": "9",
+        "commentCount": "13",
+        "shareCount": "0"
+      },
+      "imageList": [
+        {
+          "url": "",
+          "width": 1776,
+          "height": 2364
+        }
+      ],
+      "time": 1776518211000,
+      "lastUpdateTime": 1776518211000,
+      "shareInfo": {
+        "un_share": false
+      }
+    },
+    {
+      "noteId": "69bd269b000000001d01b872",
+      "keyword": "书法",
+      "xsecToken": "ABVCtMTU7DRkyMrXhRYV8hR73HC0ugGvqy8f3CUl7O32o=",
+      "title": "有想练字的朋友吗？认真带！",
+      "desc": "本人90后，专研书法十余年，擅长篆书、隶书、楷书、行书等，想带几个弟子学书法，来就认真带！\n要求：50/月\n1、自己有工具，一支笔一张纸\n2、每周有2-3小时学习\n3、蕞好是零基础，容易教会\n4、不三分钟热度，真心想学\n5、软笔/硬笔：篆隶楷行四体皆可教\n#书法入门[话题]#  #书法[话题]# #写一手好字惊艳所有人[话题]#  #书法教学[话题]# #书法时间到[话题]# #硬笔规范字[话题]# #硬笔书法[话题]# #行楷[话题]# #成人书法[话题]# #书法[话题]#   #书法老师[话题]#   #毛笔书法[话题]#   #书法学习[话题]#   #爱书法爱生活[话题]#   #成人书法[话题]#   #练字是一种生活[话题]#   #书法教学[话题]#   #书法日课[话题]#   #我的书法分享[话题]#  #我写字超好看[话题]#   #楷书[话题]#   #篆书[话题]#   #隶书[话题]#   #行书[话题]#   #硬笔书法[话题]#   #毛笔书法[话题]#   #零基础学书法[话题]#",
+      "type": "normal",
+      "tagList": [
+        {
+          "id": "5cfeefe9000000000d01b1be",
+          "name": "书法入门",
+          "type": "topic"
+        },
+        {
+          "id": "5be3a82e695ea90001e82ad9",
+          "name": "书法",
+          "type": "topic"
+        },
+        {
+          "id": "62e7a1bf000000000101d959",
+          "name": "写一手好字惊艳所有人",
+          "type": "topic"
+        },
+        {
+          "name": "书法教学",
+          "type": "topic",
+          "id": "5c6b5191000000000d032bb0"
+        },
+        {
+          "id": "63427f7c000000000101c865",
+          "name": "书法时间到",
+          "type": "topic"
+        },
+        {
+          "id": "60080a32000000000100a36d",
+          "name": "硬笔规范字",
+          "type": "topic"
+        },
+        {
+          "type": "topic",
+          "id": "5bec0dd8c3c3cb0001b80762",
+          "name": "硬笔书法"
+        },
+        {
+          "id": "5c3ff133000000000e0206c1",
+          "name": "行楷",
+          "type": "topic"
+        },
+        {
+          "id": "5c7fc610000000000f005ee2",
+          "name": "成人书法",
+          "type": "topic"
+        },
+        {
+          "id": "5f1915a50000000001006652",
+          "name": "书法老师",
+          "type": "topic"
+        },
+        {
+          "id": "5bff4e7602ebf80001cf077f",
+          "name": "毛笔书法",
+          "type": "topic"
+        },
+        {
+          "id": "5c2d77cc000000000901b3e2",
+          "name": "书法学习",
+          "type": "topic"
+        },
+        {
+          "name": "爱书法爱生活",
+          "type": "topic",
+          "id": "619a149900000000010005db"
+        },
+        {
+          "type": "topic",
+          "id": "61091d170000000001002802",
+          "name": "练字是一种生活"
+        },
+        {
+          "id": "5c1c99410000000009006e74",
+          "name": "书法日课",
+          "type": "topic"
+        },
+        {
+          "id": "5eb3985f0000000001004280",
+          "name": "我的书法分享",
+          "type": "topic"
+        },
+        {
+          "type": "topic",
+          "id": "598015e581f6d138bb321465",
+          "name": "我写字超好看"
+        },
+        {
+          "id": "5c3d3fd3000000000f02d016",
+          "name": "楷书",
+          "type": "topic"
+        },
+        {
+          "id": "5c3558d5000000000a00c19d",
+          "name": "篆书",
+          "type": "topic"
+        },
+        {
+          "id": "5be409f148ad5e000187b7c1",
+          "name": "隶书",
+          "type": "topic"
+        },
+        {
+          "id": "5bf579b31c593c00018d62ed",
+          "name": "行书",
+          "type": "topic"
+        },
+        {
+          "type": "topic",
+          "id": "5e723c380000000001006f5d",
+          "name": "零基础学书法"
+        }
+      ],
+      "user": {
+        "userId": "69548f590000000032015e5c",
+        "nickname": "巽羽书法",
+        "avatar": "https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo31sog2tbelc005qakhtcsinis047h4io"
+      },
+      "interactInfo": {
+        "likedCount": "2946",
+        "collectedCount": "1537",
+        "commentCount": "2533",
+        "shareCount": "230"
+      },
+      "imageList": [
+        {
+          "url": "",
+          "width": 1080,
+          "height": 1440
+        },
+        {
+          "url": "",
+          "width": 1200,
+          "height": 1600
+        },
+        {
+          "url": "",
+          "width": 1080,
+          "height": 1440
+        },
+        {
+          "url": "",
+          "width": 1080,
+          "height": 1440
+        },
+        {
+          "url": "",
+          "width": 1080,
+          "height": 1440
+        }
+      ],
+      "time": 1774003867000,
+      "lastUpdateTime": 1783051774000,
+      "shareInfo": {
+        "un_share": false
+      }
+    },
+    {
+      "noteId": "69e5a023000000002202be06",
+      "keyword": "书法",
+      "xsecToken": "ABst04njkcWOKV83Hk3RdX2fPiYJk12WBHOMNQKu7R13I=",
+      "title": "真的想看看大家写的书法，最好加上学习时间",
+      "desc": "大家晒一下书法作品欣赏一下吧，尽可能加上学习时间，比如一天，一个月，半年，我们一起努力学习，放心晒，恶评我来删#晒晒最近的练字作品[话题]# #毛笔字[话题]# #书法练习[话题]# #书法分享[话题]#",
+      "type": "normal",
+      "tagList": [
+        {
+          "id": "64eefd0c0000000018019f6f",
+          "name": "晒晒最近的练字作品",
+          "type": "topic"
+        },
+        {
+          "type": "topic",
+          "id": "5be5307c17dadd0001ac2b23",
+          "name": "毛笔字"
+        },
+        {
+          "id": "5c0764e27e831f00010bb8c7",
+          "name": "书法练习",
+          "type": "topic"
+        },
+        {
+          "id": "5d88d227000000000103da4e",
+          "name": "书法分享",
+          "type": "topic"
+        }
+      ],
+      "user": {
+        "userId": "5ce5098f0000000012009ffb",
+        "nickname": "阿雯素墨",
+        "avatar": "https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo320iub5p2lm005n75167kh7vr321vbm0"
+      },
+      "interactInfo": {
+        "likedCount": "177",
+        "collectedCount": "52",
+        "commentCount": "1335",
+        "shareCount": "9"
+      },
+      "imageList": [
+        {
+          "url": "",
+          "width": 1080,
+          "height": 1920
+        }
+      ],
+      "time": 1776656419000,
+      "lastUpdateTime": 1776656420000,
+      "shareInfo": {
+        "un_share": false
+      }
+    },
+    {
+      "noteId": "6a43d88f00000000080337c0",
+      "keyword": "书法",
+      "xsecToken": "AB04sOb3IkRVgizdQTdTFH1RZLgDLIRx4NtlFJRX6MotQ=",
+      "title": "",
+      "desc": "成人硬笔书法怎么练呢？没有没有推荐的线上课？ 一位马上步入40＋女人想写一手好字的觉醒",
+      "type": "normal",
+      "tagList": [],
+      "user": {
+        "userId": "5a4ad0b84eacab0736247ff8",
+        "nickname": "小桃酥.",
+        "avatar": "https://sns-avatar-qc.xhscdn.com/avatar/637e1b9698495549306cb970.jpg"
+      },
+      "interactInfo": {
+        "likedCount": "13",
+        "collectedCount": "3",
+        "commentCount": "48",
+        "shareCount": "3"
+      },
+      "imageList": [
+        {
+          "url": "",
+          "width": 1200,
+          "height": 1600
+        }
+      ],
+      "time": 1782831247000,
+      "lastUpdateTime": 1782831248000,
+      "shareInfo": {
+        "un_share": false
+      }
+    },
+    {
+      "noteId": "6a48c1ba0000000016026ca9",
+      "keyword": "书法",
+      "xsecToken": "AB2W6nP5urHR2l8RmNmN2rF0yO1y1K6n-tZTxcAyXtsG0=",
+      "title": "",
+      "desc": "想给孩子找个书法班上，目前试听了两家，一家是机构，教孩子顿笔，握笔姿势，可以每晚去上课，一家是自己教，教了一个多小时的控笔，改握笔姿势，说是他那不教顿笔，控笔会让书写速度慢，时间上只有周六有时间去上课，价格差不多，该选哪家呢？#书法学习[话题]#",
+      "type": "normal",
+      "tagList": [
+        {
+          "id": "5c2d77cc000000000901b3e2",
+          "name": "书法学习",
+          "type": "topic"
+        }
+      ],
+      "user": {
+        "userId": "5e53aeb30000000001009b6b",
+        "nickname": "夏末未至",
+        "avatar": "https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo31bp7upf510605nijlqpg96rbgcf5geg"
+      },
+      "interactInfo": {
+        "likedCount": "57",
+        "collectedCount": "34",
+        "commentCount": "355",
+        "shareCount": "10"
+      },
+      "imageList": [
+        {
+          "url": "",
+          "width": 1200,
+          "height": 1600
+        }
+      ],
+      "time": 1783153082000,
+      "lastUpdateTime": 1783153082000,
+      "shareInfo": {
+        "un_share": false
+      }
+    },
+    {
+      "noteId": "69931940000000001a02daca",
+      "keyword": "书法",
+      "xsecToken": "ABOQ7ZwwpBGYQZGbafDJ7KFjoPOkn1QQEtv9QYocIMv9E=",
+      "title": "",
+      "desc": "2025，我的书法班人数再创新高；我的股票收益再创新高；我的小红书粉丝数成为全常州书法老师中最高\n2026，愿我继续在书法的世界里落笔从容，心有山海；在股市里知行合一，复利奔跑[害羞R][害羞R][害羞R]",
+      "type": "normal",
+      "tagList": [],
+      "user": {
+        "userId": "5f3009870000000001004f23",
+        "nickname": "青山书法王老师",
+        "avatar": "https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo31n2b0bd3mg6g5npg163g8jp3mo1sj70"
+      },
+      "interactInfo": {
+        "likedCount": "325",
+        "collectedCount": "23",
+        "commentCount": "237",
+        "shareCount": "25"
+      },
+      "imageList": [
+        {
+          "url": "",
+          "width": 1080,
+          "height": 2400
+        },
+        {
+          "url": "",
+          "width": 840,
+          "height": 422
+        },
+        {
+          "url": "",
+          "width": 1053,
+          "height": 1132
+        }
+      ],
+      "time": 1771247936000,
+      "lastUpdateTime": 1771247937000,
+      "shareInfo": {
+        "un_share": false
+      }
+    },
+    {
+      "noteId": "6a2fa7dc000000001702c61c",
+      "keyword": "书法",
+      "xsecToken": "ABaBYBHHOnDvLMMF4i3yIrvtMkXQMmgvAGp37RizKbaUk=",
+      "title": "",
+      "desc": "打字也是一种文化",
+      "type": "normal",
+      "tagList": [],
+      "user": {
+        "userId": "696e28c3000000003700025e",
+        "nickname": "温文尔雅",
+        "avatar": "https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo31rh8nl4j0a6g5qbe531to0iupn0hjr0"
+      },
+      "interactInfo": {
+        "likedCount": "119",
+        "collectedCount": "37",
+        "commentCount": "697",
+        "shareCount": "6"
+      },
+      "imageList": [
+        {
+          "url": "",
+          "width": 1080,
+          "height": 1356
+        }
+      ],
+      "time": 1781508060000,
+      "lastUpdateTime": 1781508061000,
+      "shareInfo": {
+        "un_share": false
+      }
+    },
+    {
+      "noteId": "66d3d536000000001d03a2fe",
+      "keyword": "书法",
+      "xsecToken": "ABK_o8XwR82ZiqQE08ZEH4g3K-xQtROsDx9zbrBc3qoLQ=",
+      "title": "书法班日常别光拍孩子上课的样子了",
+      "desc": "作为一位书法老师，在朋友圈展示自己的专业和亲和力是赢得家长信任的关键。\n别再只拍孩子的上课日常了，以下是一些建议，可以帮助你更好地利用朋友圈来展示自己：\n\t\n[樱花R]学生作品展示：\n[看R]发学生书法作品的前后对比图，展示他们的进步和你的教学质量。\n[看R]分享学生在书法比赛中获奖的作品，强调你的教学成果。\n[樱花R]课堂实录：\n[看R]捕捉并分享学生专注练习的瞬间，展示他们对书法的热爱和投入。\n[看R]记录课堂上的有趣互动，如学生之间的友好竞赛，或是你如何用创意方法激发学生兴趣。\n[樱花R]教学成果：\n[看R]分享学生的学习心得和家长的正面反馈，用真实的声音证明你的教学效果。\n[看R]展示学生通过学习书法带来的变化，如耐心、专注力的提升。\n[樱花R]个人作品：\n[看R]定期发布自己的书法创作，展示你的艺术才华和专业水准。\n[看R]分享你的创作过程，让家长和学生看到你对书法艺术的热情和执着。\n[樱花R]书法活动：\n[看R]宣传即将举行的书法比赛或活动，鼓励学生参与并展示他们的才华。\n[看R]分享比赛或活动的现场照片和回顾，记录学生的成长和经历。\n[樱花R]书法艺术欣赏：\n[看R]分享历史上著名书法家的作品，简单介绍其艺术特点和历史背景。\n[看R]引导学生欣赏并学习传统书法艺术，培养他们的审美能力。\n[樱花R]书法趣闻：\n[看R]分享书法相关的小故事或趣闻轶事，增加朋友圈的趣味性。\n[看R]通过轻松愉快的内容，让学生和家长在轻松的氛围中了解书法文化。\n[樱花R]传统文化元素：\n[看R]结合诗词、印章等传统文化元素，展示书法艺术的深厚底蕴。\n[看R]通过展示与书法相关的文化知识，提升自己的文化品位和教育价值。\n记得，朋友圈的内容要真实、自然，避免过度包装或夸大其词。通过持续地分享有价值的内容，你不仅能展示自己的专业能力，还能建立起与家长和学生之间的信任和联系。#书法作品形式[话题]# #书法培训[话题]# #传承书法艺术[话题]# #少儿书法[话题]# #教培机构[话题]#",
+      "type": "normal",
+      "tagList": [
+        {
+          "id": "6260f5ac000000000100bf79",
+          "name": "书法作品形式",
+          "type": "topic"
+        },
+        {
+          "type": "topic",
+          "id": "5c835b9e000000000e00f66a",
+          "name": "书法培训"
+        },
+        {
+          "name": "传承书法艺术",
+          "type": "topic",
+          "id": "620c81cc00000000010053a1"
+        },
+        {
+          "id": "5cc853df000000000d005872",
+          "name": "少儿书法",
+          "type": "topic"
+        },
+        {
+          "id": "601d0c01000000000100894e",
+          "name": "教培机构",
+          "type": "topic"
+        }
+      ],
+      "user": {
+        "userId": "5ca45a5b000000001703db55",
+        "nickname": "Nelly奶粒",
+        "avatar": "https://sns-avatar-qc.xhscdn.com/avatar/62a17b90b664f9b166c29382.jpg"
+      },
+      "interactInfo": {
+        "likedCount": "1140",
+        "collectedCount": "1252",
+        "commentCount": "24",
+        "shareCount": "335"
+      },
+      "imageList": [
+        {
+          "url": "",
+          "width": 1920,
+          "height": 2560
+        }
+      ],
+      "time": 1725158710000,
+      "lastUpdateTime": 1725158711000,
+      "shareInfo": {
+        "un_share": false
+      }
+    },
+    {
+      "noteId": "6a4119d0000000000803e8d2",
+      "keyword": "书法",
+      "xsecToken": "ABEF6fzrKj8Wsall8nQkX4ONgxpO9Us6eFaGnq2-CsLi0=",
+      "title": "",
+      "desc": "有没有温州市区的练字搭子，写硬笔，有时候一个人静不下心（心理上有点障碍难以集中注意力）[哭惹R]#书法老师[话题]# #日常练字[话题]# #温州[话题]# #搭子[话题]# #书法搭子[话题]# #鹿城[话题]# #龙湾[话题]# #瓯海[话题]# #温州图书馆[话题]# #城市书房[话题]# #温州搭子[话题]# #行楷[话题]# 不是练字的其实也可以但是需要你很专注做事[皱眉R]初高中内容还记得也可以交流倘若需要的话[捂脸R]",
+      "type": "normal",
+      "tagList": [
+        {
+          "type": "topic",
+          "id": "5f1915a50000000001006652",
+          "name": "书法老师"
+        },
+        {
+          "id": "5c5e8e3b000000000f03da21",
+          "name": "日常练字",
+          "type": "topic"
+        },
+        {
+          "id": "540e746eb4c4d60f94ee755d",
+          "name": "温州",
+          "type": "topic"
+        },
+        {
+          "type": "topic",
+          "id": "618f8aed0000000001008a8f",
+          "name": "搭子"
+        },
+        {
+          "id": "64027b32000000001803931c",
+          "name": "书法搭子",
+          "type": "topic"
+        },
+        {
+          "id": "5e7ad02c0000000001006aa2",
+          "name": "鹿城",
+          "type": "topic"
+        },
+        {
+          "type": "topic",
+          "id": "5f5223b9000000000101cdf2",
+          "name": "龙湾"
+        },
+        {
+          "id": "60c441fa000000000101eb47",
+          "name": "瓯海",
+          "type": "topic"
+        },
+        {
+          "name": "温州图书馆",
+          "type": "topic",
+          "id": "5dbee77d000000000103a9d9"
+        },
+        {
+          "id": "5d258229000000000f03636d",
+          "name": "城市书房",
+          "type": "topic"
+        },
+        {
+          "id": "63e78ed5000000000100bbf3",
+          "name": "温州搭子",
+          "type": "topic"
+        },
+        {
+          "name": "行楷",
+          "type": "topic",
+          "id": "5c3ff133000000000e0206c1"
+        }
+      ],
+      "user": {
+        "userId": "66018aec000000000600df2c",
+        "nickname": "余烬",
+        "avatar": "https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo322281q4f7k005pg1hbm1hnpcvl7ffqo"
+      },
+      "interactInfo": {
+        "likedCount": "4",
+        "collectedCount": "0",
+        "commentCount": "8",
+        "shareCount": "1"
+      },
+      "imageList": [
+        {
+          "url": "",
+          "width": 1200,
+          "height": 1600
+        }
+      ],
+      "time": 1782651344000,
+      "lastUpdateTime": 1782651345000,
+      "shareInfo": {
+        "un_share": false
+      }
+    },
+    {
+      "noteId": "6a4f3d9d000000001c025910",
+      "keyword": "书法",
+      "xsecToken": "ABJgIYPayrBsfHo_eYimeytuFnhHj_DzfICH7keQ1qN_Y=",
+      "title": "自学书法，骂醒一个是一个！别想太天真",
+      "desc": "自学书法半年才懂：选对方向比瞎练更重要\n\t\n自学练字半年，最大的感悟就是：书法真的不是拼时间、拼数量的事。找对方法、避开新手常见误区，改掉自己的坏书写习惯，练字效率真的能提升一大截。\n\t\n入门打基础：稳稳扎根，不走歪路\n1. 别跟风乱选字帖\n很多新手刚开始练字，盲目跟风网红字帖、难度极高的古帖，风格太偏、技法太难，完全驾驭不了，越写越挫败。新手入门最稳妥的选择是唐楷，像《颜勤礼碑》《九成宫》，笔法规整、结构清晰，特别适合打基础。\n\t\n2. 忽视握笔和坐姿\n我刚开始只盯着写字，完全不注重姿势，每次练半小时手腕就又酸又累，长期下来还会养成坏毛病。新手直接用标准五指执笔法就够，笔杆控制在45到60度之间，姿势端正，练字才能持久不伤手。\n\t\n3. 跳过描红直接临摹\n不少人觉得描红没用，上手就直接对临，结果字形永远不准、结构混乱。正确的新手流程很简单：先花一两周描红，熟悉字体轮廓框架，再摹写找准笔画位置，最后再对临。日常练字可以按1:3的比例搭配描红和临写，慢慢把字写规整。\n\t\n进阶提分：拒绝内耗，高效精进\n1. 切忌贪多求快\n以前我每天狂写几十个字，看着特别用功，复盘却发现毫无进步。后来彻底调整方法，每天只精抠3到5个字，单个字反复练写，先打磨好起笔、行笔、收笔的细节，再调整字的疏密、倾斜结构，吃透一个字再练下一个，进步肉眼可见。\n\t\n2. 只动笔、不读帖\n单纯照着字帖照猫画虎，永远写不出字体的韵味。练字前一定要预留十分钟读帖，认真观察笔画的粗细、走向、轻重变化，读懂字体的书写逻辑，带着理解去临摹，才算有效练字。\n\t\n长期深耕：放平心态，稳步提升\n1. 急于自创字体\n很多人临摹还没学扎实，就急于自创风格、写怪异字体，写出来的字没有根基、杂乱无章。正确的节奏是先临摹做到形似，再慢慢意临，多看名家字帖吸收优点，循序渐进沉淀出自己的书写风格。\n\t\n2. 忽视章法与墨法\n平时只专注练单个字，不注重整篇书写，后期写整段、整幅字就会排版混乱、没有层次。建议每周抽一点时间通篇临摹原帖，感受字距、行距，练习墨色的浓淡干湿变化，提升整体篇章书写质感。\n#我的书法分享[话题]# #自学书法[话题]# #书法入门[话题]# #书法时间到[话题]# #今日书法练习[话题]# #书法打卡挑战[话题]# #书法是一种生活状态[话题]# #毛笔书法[话题]# #书法日课[话题]# #书法的力量[话题]#",
+      "type": "normal",
+      "tagList": [
+        {
+          "id": "5eb3985f0000000001004280",
+          "name": "我的书法分享",
+          "type": "topic"
+        },
+        {
+          "id": "5d307e6f000000000f009483",
+          "name": "自学书法",
+          "type": "topic"
+        },
+        {
+          "id": "5cfeefe9000000000d01b1be",
+          "name": "书法入门",
+          "type": "topic"
+        },
+        {
+          "id": "63427f7c000000000101c865",
+          "name": "书法时间到",
+          "type": "topic"
+        },
+        {
+          "id": "6183f17c00000000010033c9",
+          "name": "今日书法练习",
+          "type": "topic"
+        },
+        {
+          "id": "64e6d3400000000018019089",
+          "name": "书法打卡挑战",
+          "type": "topic"
+        },
+        {
+          "type": "topic",
+          "id": "626653830000000001006176",
+          "name": "书法是一种生活状态"
+        },
+        {
+          "id": "5bff4e7602ebf80001cf077f",
+          "name": "毛笔书法",
+          "type": "topic"
+        },
+        {
+          "id": "5c1c99410000000009006e74",
+          "name": "书法日课",
+          "type": "topic"
+        },
+        {
+          "id": "60e94fc2000000000101ed3b",
+          "name": "书法的力量",
+          "type": "topic"
+        }
+      ],
+      "user": {
+        "userId": "68157f27000000000a03cdc6",
+        "nickname": "爱吃小当家",
+        "avatar": "https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo31thgdcae5k005q0lfsjinje6vpfo2tg"
+      },
+      "interactInfo": {
+        "likedCount": "5",
+        "collectedCount": "4",
+        "commentCount": "0",
+        "shareCount": "0"
+      },
+      "imageList": [
+        {
+          "url": "",
+          "width": 3024,
+          "height": 4032
+        },
+        {
+          "url": "",
+          "width": 3024,
+          "height": 4032
+        },
+        {
+          "url": "",
+          "width": 3024,
+          "height": 4032
+        },
+        {
+          "url": "",
+          "width": 3024,
+          "height": 4032
+        },
+        {
+          "url": "",
+          "width": 3024,
+          "height": 4032
+        },
+        {
+          "url": "",
+          "width": 3024,
+          "height": 4032
+        },
+        {
+          "url": "",
+          "width": 3024,
+          "height": 4032
+        },
+        {
+          "url": "",
+          "width": 3024,
+          "height": 4032
+        }
+      ],
+      "time": 1783579202000,
+      "lastUpdateTime": 1783578014000,
+      "shareInfo": {
+        "un_share": false
+      }
+    },
+    {
+      "noteId": "6858f70000000000170307a9",
+      "keyword": "书法",
+      "xsecToken": "ABy1cI569r_9kYIetYPd29vDWJM5Z-8nh_N-l0bV3XWCU=",
+      "title": "女生强大到可怕的十大表现！！会书法",
+      "desc": "女生强大到可怕的表现：练书法。书法在各个方面都能够提升自己\n\t\n10条书法入门硬核建议\n1. 临摹要对临：别用描红和水写布，直接对照字帖在毛边纸上写，逼自己观察笔画细节。\n2. 书体入门顺序：隶书＞篆书＞楷书，隶书选《曹全碑》，楷书建议从颜体入手，别学我从欧体开始，改用笔习惯太难！楷书可用花间居早春笔。\n3. 笔画与单字穿插练：练“辶”就写“远”“运”“道”，在实际字中理解偏旁结构变化。\n4. 高效自学流程：先自己临单字→看教学视频（推荐陈忠建老师）→跟着模仿→脱离视频练到满意，一个字花1小时很正常。\n5. 初期慢写：哪怕写行书也要放慢速度，看清笔锋走向。\n6. 尽早悬腕：我因从小枕腕练小楷，后来写大字笔画放不开，改起来超痛苦！\n7. 毛笔跑毛处理：轻轻拉掉即可，别剪笔尖（可单独剪跑毛），不好用的笔可过段时间再试。\n8. 坚持练习：书法靠积累，别三天打鱼两天晒网，久了会打回原形。\n9. 别纠结工具：开局楼下文具店买笔纸墨就行，花间居的笔、骛东制造的墨汁性价比高，别等买齐再练，先动起来最重要。",
+      "type": "normal",
+      "tagList": [],
+      "user": {
+        "userId": "6585abaa000000001c03c31f",
+        "nickname": "我是小甜心",
+        "avatar": "https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo30t1ae1l4400g5pc5lel77govnqd81n8"
+      },
+      "interactInfo": {
+        "likedCount": "2090",
+        "collectedCount": "1055",
+        "commentCount": "42",
+        "shareCount": "50"
+      },
+      "imageList": [
+        {
+          "url": "",
+          "width": 2966,
+          "height": 3955
+        },
+        {
+          "url": "",
+          "width": 3024,
+          "height": 4032
+        },
+        {
+          "url": "",
+          "width": 3024,
+          "height": 4032
+        },
+        {
+          "url": "",
+          "width": 3024,
+          "height": 4032
+        }
+      ],
+      "time": 1750660864000,
+      "lastUpdateTime": 1750673480000,
+      "shareInfo": {
+        "un_share": false
+      }
+    },
+    {
+      "noteId": "695cb4b8000000000a029eae",
+      "keyword": "书法",
+      "xsecToken": "ABQnWAQT6pC3fT2Qo1-F-tzb4IVNXe8Nk33J1Q-KL7q90=",
+      "title": "",
+      "desc": "书法专业247.5分有希望吗？",
+      "type": "normal",
+      "tagList": [],
+      "user": {
+        "userId": "65f0393b000000000500b745",
+        "nickname": "叶舒华喝椰汁",
+        "avatar": "https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo31phqf696jq6g5pfg74th9dq5uphj1io"
+      },
+      "interactInfo": {
+        "likedCount": "14",
+        "collectedCount": "5",
+        "commentCount": "43",
+        "shareCount": "0"
+      },
+      "imageList": [
+        {
+          "url": "",
+          "width": 1200,
+          "height": 1600
+        }
+      ],
+      "time": 1767683256000,
+      "lastUpdateTime": 1767683257000,
+      "shareInfo": {
+        "un_share": false
+      }
+    },
+    {
+      "noteId": "698096f2000000000d00a1e9",
+      "keyword": "书法",
+      "xsecToken": "ABs5gj24Sd7vbabU5eSiKF0CDtJDnunOocSmBw7GMM2eI=",
+      "title": "《如果你开始学书法，会慢慢发现十个真相》",
+      "desc": "第一个真相：《终极馈赠 · 完整，是比成功更奢侈的事》\n“书法不一定让你成功，但一定让你更完整。”​ ✨\n“完整”是什么？​ 是你在横平竖直的重复里，学会了与自己的浮躁和解；是在一笔写坏后，依然有勇气提笔写下个字的韧性。它不帮你赢得世界，但帮你安顿好自己。​ 这份内在的丰盈与稳定，是任何外在标签都无法替代的奖赏。❤️\n💎真正的治愈，不是让你变得完美，而是让你学会，与不完美的自己温柔相处。\n\t\n第二个真相：《最先改变 · 你的节奏，与世界“反向”而行》\n练字一年，你会发现最大的变化是：变“慢”了！🐢\n我们习惯了被信息流裹挟，习惯了焦虑地追赶。而书法，像一个内置的“减速器”，强迫你在一笔一划的呼吸间，找回对时间的掌控感。这种“慢”，不是落后，而是你主动选择的、更有质感的生活节奏。🎵\n💎当所有人都在加速时，你能慢下来的定力，就是最大的奢侈。\n\t\n第三个真相：《认知颠覆 · 你的时间，正在产生“复利”》\n这种“复利能力”是什么？​ 是专注力、是耐心、是抗挫力。它不体现在你马上能卖出的作品上，而体现在你今后处理任何难题的从容心态里。​ 今天你为一笔“捺”投入的耐心，未来会成为你面对人生抉择时的沉稳底气。这，才是穿越时间的真正财富。\n💎最聪明的投资，是把时间花在那些让自己“内在增值”的事情上。\n\t\n第四个真相：《感官觉醒 · 你开始“不一样”地看世界》\n“三个月你可能看不到（字迹的）变化，但你会开始不一样地看世界。”​ 👁️\n你的感官被重新校准了。咖啡的拉花里看到了笔锋的流转，树叶的脉络中读出了结构的疏密，光影的切割仿佛墨色的浓淡。​ 世界不再是模糊的背景板，而成了充满细节与美感的“活字帖”。这种全新的“看见”，是书法赠予你最私密而奢侈的礼物。🎁\n💎书法不只训练你的手，更在升级你感知世界的“操作系统”。\n\t\n第五个真相：《情绪整理 · 你重新认识了“安静”的价值》\n它不给你即时的快乐刺激，而是给你一个容器、一个仪式，让你把白天的浮躁、焦虑、杂念，通过笔尖的提按，一一梳理、安放。​ 当最后一笔收起，心也随之澄净。这种“安静”，不是空洞，而是充满力量的秩序与平和。\n💎在喧闹的世界里，能让自己安静下来的能力，才是真正的“情绪自由”。\n\t\n#书法改变生活 #治愈自己 #个人成长 #情绪整理 #感知力 #长期主义 #书法 #练字 #慢生活 #新中式",
+      "type": "normal",
+      "tagList": [],
+      "user": {
+        "userId": "5ebaae48000000000101fc9d",
+        "nickname": "漫画学书法（每日更新）",
+        "avatar": "https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo31q7jn416no6g5nlqlp40bv4thr1kkn0"
+      },
+      "interactInfo": {
+        "likedCount": "334",
+        "collectedCount": "244",
+        "commentCount": "29",
+        "shareCount": "55"
+      },
+      "imageList": [
+        {
+          "url": "",
+          "width": 1672,
+          "height": 2508
+        },
+        {
+          "url": "",
+          "width": 1672,
+          "height": 2508
+        },
+        {
+          "url": "",
+          "width": 1672,
+          "height": 2508
+        },
+        {
+          "url": "",
+          "width": 1672,
+          "height": 2508
+        },
+        {
+          "url": "",
+          "width": 1672,
+          "height": 2508
+        }
+      ],
+      "time": 1770070920000,
+      "lastUpdateTime": 1770034931000,
+      "shareInfo": {
+        "un_share": false
+      }
+    },
+    {
+      "noteId": "6721dd62000000001b02e70b",
+      "keyword": "书法",
+      "xsecToken": "AB7G7-2VJ9VxBhTL92aizIqx_aLyrjEXaEea0_Ex4hmCY=",
+      "title": "赵孟頫真的太强了，越练越上头越写越爱写",
+      "desc": "人生难得几日闲，清茶一壶煮流年。\n忘却人间三千事，心宽无处不桃源。\n#今日书法练习[话题]# #我的书法分享[话题]# #每日练字打卡[话题]# #写字是一种生活[话题]# #书法时间到[话题]# #赵孟頫[话题]# #见字如面[话题]#",
+      "type": "normal",
+      "tagList": [
+        {
+          "id": "6183f17c00000000010033c9",
+          "name": "今日书法练习",
+          "type": "topic"
+        },
+        {
+          "type": "topic",
+          "id": "5eb3985f0000000001004280",
+          "name": "我的书法分享"
+        },
+        {
+          "id": "59449ba5cd30d845ea0e146b",
+          "name": "每日练字打卡",
+          "type": "topic"
+        },
+        {
+          "id": "5bff9cf7a209fd000162c599",
+          "name": "写字是一种生活",
+          "type": "topic"
+        },
+        {
+          "id": "63427f7c000000000101c865",
+          "name": "书法时间到",
+          "type": "topic"
+        },
+        {
+          "id": "5d348140000000000f001571",
+          "name": "赵孟頫",
+          "type": "topic"
+        },
+        {
+          "id": "5c3ded8c000000000d005fca",
+          "name": "见字如面",
+          "type": "topic"
+        }
+      ],
+      "user": {
+        "userId": "5a41b34111be102f366bd5d2",
+        "nickname": "小鱼书法",
+        "avatar": "https://sns-avatar-qc.xhscdn.com/avatar/62678f701694b30a593b463f.jpg"
+      },
+      "interactInfo": {
+        "likedCount": "6819",
+        "collectedCount": "4651",
+        "commentCount": "288",
+        "shareCount": "694"
+      },
+      "imageList": [
+        {
+          "url": "",
+          "width": 3538,
+          "height": 4716
+        },
+        {
+          "url": "",
+          "width": 3538,
+          "height": 4716
+        },
+        {
+          "url": "",
+          "width": 3538,
+          "height": 4716
+        },
+        {
+          "url": "",
+          "width": 3538,
+          "height": 4716
+        },
+        {
+          "url": "",
+          "width": 3538,
+          "height": 4716
+        },
+        {
+          "url": "",
+          "width": 3538,
+          "height": 4716
+        }
+      ],
+      "time": 1730272610000,
+      "lastUpdateTime": 1730272611000,
+      "shareInfo": {
+        "un_share": false
+      }
+    },
+    {
+      "noteId": "67aafb26000000002901c590",
+      "keyword": "书法",
+      "xsecToken": "ABRGbVil-_OMfxNj-vB4T6UWSOHQtueTWiUuHvHnmFj-w=",
+      "title": "搭子们今天体验乱搭的快乐",
+      "desc": "#自学书法[话题]# #零基础学习书法[话题]# #贵在坚持[话题]#",
+      "type": "video",
+      "tagList": [
+        {
+          "name": "自学书法",
+          "type": "topic",
+          "id": "5d307e6f000000000f009483"
+        },
+        {
+          "id": "618b2940000000000101df09",
+          "name": "零基础学习书法",
+          "type": "topic"
+        },
+        {
+          "id": "5c56f1a3000000000e015559",
+          "name": "贵在坚持",
+          "type": "topic"
+        }
+      ],
+      "user": {
+        "userId": "5daac07e00000000010049f7",
+        "nickname": "小墨爱书法",
+        "avatar": "https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo30pcacsfnjs605ndao1v08ifnllkumr8"
+      },
+      "interactInfo": {
+        "likedCount": "10万+",
+        "collectedCount": "2万",
+        "commentCount": "1041",
+        "shareCount": "2601"
+      },
+      "imageList": [
+        {
+          "url": "",
+          "width": 1080,
+          "height": 1440
+        }
+      ],
+      "time": 1739258662000,
+      "lastUpdateTime": 1739258663000,
+      "shareInfo": {
+        "un_share": false
+      }
+    },
+    {
+      "noteId": "68d3de06000000000e00c0eb",
+      "keyword": "书法",
+      "xsecToken": "ABfUNzI22swWEVNxKZXLhCQDX446k7nyxHo83kFfJDjyw=",
+      "title": "我发现，起号失败的书法博主都有这些共性",
+      "desc": "做书法号3个月涨粉5000+，回头看那些没做起来的号，发现失败的原因真的太相似了...今天把踩过的坑扒开给你们看，新手别再重蹈覆辙!🤫\n1️⃣内容太“散”，没有价值锚点\n✅今天发一张临帖作业，明天晒新买的毛笔，后天录个写字的快镜头。粉丝根本不知道关注你能获得什么。\n✅我前期就犯过这错，后来专注“零基础楷书入门”，每条视频封面都打上“小白也能懂的书法课”标签，现在粉丝刷到就知道：“哦，是那个教入门干货的老师。”\n\t\n2️⃣只晒“成果”，没有“过程共鸣”\n✅一幅写好的漂亮字是基础，但光发“看我写的多好看”，粉丝看几次就无感了。\n✅换个角度：拍自己写崩了的瞬间（“练了100遍的‘永’字，还是像一坨墨疙瘩”）、洗笔洗到满手黑的狼狈（“书法生的手，没有干净的可能”）。\n\t\n3️⃣太“仙气”，忘了“烟火气”\n✅总想着展示“书法家”状态：环境必须雅致，作品必须完美。但真实的书法练习哪有天天出精品？\n✅我经常拍墨滴到纸上、字写歪了懊恼捶桌的场景，配文“今日书法状态：人菜瘾大”，反而评论区炸了，大家都在晒自己的“翻车”作品。这种“不完美”才是最强的粘合剂。\n\t\n4️⃣不会“抓热点”，但爱“追热点”\n✅看到别人发“挑战瘦金体”就跟着写，看到“用毛笔写流行歌词”也跟风，结果热点过了，你的视频还没什么流量。\n\t\n5️⃣舍不得“出声”，少了“人格魅力”\n✅总觉得“粉丝是来看字的，我不用说话”，但书法号的核心是“人+字”的情感与知识传递。\n✅多说说这个字的结构技巧，那个笔画的历史渊源，粉丝留言突然变多：“老师讲得真清楚”、“听你说话很治愈”。漂亮的字是敲门砖，你的讲解和陪伴才是留住粉丝的关键。\n\t\n6️⃣数据差就“灰心”，不懂“复盘优化”\n✅发了10条视频没流量就放弃，却没想过：是不是封面太暗？标题太文艺不够直接？内容太枯燥没人能看完？\n\t\n其实书法号真的不难做，毕竟大家对传统文化有天然的亲近感。但比起“展示书法”，更重要的是“让粉丝透过书法看到你”——你的教学方法、你的坚持、你对书法的理解和热爱，才是让别人持续关注你的理由。#热点[话题]# #书法[话题]# #书法老师[话题]# #硬笔书法[话题]# #书法的力量[话题]# #书法时间到[话题]# #如何做博主[话题]# #书法是一种生活状态[话题]# #软笔书法[话题]# #毛笔字[话题]#",
+      "type": "normal",
+      "tagList": [
+        {
+          "id": "5c46829d000000000e009c0a",
+          "name": "热点",
+          "type": "topic"
+        },
+        {
+          "id": "5be3a82e695ea90001e82ad9",
+          "name": "书法",
+          "type": "topic"
+        },
+        {
+          "name": "书法老师",
+          "type": "topic",
+          "id": "5f1915a50000000001006652"
+        },
+        {
+          "id": "5bec0dd8c3c3cb0001b80762",
+          "name": "硬笔书法",
+          "type": "topic"
+        },
+        {
+          "name": "书法的力量",
+          "type": "topic",
+          "id": "60e94fc2000000000101ed3b"
+        },
+        {
+          "id": "63427f7c000000000101c865",
+          "name": "书法时间到",
+          "type": "topic"
+        },
+        {
+          "id": "600b1d5b000000000100b1d8",
+          "name": "如何做博主",
+          "type": "topic"
+        },
+        {
+          "type": "topic",
+          "id": "626653830000000001006176",
+          "name": "书法是一种生活状态"
+        },
+        {
+          "id": "5cda3753000000000e00d7c3",
+          "name": "软笔书法",
+          "type": "topic"
+        },
+        {
+          "id": "5be5307c17dadd0001ac2b23",
+          "name": "毛笔字",
+          "type": "topic"
+        }
+      ],
+      "user": {
+        "userId": "670cd36c000000000d027392",
+        "nickname": "书法小栀",
+        "avatar": "https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo31matj30qmg705pocqdm3cssidlu3ss0"
+      },
+      "interactInfo": {
+        "likedCount": "612",
+        "collectedCount": "661",
+        "commentCount": "34",
+        "shareCount": "133"
+      },
+      "imageList": [
+        {
+          "url": "",
+          "width": 1235,
+          "height": 1680
+        }
+      ],
+      "time": 1758715398000,
+      "lastUpdateTime": 1758715399000,
+      "shareInfo": {
+        "un_share": false
+      }
+    },
+    {
+      "noteId": "69e219ca000000001f0061b5",
+      "keyword": "书法",
+      "xsecToken": "ABcZn6smJc1yEK3LO4j_3RnC7tiC4HT7ExnHQmmF2em00=",
+      "title": "",
+      "desc": "书法日常",
+      "type": "normal",
+      "tagList": [],
+      "user": {
+        "userId": "665fc9e7000000000700687f",
+        "nickname": "有利就有我",
+        "avatar": "https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo31rd2fn30no005pivp7jhoq3v5mtgjrg"
+      },
+      "interactInfo": {
+        "likedCount": "1288",
+        "collectedCount": "41",
+        "commentCount": "106",
+        "shareCount": "3"
+      },
+      "imageList": [
+        {
+          "url": "",
+          "width": 960,
+          "height": 1282
+        }
+      ],
+      "time": 1776425419000,
+      "lastUpdateTime": 1776425419000,
+      "shareInfo": {
+        "un_share": false
+      }
+    },
+    {
+      "noteId": "68268ade00000000220298ba",
+      "keyword": "书法",
+      "xsecToken": "ABvsUc4wxQa_BXIrcj-5JOZskDJPF8xERJe5R_4pMaa18=",
+      "title": "五选一，这次我选1",
+      "desc": "#硬笔规范字[话题]# #硬笔书法[话题]# #手写[话题]# #规范字书写[话题]# #练字[话题]# #我的书法分享[话题]# #书法[话题]# #古诗词[话题]# #少儿硬笔书法[话题]# #每日练字打卡[话题]# #练字方法[话题]# #硬笔书法之美[话题]#",
+      "type": "normal",
+      "tagList": [
+        {
+          "id": "60080a32000000000100a36d",
+          "name": "硬笔规范字",
+          "type": "topic"
+        },
+        {
+          "id": "5bec0dd8c3c3cb0001b80762",
+          "name": "硬笔书法",
+          "type": "topic"
+        },
+        {
+          "name": "手写",
+          "type": "topic",
+          "id": "5be689d896f68c00017ccea9"
+        },
+        {
+          "type": "topic",
+          "id": "5c77807f000000000d028a39",
+          "name": "规范字书写"
+        },
+        {
+          "type": "topic",
+          "id": "5be2fc25a5142900018d6f4e",
+          "name": "练字"
+        },
+        {
+          "id": "5eb3985f0000000001004280",
+          "name": "我的书法分享",
+          "type": "topic"
+        },
+        {
+          "id": "5be3a82e695ea90001e82ad9",
+          "name": "书法",
+          "type": "topic"
+        },
+        {
+          "type": "topic",
+          "id": "635fc349000000000100823e",
+          "name": "古诗词"
+        },
+        {
+          "id": "5dc6c721000000000100bca3",
+          "name": "少儿硬笔书法",
+          "type": "topic"
+        },
+        {
+          "id": "59449ba5cd30d845ea0e146b",
+          "name": "每日练字打卡",
+          "type": "topic"
+        },
+        {
+          "name": "练字方法",
+          "type": "topic",
+          "id": "5b007178092b5b71d1fb0672"
+        },
+        {
+          "id": "6364a333000000000101fbb8",
+          "name": "硬笔书法之美",
+          "type": "topic"
+        }
+      ],
+      "user": {
+        "userId": "63aefaaa0000000027036b30",
+        "nickname": "小段手写（收学员）",
+        "avatar": "https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo316ha3gp0go605oteval9uqpgaf31ma8"
+      },
+      "interactInfo": {
+        "likedCount": "9870",
+        "collectedCount": "5721",
+        "commentCount": "369",
+        "shareCount": "846"
+      },
+      "imageList": [
+        {
+          "url": "",
+          "width": 1920,
+          "height": 2560
+        },
+        {
+          "url": "",
+          "width": 1920,
+          "height": 2560
+        },
+        {
+          "url": "",
+          "width": 1920,
+          "height": 2560
+        },
+        {
+          "url": "",
+          "width": 1920,
+          "height": 2560
+        },
+        {
+          "url": "",
+          "width": 1920,
+          "height": 2560
+        }
+      ],
+      "time": 1747356383000,
+      "lastUpdateTime": 1747356383000,
+      "shareInfo": {
+        "un_share": false
+      }
+    },
+    {
+      "noteId": "66fe90d2000000001902d70e",
+      "keyword": "书法",
+      "xsecToken": "AByxhZewYntYAJvIAGgKY9Zz9eWPTmmvsV_wHHOyD12M8=",
+      "title": "一秒认识书法！",
+      "desc": "新手小白想学书法，是不是无从下手，快来看这篇！\n#书法教学[话题]# #书法入门[话题]# #书法培训[话题]# #提高艺术鉴赏水平[话题]#  #书法[话题]# #书法练习打卡[话题]# #书法日课[话题]# #书法时间到[话题]# #书法的力量[话题]# #搞的就是艺术[话题]#",
+      "type": "normal",
+      "tagList": [
+        {
+          "name": "书法教学",
+          "type": "topic",
+          "id": "5c6b5191000000000d032bb0"
+        },
+        {
+          "id": "5cfeefe9000000000d01b1be",
+          "name": "书法入门",
+          "type": "topic"
+        },
+        {
+          "type": "topic",
+          "id": "5c835b9e000000000e00f66a",
+          "name": "书法培训"
+        },
+        {
+          "id": "6125191d0000000001007f77",
+          "name": "提高艺术鉴赏水平",
+          "type": "topic"
+        },
+        {
+          "id": "5be3a82e695ea90001e82ad9",
+          "name": "书法",
+          "type": "topic"
+        },
+        {
+          "id": "5ddbd0750000000001007700",
+          "name": "书法练习打卡",
+          "type": "topic"
+        },
+        {
+          "id": "5c1c99410000000009006e74",
+          "name": "书法日课",
+          "type": "topic"
+        },
+        {
+          "name": "书法时间到",
+          "type": "topic",
+          "id": "63427f7c000000000101c865"
+        },
+        {
+          "id": "60e94fc2000000000101ed3b",
+          "name": "书法的力量",
+          "type": "topic"
+        },
+        {
+          "id": "63761cf400000000010020d2",
+          "name": "搞的就是艺术",
+          "type": "topic"
+        }
+      ],
+      "user": {
+        "userId": "66d96280000000001d020dcb",
+        "nickname": "冰心书法",
+        "avatar": "https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo31topo71t6o605pmpca07c3ebklldet8"
+      },
+      "interactInfo": {
+        "likedCount": "1.4万",
+        "collectedCount": "1.1万",
+        "commentCount": "232",
+        "shareCount": "665"
+      },
+      "imageList": [
+        {
+          "url": "",
+          "width": 1242,
+          "height": 1660
+        },
+        {
+          "url": "",
+          "width": 1242,
+          "height": 1660
+        },
+        {
+          "url": "",
+          "width": 1242,
+          "height": 1660
+        },
+        {
+          "url": "",
+          "width": 1242,
+          "height": 1660
+        },
+        {
+          "url": "",
+          "width": 1242,
+          "height": 1660
+        }
+      ],
+      "time": 1727959250000,
+      "lastUpdateTime": 1727959251000,
+      "shareInfo": {
+        "un_share": false
+      }
+    },
+    {
+      "noteId": "6a43d88f00000000080337c0",
+      "keyword": "书法",
+      "xsecToken": "AB04sOb3IkRVgizdQTdTFH1RZLgDLIRx4NtlFJRX6MotQ=",
+      "title": "",
+      "desc": "成人硬笔书法怎么练呢？没有没有推荐的线上课？ 一位马上步入40＋女人想写一手好字的觉醒",
+      "type": "normal",
+      "tagList": [],
+      "user": {
+        "userId": "5a4ad0b84eacab0736247ff8",
+        "nickname": "小桃酥.",
+        "avatar": "https://sns-avatar-qc.xhscdn.com/avatar/637e1b9698495549306cb970.jpg"
+      },
+      "interactInfo": {
+        "likedCount": "13",
+        "collectedCount": "3",
+        "commentCount": "48",
+        "shareCount": "3"
+      },
+      "imageList": [
+        {
+          "url": "",
+          "width": 1200,
+          "height": 1600
+        }
+      ],
+      "time": 1782831247000,
+      "lastUpdateTime": 1782831248000,
+      "shareInfo": {
+        "un_share": false
+      }
+    },
+    {
+      "noteId": "69a3d8b20000000028020fad",
+      "keyword": "书法",
+      "xsecToken": "ABnK25_KLc1qrazzPZomLT0_xTYoKHb4V4mweFEU_ZV7A=",
+      "title": "三种书体的《陋室铭》",
+      "desc": "陈国昭用行书、楷书和草书三种书体创作刘禹锡的《陋室铭》#书法[话题]# #陋室铭[话题]#",
+      "type": "normal",
+      "tagList": [
+        {
+          "id": "5be3a82e695ea90001e82ad9",
+          "name": "书法",
+          "type": "topic"
+        },
+        {
+          "id": "5e76bed10000000001009048",
+          "name": "陋室铭",
+          "type": "topic"
+        }
+      ],
+      "user": {
+        "userId": "558e3ff3f5a2634941b372e0",
+        "nickname": "字曰",
+        "avatar": "https://sns-avatar-qc.xhscdn.com/avatar/5e0445e72863550001f8fe05.jpg"
+      },
+      "interactInfo": {
+        "likedCount": "1315",
+        "collectedCount": "890",
+        "commentCount": "38",
+        "shareCount": "237"
+      },
+      "imageList": [
+        {
+          "url": "",
+          "width": 1400,
+          "height": 2065
+        },
+        {
+          "url": "",
+          "width": 1127,
+          "height": 2048
+        },
+        {
+          "url": "",
+          "width": 1218,
+          "height": 1744
+        }
+      ],
+      "time": 1772355639000,
+      "lastUpdateTime": 1772345522000,
+      "shareInfo": {
+        "un_share": false
+      }
+    },
+    {
+      "noteId": "69931940000000001a02daca",
+      "keyword": "书法",
+      "xsecToken": "ABOQ7ZwwpBGYQZGbafDJ7KFjoPOkn1QQEtv9QYocIMv9E=",
+      "title": "",
+      "desc": "2025，我的书法班人数再创新高；我的股票收益再创新高；我的小红书粉丝数成为全常州书法老师中最高\n2026，愿我继续在书法的世界里落笔从容，心有山海；在股市里知行合一，复利奔跑[害羞R][害羞R][害羞R]",
+      "type": "normal",
+      "tagList": [],
+      "user": {
+        "userId": "5f3009870000000001004f23",
+        "nickname": "青山书法王老师",
+        "avatar": "https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo31n2b0bd3mg6g5npg163g8jp3mo1sj70"
+      },
+      "interactInfo": {
+        "likedCount": "325",
+        "collectedCount": "23",
+        "commentCount": "237",
+        "shareCount": "25"
+      },
+      "imageList": [
+        {
+          "url": "",
+          "width": 1080,
+          "height": 2400
+        },
+        {
+          "url": "",
+          "width": 840,
+          "height": 422
+        },
+        {
+          "url": "",
+          "width": 1053,
+          "height": 1132
+        }
+      ],
+      "time": 1771247936000,
+      "lastUpdateTime": 1771247937000,
+      "shareInfo": {
+        "un_share": false
+      }
+    },
+    {
+      "noteId": "6a2fa7dc000000001702c61c",
+      "keyword": "书法",
+      "xsecToken": "ABaBYBHHOnDvLMMF4i3yIrvtMkXQMmgvAGp37RizKbaUk=",
+      "title": "",
+      "desc": "打字也是一种文化",
+      "type": "normal",
+      "tagList": [],
+      "user": {
+        "userId": "696e28c3000000003700025e",
+        "nickname": "温文尔雅",
+        "avatar": "https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo31rh8nl4j0a6g5qbe531to0iupn0hjr0"
+      },
+      "interactInfo": {
+        "likedCount": "119",
+        "collectedCount": "37",
+        "commentCount": "697",
+        "shareCount": "6"
+      },
+      "imageList": [
+        {
+          "url": "",
+          "width": 1080,
+          "height": 1356
+        }
+      ],
+      "time": 1781508060000,
+      "lastUpdateTime": 1781508061000,
+      "shareInfo": {
+        "un_share": false
+      }
+    },
+    {
+      "noteId": "6900261d000000000501238b",
+      "keyword": "书法",
+      "xsecToken": "ABfZkuWMCVm_x3M1YTzGpF_RolgJn5VLbDJorfx-QLxmc=",
+      "title": "相逢已是上上签，何须相思煮余年。",
+      "desc": "#书法日课[话题]# #相见便是缘[话题]# #写字是一种态度[话题]# #小楷[话题]##诗词的浪漫[话题]#",
+      "type": "normal",
+      "tagList": [
+        {
+          "id": "5c1c99410000000009006e74",
+          "name": "书法日课",
+          "type": "topic"
+        },
+        {
+          "id": "63d4a4a400000000010097d2",
+          "name": "相见便是缘",
+          "type": "topic"
+        },
+        {
+          "id": "5f112566000000000101e631",
+          "name": "写字是一种态度",
+          "type": "topic"
+        },
+        {
+          "id": "5bfb8a7fd71bbf0001cbc5fd",
+          "name": "小楷",
+          "type": "topic"
+        },
+        {
+          "name": "诗词的浪漫",
+          "type": "topic",
+          "id": "630ae6cf0000000001001441"
+        }
+      ],
+      "user": {
+        "userId": "63d71796000000002702831f",
+        "nickname": "宁之爱书写",
+        "avatar": "https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo31k091e9fj4505oun2ub9t0ovm525gl8"
+      },
+      "interactInfo": {
+        "likedCount": "3042",
+        "collectedCount": "1313",
+        "commentCount": "351",
+        "shareCount": "121"
+      },
+      "imageList": [
+        {
+          "url": "",
+          "width": 1682,
+          "height": 3892
+        }
+      ],
+      "time": 1761617437000,
+      "lastUpdateTime": 1761617513000,
+      "shareInfo": {
+        "un_share": false
+      }
+    },
+    {
+      "noteId": "6a48c1ba0000000016026ca9",
+      "keyword": "书法",
+      "xsecToken": "AB2W6nP5urHR2l8RmNmN2rF0yO1y1K6n-tZTxcAyXtsG0=",
+      "title": "",
+      "desc": "想给孩子找个书法班上，目前试听了两家，一家是机构，教孩子顿笔，握笔姿势，可以每晚去上课，一家是自己教，教了一个多小时的控笔，改握笔姿势，说是他那不教顿笔，控笔会让书写速度慢，时间上只有周六有时间去上课，价格差不多，该选哪家呢？#书法学习[话题]#",
+      "type": "normal",
+      "tagList": [
+        {
+          "id": "5c2d77cc000000000901b3e2",
+          "name": "书法学习",
+          "type": "topic"
+        }
+      ],
+      "user": {
+        "userId": "5e53aeb30000000001009b6b",
+        "nickname": "夏末未至",
+        "avatar": "https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo31bp7upf510605nijlqpg96rbgcf5geg"
+      },
+      "interactInfo": {
+        "likedCount": "57",
+        "collectedCount": "34",
+        "commentCount": "355",
+        "shareCount": "10"
+      },
+      "imageList": [
+        {
+          "url": "",
+          "width": 1200,
+          "height": 1600
+        }
+      ],
+      "time": 1783153082000,
+      "lastUpdateTime": 1783153082000,
+      "shareInfo": {
+        "un_share": false
+      }
+    },
+    {
+      "noteId": "69e384430000000023022bfc",
+      "keyword": "书法",
+      "xsecToken": "ABrEf3--OwDiKCn6EQB3IDfeSJgzUi8_To2WMECrU9jfk=",
+      "title": "练习书法",
+      "desc": "#感恩父母[话题]# #愿天下所有的父母身体健康[话题]# #愿天下父母健康长寿[话题]# #愿天下所有老人都健康长寿[话题]# #家人最重要[话题]# #愿所有人平安健康[话题]# #身体健康[话题]# #书法作品[话题]# #身体健康才是福[话题]# #父母健康[话题]#",
+      "type": "normal",
+      "tagList": [
+        {
+          "id": "5c3204360000000009027925",
+          "name": "感恩父母",
+          "type": "topic"
+        },
+        {
+          "name": "愿天下所有的父母身体健康",
+          "type": "topic",
+          "id": "61d26d4700000000010007bd"
+        },
+        {
+          "type": "topic",
+          "id": "611f57cd000000000100140e",
+          "name": "愿天下父母健康长寿"
+        },
+        {
+          "id": "625a43740000000001007392",
+          "name": "愿天下所有老人都健康长寿",
+          "type": "topic"
+        },
+        {
+          "type": "topic",
+          "id": "5c21bf0d000000000301193c",
+          "name": "家人最重要"
+        },
+        {
+          "id": "610752030000000001003280",
+          "name": "愿所有人平安健康",
+          "type": "topic"
+        },
+        {
+          "id": "5be43351f4fc960001f969e1",
+          "name": "身体健康",
+          "type": "topic"
+        },
+        {
+          "name": "书法作品",
+          "type": "topic",
+          "id": "5c43ce2b000000000f0352f6"
+        },
+        {
+          "id": "6333b48c000000000101f96e",
+          "name": "身体健康才是福",
+          "type": "topic"
+        },
+        {
+          "id": "5bfd57e32698c300014d3b02",
+          "name": "父母健康",
+          "type": "topic"
+        }
+      ],
+      "user": {
+        "userId": "6713b9b7000000001d032c57",
+        "nickname": "松松的潦草小狗",
+        "avatar": "https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo31scusghq5c005pojn6rneb2n1pnvp6o"
+      },
+      "interactInfo": {
+        "likedCount": "249",
+        "collectedCount": "9",
+        "commentCount": "13",
+        "shareCount": "0"
+      },
+      "imageList": [
+        {
+          "url": "",
+          "width": 1776,
+          "height": 2364
+        }
+      ],
+      "time": 1776518211000,
+      "lastUpdateTime": 1776518211000,
+      "shareInfo": {
+        "un_share": false
+      }
+    },
+    {
+      "noteId": "66d3d536000000001d03a2fe",
+      "keyword": "书法",
+      "xsecToken": "ABK_o8XwR82ZiqQE08ZEH4g3K-xQtROsDx9zbrBc3qoLQ=",
+      "title": "书法班日常别光拍孩子上课的样子了",
+      "desc": "作为一位书法老师，在朋友圈展示自己的专业和亲和力是赢得家长信任的关键。\n别再只拍孩子的上课日常了，以下是一些建议，可以帮助你更好地利用朋友圈来展示自己：\n\t\n[樱花R]学生作品展示：\n[看R]发学生书法作品的前后对比图，展示他们的进步和你的教学质量。\n[看R]分享学生在书法比赛中获奖的作品，强调你的教学成果。\n[樱花R]课堂实录：\n[看R]捕捉并分享学生专注练习的瞬间，展示他们对书法的热爱和投入。\n[看R]记录课堂上的有趣互动，如学生之间的友好竞赛，或是你如何用创意方法激发学生兴趣。\n[樱花R]教学成果：\n[看R]分享学生的学习心得和家长的正面反馈，用真实的声音证明你的教学效果。\n[看R]展示学生通过学习书法带来的变化，如耐心、专注力的提升。\n[樱花R]个人作品：\n[看R]定期发布自己的书法创作，展示你的艺术才华和专业水准。\n[看R]分享你的创作过程，让家长和学生看到你对书法艺术的热情和执着。\n[樱花R]书法活动：\n[看R]宣传即将举行的书法比赛或活动，鼓励学生参与并展示他们的才华。\n[看R]分享比赛或活动的现场照片和回顾，记录学生的成长和经历。\n[樱花R]书法艺术欣赏：\n[看R]分享历史上著名书法家的作品，简单介绍其艺术特点和历史背景。\n[看R]引导学生欣赏并学习传统书法艺术，培养他们的审美能力。\n[樱花R]书法趣闻：\n[看R]分享书法相关的小故事或趣闻轶事，增加朋友圈的趣味性。\n[看R]通过轻松愉快的内容，让学生和家长在轻松的氛围中了解书法文化。\n[樱花R]传统文化元素：\n[看R]结合诗词、印章等传统文化元素，展示书法艺术的深厚底蕴。\n[看R]通过展示与书法相关的文化知识，提升自己的文化品位和教育价值。\n记得，朋友圈的内容要真实、自然，避免过度包装或夸大其词。通过持续地分享有价值的内容，你不仅能展示自己的专业能力，还能建立起与家长和学生之间的信任和联系。#书法作品形式[话题]# #书法培训[话题]# #传承书法艺术[话题]# #少儿书法[话题]# #教培机构[话题]#",
+      "type": "normal",
+      "tagList": [
+        {
+          "id": "6260f5ac000000000100bf79",
+          "name": "书法作品形式",
+          "type": "topic"
+        },
+        {
+          "type": "topic",
+          "id": "5c835b9e000000000e00f66a",
+          "name": "书法培训"
+        },
+        {
+          "id": "620c81cc00000000010053a1",
+          "name": "传承书法艺术",
+          "type": "topic"
+        },
+        {
+          "id": "5cc853df000000000d005872",
+          "name": "少儿书法",
+          "type": "topic"
+        },
+        {
+          "id": "601d0c01000000000100894e",
+          "name": "教培机构",
+          "type": "topic"
+        }
+      ],
+      "user": {
+        "userId": "5ca45a5b000000001703db55",
+        "nickname": "Nelly奶粒",
+        "avatar": "https://sns-avatar-qc.xhscdn.com/avatar/62a17b90b664f9b166c29382.jpg"
+      },
+      "interactInfo": {
+        "likedCount": "1140",
+        "collectedCount": "1252",
+        "commentCount": "24",
+        "shareCount": "335"
+      },
+      "imageList": [
+        {
+          "url": "",
+          "width": 1920,
+          "height": 2560
+        }
+      ],
+      "time": 1725158710000,
+      "lastUpdateTime": 1725158711000,
+      "shareInfo": {
+        "un_share": false
+      }
+    },
+    {
+      "noteId": "6a4119d0000000000803e8d2",
+      "keyword": "书法",
+      "xsecToken": "ABEF6fzrKj8Wsall8nQkX4ONgxpO9Us6eFaGnq2-CsLi0=",
+      "title": "",
+      "desc": "有没有温州市区的练字搭子，写硬笔，有时候一个人静不下心（心理上有点障碍难以集中注意力）[哭惹R]#书法老师[话题]# #日常练字[话题]# #温州[话题]# #搭子[话题]# #书法搭子[话题]# #鹿城[话题]# #龙湾[话题]# #瓯海[话题]# #温州图书馆[话题]# #城市书房[话题]# #温州搭子[话题]# #行楷[话题]# 不是练字的其实也可以但是需要你很专注做事[皱眉R]初高中内容还记得也可以交流倘若需要的话[捂脸R]",
+      "type": "normal",
+      "tagList": [
+        {
+          "id": "5f1915a50000000001006652",
+          "name": "书法老师",
+          "type": "topic"
+        },
+        {
+          "type": "topic",
+          "id": "5c5e8e3b000000000f03da21",
+          "name": "日常练字"
+        },
+        {
+          "type": "topic",
+          "id": "540e746eb4c4d60f94ee755d",
+          "name": "温州"
+        },
+        {
+          "id": "618f8aed0000000001008a8f",
+          "name": "搭子",
+          "type": "topic"
+        },
+        {
+          "id": "64027b32000000001803931c",
+          "name": "书法搭子",
+          "type": "topic"
+        },
+        {
+          "name": "鹿城",
+          "type": "topic",
+          "id": "5e7ad02c0000000001006aa2"
+        },
+        {
+          "name": "龙湾",
+          "type": "topic",
+          "id": "5f5223b9000000000101cdf2"
+        },
+        {
+          "id": "60c441fa000000000101eb47",
+          "name": "瓯海",
+          "type": "topic"
+        },
+        {
+          "id": "5dbee77d000000000103a9d9",
+          "name": "温州图书馆",
+          "type": "topic"
+        },
+        {
+          "type": "topic",
+          "id": "5d258229000000000f03636d",
+          "name": "城市书房"
+        },
+        {
+          "type": "topic",
+          "id": "63e78ed5000000000100bbf3",
+          "name": "温州搭子"
+        },
+        {
+          "id": "5c3ff133000000000e0206c1",
+          "name": "行楷",
+          "type": "topic"
+        }
+      ],
+      "user": {
+        "userId": "66018aec000000000600df2c",
+        "nickname": "余烬",
+        "avatar": "https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo322281q4f7k005pg1hbm1hnpcvl7ffqo"
+      },
+      "interactInfo": {
+        "likedCount": "4",
+        "collectedCount": "0",
+        "commentCount": "8",
+        "shareCount": "1"
+      },
+      "imageList": [
+        {
+          "url": "",
+          "width": 1200,
+          "height": 1600
+        }
+      ],
+      "time": 1782651344000,
+      "lastUpdateTime": 1782651345000,
+      "shareInfo": {
+        "un_share": false
+      }
+    },
+    {
+      "noteId": "68d0bd1d00000000070285db",
+      "keyword": "书法",
+      "xsecToken": "ABBqSI1BDuJyATjKbm_03PoqJdP-XkGo1yOOWj-hP7AxE=",
+      "title": "……",
+      "desc": "#写字是一种生活[话题]# #每天坚持练字[话题]# #就是因为热爱[话题]#",
+      "type": "normal",
+      "tagList": [
+        {
+          "id": "5bff9cf7a209fd000162c599",
+          "name": "写字是一种生活",
+          "type": "topic"
+        },
+        {
+          "id": "6182798b000000000100a8f5",
+          "name": "每天坚持练字",
+          "type": "topic"
+        },
+        {
+          "id": "600027990000000001002058",
+          "name": "就是因为热爱",
+          "type": "topic"
+        }
+      ],
+      "user": {
+        "userId": "68d0ba3b00000000210275d6",
+        "nickname": "聽君",
+        "avatar": "https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo31mnh8qvmli605q6gn8toctemau8g038"
+      },
+      "interactInfo": {
+        "likedCount": "2053",
+        "collectedCount": "500",
+        "commentCount": "110",
+        "shareCount": "44"
+      },
+      "imageList": [
+        {
+          "url": "",
+          "width": 2160,
+          "height": 3838
+        },
+        {
+          "url": "",
+          "width": 2160,
+          "height": 3838
+        },
+        {
+          "url": "",
+          "width": 2160,
+          "height": 3838
+        },
+        {
+          "url": "",
+          "width": 2160,
+          "height": 3838
+        }
+      ],
+      "time": 1758510365000,
+      "lastUpdateTime": 1758510509000,
+      "shareInfo": {
+        "un_share": false
+      }
+    },
+    {
+      "noteId": "695cb4b8000000000a029eae",
+      "keyword": "书法",
+      "xsecToken": "ABQnWAQT6pC3fT2Qo1-F-tzb4IVNXe8Nk33J1Q-KL7q90=",
+      "title": "",
+      "desc": "书法专业247.5分有希望吗？",
+      "type": "normal",
+      "tagList": [],
+      "user": {
+        "userId": "65f0393b000000000500b745",
+        "nickname": "叶舒华喝椰汁",
+        "avatar": "https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo31phqf696jq6g5pfg74th9dq5uphj1io"
+      },
+      "interactInfo": {
+        "likedCount": "14",
+        "collectedCount": "5",
+        "commentCount": "43",
+        "shareCount": "0"
+      },
+      "imageList": [
+        {
+          "url": "",
+          "width": 1200,
+          "height": 1600
+        }
+      ],
+      "time": 1767683256000,
+      "lastUpdateTime": 1767683257000,
+      "shareInfo": {
+        "un_share": false
+      }
+    },
+    {
+      "noteId": "67c2e7c000000000290316be",
+      "keyword": "书法",
+      "xsecToken": "ABNT_mcCw1Oj8enuWEB8uXfMGWPgKThns1vDmm7S0aA3w=",
+      "title": "最新硬笔书法作品形式设计，建议收藏（55）",
+      "desc": "#书法作品纸[话题]# #硬笔书法纸[话题]# #硬笔书法作品纸[话题]# #书法练习纸[话题]# #硬笔作品纸[话题]# #田字格书法纸[话题]# #七言古诗作品纸[话题]# #书法用纸[话题]# #我的书法分享[话题]# #书法作品硬笔纸[话题]#",
+      "type": "normal",
+      "tagList": [
+        {
+          "id": "6174fc4f00000000010019d7",
+          "name": "书法作品纸",
+          "type": "topic"
+        },
+        {
+          "name": "硬笔书法纸",
+          "type": "topic",
+          "id": "60d752600000000001006878"
+        },
+        {
+          "id": "6157d83100000000010076c2",
+          "name": "硬笔书法作品纸",
+          "type": "topic"
+        },
+        {
+          "type": "topic",
+          "id": "61584b1d00000000010048f5",
+          "name": "书法练习纸"
+        },
+        {
+          "name": "硬笔作品纸",
+          "type": "topic",
+          "id": "6211efd10000000001001112"
+        },
+        {
+          "id": "635298d9000000000100baf1",
+          "name": "田字格书法纸",
+          "type": "topic"
+        },
+        {
+          "id": "65b1d90300000000030174b1",
+          "name": "七言古诗作品纸",
+          "type": "topic"
+        },
+        {
+          "id": "5cefed03000000000f034d94",
+          "name": "书法用纸",
+          "type": "topic"
+        },
+        {
+          "id": "5eb3985f0000000001004280",
+          "name": "我的书法分享",
+          "type": "topic"
+        },
+        {
+          "id": "6762c8cd000000000401b53b",
+          "name": "书法作品硬笔纸",
+          "type": "topic"
+        }
+      ],
+      "user": {
+        "userId": "66b33b27000000000b031048",
+        "nickname": "硬笔书法教学资料",
+        "avatar": "https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo3168d9uucgs6g5plj7cjiu428f47pb08"
+      },
+      "interactInfo": {
+        "likedCount": "1238",
+        "collectedCount": "837",
+        "commentCount": "15",
+        "shareCount": "102"
+      },
+      "imageList": [
+        {
+          "url": "",
+          "width": 1080,
+          "height": 1501
+        },
+        {
+          "url": "",
+          "width": 1080,
+          "height": 1502
+        },
+        {
+          "url": "",
+          "width": 1080,
+          "height": 1501
+        },
+        {
+          "url": "",
+          "width": 1080,
+          "height": 1502
+        },
+        {
+          "url": "",
+          "width": 1080,
+          "height": 1501
+        },
+        {
+          "url": "",
+          "width": 1080,
+          "height": 1501
+        },
+        {
+          "url": "",
+          "width": 1080,
+          "height": 1502
+        },
+        {
+          "url": "",
+          "width": 1079,
+          "height": 1501
+        },
+        {
+          "url": "",
+          "width": 1079,
+          "height": 1501
+        },
+        {
+          "url": "",
+          "width": 1079,
+          "height": 1501
+        },
+        {
+          "url": "",
+          "width": 1079,
+          "height": 1501
+        },
+        {
+          "url": "",
+          "width": 1079,
+          "height": 1501
+        },
+        {
+          "url": "",
+          "width": 1079,
+          "height": 1501
+        },
+        {
+          "url": "",
+          "width": 1079,
+          "height": 1501
+        },
+        {
+          "url": "",
+          "width": 1080,
+          "height": 1502
+        },
+        {
+          "url": "",
+          "width": 1080,
+          "height": 1501
+        },
+        {
+          "url": "",
+          "width": 1080,
+          "height": 1502
+        },
+        {
+          "url": "",
+          "width": 1080,
+          "height": 1501
+        }
+      ],
+      "time": 1740826560000,
+      "lastUpdateTime": 1740826560000,
+      "shareInfo": {
+        "un_share": false
+      }
+    },
+    {
+      "noteId": "6a4f7ff1000000001102ece6",
+      "keyword": "书法",
+      "xsecToken": "ABJgIYPayrBsfHo_eYimeytsDa2aG-8mZP4yt8Olmx2gU=",
+      "title": "我的书法分享",
+      "desc": "#书法[话题]# #我的书法分享[话题]# #书法作品[话题]# #书法打卡挑战[话题]# #书法创作[话题]# #书法的力量[话题]# #爱书法爱生活[话题]# #书法时间到[话题]# #原创书法作品[话题]# #今日书法练习[话题]#",
+      "type": "video",
+      "tagList": [
+        {
+          "id": "5be3a82e695ea90001e82ad9",
+          "name": "书法",
+          "type": "topic"
+        },
+        {
+          "type": "topic",
+          "id": "5eb3985f0000000001004280",
+          "name": "我的书法分享"
+        },
+        {
+          "id": "5c43ce2b000000000f0352f6",
+          "name": "书法作品",
+          "type": "topic"
+        },
+        {
+          "id": "64e6d3400000000018019089",
+          "name": "书法打卡挑战",
+          "type": "topic"
+        },
+        {
+          "id": "5d88d16c000000000103da43",
+          "name": "书法创作",
+          "type": "topic"
+        },
+        {
+          "name": "书法的力量",
+          "type": "topic",
+          "id": "60e94fc2000000000101ed3b"
+        },
+        {
+          "type": "topic",
+          "id": "619a149900000000010005db",
+          "name": "爱书法爱生活"
+        },
+        {
+          "id": "63427f7c000000000101c865",
+          "name": "书法时间到",
+          "type": "topic"
+        },
+        {
+          "id": "61079975000000000100793f",
+          "name": "原创书法作品",
+          "type": "topic"
+        },
+        {
+          "id": "6183f17c00000000010033c9",
+          "name": "今日书法练习",
+          "type": "topic"
+        }
+      ],
+      "user": {
+        "userId": "69d0698e00000000320365e1",
+        "nickname": "PP",
+        "avatar": "https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo32138tslk725g5qegd67cmpf16ilp5mo"
+      },
+      "interactInfo": {
+        "likedCount": "1015",
+        "collectedCount": "27",
+        "commentCount": "58",
+        "shareCount": "0"
+      },
+      "imageList": [
+        {
+          "url": "",
+          "width": 1032,
+          "height": 1920
+        }
+      ],
+      "time": 1783594993000,
+      "lastUpdateTime": 1783594994000,
+      "shareInfo": {
+        "un_share": false
+      }
+    },
+    {
+      "noteId": "6a4a69230000000006021452",
+      "keyword": "书法",
+      "xsecToken": "AB-sgi_ISw-fxYt_26z0ZNqaEP5YdmvFPf6lUGcK3nZVg=",
+      "title": "当我练字时，心情也变好了",
+      "desc": "[星R]\n\t\n真正有价值的事情，\n都不是轻松舒服就能完成的。\n那些晨间的寂静，不眠的星光，\n清醒的克制，孤军奋战的坚持，\n暗暗许下的承诺，\n才是我热爱自己的时刻。\n#荆霄鹏行楷[话题]# #手写[话题]# #惊艳到你的句子[话题]# #练字静心[话题]# #文案[话题]# #书法打卡挑战[话题]# #崔方圆书法[话题]# #手写摘抄[话题]# #每日练字打卡[话题]# #随笔[话题]#",
+      "type": "normal",
+      "tagList": [
+        {
+          "id": "5ddaa2e8000000000100a20c",
+          "name": "荆霄鹏行楷",
+          "type": "topic"
+        },
+        {
+          "id": "5be689d896f68c00017ccea9",
+          "name": "手写",
+          "type": "topic"
+        },
+        {
+          "name": "惊艳到你的句子",
+          "type": "topic",
+          "id": "5a4222be092b5b5f9696d0fc"
+        },
+        {
+          "type": "topic",
+          "id": "5fe9cefc000000000100a88a",
+          "name": "练字静心"
+        },
+        {
+          "type": "topic",
+          "id": "5bfba3484283b500010f59fe",
+          "name": "文案"
+        },
+        {
+          "id": "64e6d3400000000018019089",
+          "name": "书法打卡挑战",
+          "type": "topic"
+        },
+        {
+          "id": "672592250000000021020864",
+          "name": "崔方圆书法",
+          "type": "topic"
+        },
+        {
+          "name": "手写摘抄",
+          "type": "topic",
+          "id": "5d3708e000000000180001bf"
+        },
+        {
+          "id": "59449ba5cd30d845ea0e146b",
+          "name": "每日练字打卡",
+          "type": "topic"
+        },
+        {
+          "id": "53cfbd98b4c4d64f4a22afe5",
+          "name": "随笔",
+          "type": "topic"
+        }
+      ],
+      "user": {
+        "userId": "67342c54000000001c01810e",
+        "nickname": "芷如练字",
+        "avatar": "https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo31ajpsros7c0g5ppk5ha7308emmi3a2o"
+      },
+      "interactInfo": {
+        "likedCount": "51",
+        "collectedCount": "15",
+        "commentCount": "21",
+        "shareCount": "2"
+      },
+      "imageList": [
+        {
+          "url": "",
+          "width": 3496,
+          "height": 4960
+        },
+        {
+          "url": "",
+          "width": 3326,
+          "height": 4846
+        },
+        {
+          "url": "",
+          "width": 4364,
+          "height": 6331
+        },
+        {
+          "url": "",
+          "width": 4369,
+          "height": 6332
+        }
+      ],
+      "time": 1783261475000,
+      "lastUpdateTime": 1783261476000,
+      "shareInfo": {
+        "un_share": false
+      }
+    },
+    {
+      "noteId": "6721dd62000000001b02e70b",
+      "keyword": "书法",
+      "xsecToken": "AB7G7-2VJ9VxBhTL92aizIqx_aLyrjEXaEea0_Ex4hmCY=",
+      "title": "赵孟頫真的太强了，越练越上头越写越爱写",
+      "desc": "人生难得几日闲，清茶一壶煮流年。\n忘却人间三千事，心宽无处不桃源。\n#今日书法练习[话题]# #我的书法分享[话题]# #每日练字打卡[话题]# #写字是一种生活[话题]# #书法时间到[话题]# #赵孟頫[话题]# #见字如面[话题]#",
+      "type": "normal",
+      "tagList": [
+        {
+          "id": "6183f17c00000000010033c9",
+          "name": "今日书法练习",
+          "type": "topic"
+        },
+        {
+          "id": "5eb3985f0000000001004280",
+          "name": "我的书法分享",
+          "type": "topic"
+        },
+        {
+          "name": "每日练字打卡",
+          "type": "topic",
+          "id": "59449ba5cd30d845ea0e146b"
+        },
+        {
+          "name": "写字是一种生活",
+          "type": "topic",
+          "id": "5bff9cf7a209fd000162c599"
+        },
+        {
+          "name": "书法时间到",
+          "type": "topic",
+          "id": "63427f7c000000000101c865"
+        },
+        {
+          "id": "5d348140000000000f001571",
+          "name": "赵孟頫",
+          "type": "topic"
+        },
+        {
+          "id": "5c3ded8c000000000d005fca",
+          "name": "见字如面",
+          "type": "topic"
+        }
+      ],
+      "user": {
+        "userId": "5a41b34111be102f366bd5d2",
+        "nickname": "小鱼书法",
+        "avatar": "https://sns-avatar-qc.xhscdn.com/avatar/62678f701694b30a593b463f.jpg"
+      },
+      "interactInfo": {
+        "likedCount": "6819",
+        "collectedCount": "4651",
+        "commentCount": "288",
+        "shareCount": "694"
+      },
+      "imageList": [
+        {
+          "url": "",
+          "width": 3538,
+          "height": 4716
+        },
+        {
+          "url": "",
+          "width": 3538,
+          "height": 4716
+        },
+        {
+          "url": "",
+          "width": 3538,
+          "height": 4716
+        },
+        {
+          "url": "",
+          "width": 3538,
+          "height": 4716
+        },
+        {
+          "url": "",
+          "width": 3538,
+          "height": 4716
+        },
+        {
+          "url": "",
+          "width": 3538,
+          "height": 4716
+        }
+      ],
+      "time": 1730272610000,
+      "lastUpdateTime": 1730272611000,
+      "shareInfo": {
+        "un_share": false
+      }
+    },
+    {
+      "noteId": "67aafb26000000002901c590",
+      "keyword": "书法",
+      "xsecToken": "ABRGbVil-_OMfxNj-vB4T6UWSOHQtueTWiUuHvHnmFj-w=",
+      "title": "搭子们今天体验乱搭的快乐",
+      "desc": "#自学书法[话题]# #零基础学习书法[话题]# #贵在坚持[话题]#",
+      "type": "video",
+      "tagList": [
+        {
+          "id": "5d307e6f000000000f009483",
+          "name": "自学书法",
+          "type": "topic"
+        },
+        {
+          "id": "618b2940000000000101df09",
+          "name": "零基础学习书法",
+          "type": "topic"
+        },
+        {
+          "id": "5c56f1a3000000000e015559",
+          "name": "贵在坚持",
+          "type": "topic"
+        }
+      ],
+      "user": {
+        "userId": "5daac07e00000000010049f7",
+        "nickname": "小墨爱书法",
+        "avatar": "https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo30pcacsfnjs605ndao1v08ifnllkumr8"
+      },
+      "interactInfo": {
+        "likedCount": "10万+",
+        "collectedCount": "2万",
+        "commentCount": "1041",
+        "shareCount": "2601"
+      },
+      "imageList": [
+        {
+          "url": "",
+          "width": 1080,
+          "height": 1440
+        }
+      ],
+      "time": 1739258662000,
+      "lastUpdateTime": 1739258663000,
+      "shareInfo": {
+        "un_share": false
+      }
+    },
+    {
+      "noteId": "68d3de06000000000e00c0eb",
+      "keyword": "书法",
+      "xsecToken": "ABfUNzI22swWEVNxKZXLhCQDX446k7nyxHo83kFfJDjyw=",
+      "title": "我发现，起号失败的书法博主都有这些共性",
+      "desc": "做书法号3个月涨粉5000+，回头看那些没做起来的号，发现失败的原因真的太相似了...今天把踩过的坑扒开给你们看，新手别再重蹈覆辙!🤫\n1️⃣内容太“散”，没有价值锚点\n✅今天发一张临帖作业，明天晒新买的毛笔，后天录个写字的快镜头。粉丝根本不知道关注你能获得什么。\n✅我前期就犯过这错，后来专注“零基础楷书入门”，每条视频封面都打上“小白也能懂的书法课”标签，现在粉丝刷到就知道：“哦，是那个教入门干货的老师。”\n\t\n2️⃣只晒“成果”，没有“过程共鸣”\n✅一幅写好的漂亮字是基础，但光发“看我写的多好看”，粉丝看几次就无感了。\n✅换个角度：拍自己写崩了的瞬间（“练了100遍的‘永’字，还是像一坨墨疙瘩”）、洗笔洗到满手黑的狼狈（“书法生的手，没有干净的可能”）。\n\t\n3️⃣太“仙气”，忘了“烟火气”\n✅总想着展示“书法家”状态：环境必须雅致，作品必须完美。但真实的书法练习哪有天天出精品？\n✅我经常拍墨滴到纸上、字写歪了懊恼捶桌的场景，配文“今日书法状态：人菜瘾大”，反而评论区炸了，大家都在晒自己的“翻车”作品。这种“不完美”才是最强的粘合剂。\n\t\n4️⃣不会“抓热点”，但爱“追热点”\n✅看到别人发“挑战瘦金体”就跟着写，看到“用毛笔写流行歌词”也跟风，结果热点过了，你的视频还没什么流量。\n\t\n5️⃣舍不得“出声”，少了“人格魅力”\n✅总觉得“粉丝是来看字的，我不用说话”，但书法号的核心是“人+字”的情感与知识传递。\n✅多说说这个字的结构技巧，那个笔画的历史渊源，粉丝留言突然变多：“老师讲得真清楚”、“听你说话很治愈”。漂亮的字是敲门砖，你的讲解和陪伴才是留住粉丝的关键。\n\t\n6️⃣数据差就“灰心”，不懂“复盘优化”\n✅发了10条视频没流量就放弃，却没想过：是不是封面太暗？标题太文艺不够直接？内容太枯燥没人能看完？\n\t\n其实书法号真的不难做，毕竟大家对传统文化有天然的亲近感。但比起“展示书法”，更重要的是“让粉丝透过书法看到你”——你的教学方法、你的坚持、你对书法的理解和热爱，才是让别人持续关注你的理由。#热点[话题]# #书法[话题]# #书法老师[话题]# #硬笔书法[话题]# #书法的力量[话题]# #书法时间到[话题]# #如何做博主[话题]# #书法是一种生活状态[话题]# #软笔书法[话题]# #毛笔字[话题]#",
+      "type": "normal",
+      "tagList": [
+        {
+          "id": "5c46829d000000000e009c0a",
+          "name": "热点",
+          "type": "topic"
+        },
+        {
+          "id": "5be3a82e695ea90001e82ad9",
+          "name": "书法",
+          "type": "topic"
+        },
+        {
+          "id": "5f1915a50000000001006652",
+          "name": "书法老师",
+          "type": "topic"
+        },
+        {
+          "id": "5bec0dd8c3c3cb0001b80762",
+          "name": "硬笔书法",
+          "type": "topic"
+        },
+        {
+          "id": "60e94fc2000000000101ed3b",
+          "name": "书法的力量",
+          "type": "topic"
+        },
+        {
+          "type": "topic",
+          "id": "63427f7c000000000101c865",
+          "name": "书法时间到"
+        },
+        {
+          "id": "600b1d5b000000000100b1d8",
+          "name": "如何做博主",
+          "type": "topic"
+        },
+        {
+          "id": "626653830000000001006176",
+          "name": "书法是一种生活状态",
+          "type": "topic"
+        },
+        {
+          "id": "5cda3753000000000e00d7c3",
+          "name": "软笔书法",
+          "type": "topic"
+        },
+        {
+          "id": "5be5307c17dadd0001ac2b23",
+          "name": "毛笔字",
+          "type": "topic"
+        }
+      ],
+      "user": {
+        "userId": "670cd36c000000000d027392",
+        "nickname": "书法小栀",
+        "avatar": "https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo31matj30qmg705pocqdm3cssidlu3ss0"
+      },
+      "interactInfo": {
+        "likedCount": "612",
+        "collectedCount": "661",
+        "commentCount": "34",
+        "shareCount": "133"
+      },
+      "imageList": [
+        {
+          "url": "",
+          "width": 1235,
+          "height": 1680
+        }
+      ],
+      "time": 1758715398000,
+      "lastUpdateTime": 1758715399000,
+      "shareInfo": {
+        "un_share": false
+      }
+    },
+    {
+      "noteId": "69e219ca000000001f0061b5",
+      "keyword": "书法",
+      "xsecToken": "ABcZn6smJc1yEK3LO4j_3RnC7tiC4HT7ExnHQmmF2em00=",
+      "title": "",
+      "desc": "书法日常",
+      "type": "normal",
+      "tagList": [],
+      "user": {
+        "userId": "665fc9e7000000000700687f",
+        "nickname": "有利就有我",
+        "avatar": "https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo31rd2fn30no005pivp7jhoq3v5mtgjrg"
+      },
+      "interactInfo": {
+        "likedCount": "1288",
+        "collectedCount": "41",
+        "commentCount": "106",
+        "shareCount": "3"
+      },
+      "imageList": [
+        {
+          "url": "",
+          "width": 960,
+          "height": 1282
+        }
+      ],
+      "time": 1776425419000,
+      "lastUpdateTime": 1776425419000,
+      "shareInfo": {
+        "un_share": false
+      }
+    },
+    {
+      "noteId": "67e935a1000000000b02e66d",
+      "keyword": "书法",
+      "xsecToken": "ABF_zQNe63mCAAAOQZNF0A_3IHHPUF1gRHX2gycdDReFg=",
+      "title": "每一滴月光都值得温柔以待",
+      "desc": "“墨书素练问苍生：此生当如雪 不染尘与屑”\n[向右R]一场关于女性健康的无声宣言……\n近期卫生巾安全问题再度刺痛人心:荧光剂、甲醛超标、黑产翻新….…这些词像一根根刺，扎进4亿女性的日常\n\t\n「卫生巾不是羞耻的符号，而是生命的礼赞」\n\t\n✨它承载的不仅是生理周期的自然\n更是社会对女性权益的丈量\n当标准模糊时，我们呼吁透明;\n当黑产横行时，我们选择觉醒。\n[爱心R]每一片卫生巾都该如宣纸般纯净，如墨迹般坦诚。\n#搞得就是艺术的[话题]#  #女性力量[话题]##女性刚需[话题]# #卫生巾事件[话题]# #书法的力量[话题]# #书法人的浪漫[话题]# #书法与生活之美[话题]# #万物皆可写[话题]# #健康生活[话题]# #你们用的卫生巾踩雷了吗[PK]#",
+      "type": "normal",
+      "tagList": [
+        {
+          "id": "654e096a0000000003013c9a",
+          "name": "搞得就是艺术的",
+          "type": "topic"
+        },
+        {
+          "id": "5c2576c1000000000a03831f",
+          "name": "女性力量",
+          "type": "topic"
+        },
+        {
+          "id": "65a35cfd000000003f02fbb8",
+          "name": "女性刚需",
+          "type": "topic"
+        },
+        {
+          "id": "647348bb0000000025024387",
+          "name": "卫生巾事件",
+          "type": "topic"
+        },
+        {
+          "id": "60e94fc2000000000101ed3b",
+          "name": "书法的力量",
+          "type": "topic"
+        },
+        {
+          "id": "61b96c730000000001000aa6",
+          "name": "书法人的浪漫",
+          "type": "topic"
+        },
+        {
+          "id": "624ba1de000000000100803d",
+          "name": "书法与生活之美",
+          "type": "topic"
+        },
+        {
+          "id": "60cad9c500000000010065b7",
+          "name": "万物皆可写",
+          "type": "topic"
+        },
+        {
+          "id": "60481567000000000101fd80",
+          "name": "健康生活",
+          "type": "topic"
+        },
+        {
+          "id": "137334729199322074",
+          "name": "你们用的卫生巾踩雷了吗",
+          "type": "interact_pk"
+        }
+      ],
+      "user": {
+        "userId": "6013bd39000000000101ce3e",
+        "nickname": "溪月",
+        "avatar": "https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo30obvj3ss2m005o0jnksgbjhu3160rf0"
+      },
+      "interactInfo": {
+        "likedCount": "651",
+        "collectedCount": "80",
+        "commentCount": "211",
+        "shareCount": "316"
+      },
+      "imageList": [
+        {
+          "url": "",
+          "width": 1920,
+          "height": 2560
+        },
+        {
+          "url": "",
+          "width": 1920,
+          "height": 2560
+        }
+      ],
+      "time": 1743336865000,
+      "lastUpdateTime": 1743336865000,
+      "shareInfo": {
+        "un_share": false
+      }
+    },
+    {
+      "noteId": "68268ade00000000220298ba",
+      "keyword": "书法",
+      "xsecToken": "ABvsUc4wxQa_BXIrcj-5JOZskDJPF8xERJe5R_4pMaa18=",
+      "title": "五选一，这次我选1",
+      "desc": "#硬笔规范字[话题]# #硬笔书法[话题]# #手写[话题]# #规范字书写[话题]# #练字[话题]# #我的书法分享[话题]# #书法[话题]# #古诗词[话题]# #少儿硬笔书法[话题]# #每日练字打卡[话题]# #练字方法[话题]# #硬笔书法之美[话题]#",
+      "type": "normal",
+      "tagList": [
+        {
+          "id": "60080a32000000000100a36d",
+          "name": "硬笔规范字",
+          "type": "topic"
+        },
+        {
+          "id": "5bec0dd8c3c3cb0001b80762",
+          "name": "硬笔书法",
+          "type": "topic"
+        },
+        {
+          "id": "5be689d896f68c00017ccea9",
+          "name": "手写",
+          "type": "topic"
+        },
+        {
+          "id": "5c77807f000000000d028a39",
+          "name": "规范字书写",
+          "type": "topic"
+        },
+        {
+          "id": "5be2fc25a5142900018d6f4e",
+          "name": "练字",
+          "type": "topic"
+        },
+        {
+          "id": "5eb3985f0000000001004280",
+          "name": "我的书法分享",
+          "type": "topic"
+        },
+        {
+          "id": "5be3a82e695ea90001e82ad9",
+          "name": "书法",
+          "type": "topic"
+        },
+        {
+          "id": "635fc349000000000100823e",
+          "name": "古诗词",
+          "type": "topic"
+        },
+        {
+          "id": "5dc6c721000000000100bca3",
+          "name": "少儿硬笔书法",
+          "type": "topic"
+        },
+        {
+          "id": "59449ba5cd30d845ea0e146b",
+          "name": "每日练字打卡",
+          "type": "topic"
+        },
+        {
+          "id": "5b007178092b5b71d1fb0672",
+          "name": "练字方法",
+          "type": "topic"
+        },
+        {
+          "name": "硬笔书法之美",
+          "type": "topic",
+          "id": "6364a333000000000101fbb8"
+        }
+      ],
+      "user": {
+        "userId": "63aefaaa0000000027036b30",
+        "nickname": "小段手写（收学员）",
+        "avatar": "https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo316ha3gp0go605oteval9uqpgaf31ma8"
+      },
+      "interactInfo": {
+        "likedCount": "9870",
+        "collectedCount": "5721",
+        "commentCount": "369",
+        "shareCount": "846"
+      },
+      "imageList": [
+        {
+          "url": "",
+          "width": 1920,
+          "height": 2560
+        },
+        {
+          "url": "",
+          "width": 1920,
+          "height": 2560
+        },
+        {
+          "url": "",
+          "width": 1920,
+          "height": 2560
+        },
+        {
+          "url": "",
+          "width": 1920,
+          "height": 2560
+        },
+        {
+          "url": "",
+          "width": 1920,
+          "height": 2560
+        }
+      ],
+      "time": 1747356383000,
+      "lastUpdateTime": 1747356383000,
+      "shareInfo": {
+        "un_share": false
+      }
+    },
+    {
+      "noteId": "69c6a96e000000001a02904d",
+      "keyword": "书法",
+      "xsecToken": "ABdM6w7EQ7Jz47xmx3WvWfI7jXdAqQXMnd5o9s2d5JpU8=",
+      "title": "硬笔行楷||游春词",
+      "desc": "高楼晓见一花开，便觉春光四面来。——令狐楚\n#练字静心[话题]# #行楷[话题]# #硬笔舞动之美[话题]#",
+      "type": "normal",
+      "tagList": [
+        {
+          "id": "5fe9cefc000000000100a88a",
+          "name": "练字静心",
+          "type": "topic"
+        },
+        {
+          "id": "5c3ff133000000000e0206c1",
+          "name": "行楷",
+          "type": "topic"
+        },
+        {
+          "id": "64883890000000002200e7d9",
+          "name": "硬笔舞动之美",
+          "type": "topic"
+        }
+      ],
+      "user": {
+        "userId": "5bb2c6d011be1033e8eff4a6",
+        "nickname": "羽山之北",
+        "avatar": "https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo31embdbksli4g4b8oe23d1t56m12reh8"
+      },
+      "interactInfo": {
+        "likedCount": "292",
+        "collectedCount": "124",
+        "commentCount": "14",
+        "shareCount": "8"
+      },
+      "imageList": [
+        {
+          "url": "",
+          "width": 3024,
+          "height": 4032
+        }
+      ],
+      "time": 1774627182000,
+      "lastUpdateTime": 1774627182000,
+      "shareInfo": {
+        "un_share": false
+      }
+    },
+    {
+      "noteId": "6a43d88f00000000080337c0",
+      "keyword": "书法",
+      "xsecToken": "AB04sOb3IkRVgizdQTdTFH1RZLgDLIRx4NtlFJRX6MotQ=",
+      "title": "",
+      "desc": "成人硬笔书法怎么练呢？没有没有推荐的线上课？ 一位马上步入40＋女人想写一手好字的觉醒",
+      "type": "normal",
+      "tagList": [],
+      "user": {
+        "userId": "5a4ad0b84eacab0736247ff8",
+        "nickname": "小桃酥.",
+        "avatar": "https://sns-avatar-qc.xhscdn.com/avatar/637e1b9698495549306cb970.jpg"
+      },
+      "interactInfo": {
+        "likedCount": "13",
+        "collectedCount": "3",
+        "commentCount": "48",
+        "shareCount": "3"
+      },
+      "imageList": [
+        {
+          "url": "",
+          "width": 1200,
+          "height": 1600
+        }
+      ],
+      "time": 1782831247000,
+      "lastUpdateTime": 1782831248000,
+      "shareInfo": {
+        "un_share": false
+      }
+    },
+    {
+      "noteId": "69a3d8b20000000028020fad",
+      "keyword": "书法",
+      "xsecToken": "ABnK25_KLc1qrazzPZomLT0_xTYoKHb4V4mweFEU_ZV7A=",
+      "title": "三种书体的《陋室铭》",
+      "desc": "陈国昭用行书、楷书和草书三种书体创作刘禹锡的《陋室铭》#书法[话题]# #陋室铭[话题]#",
+      "type": "normal",
+      "tagList": [
+        {
+          "id": "5be3a82e695ea90001e82ad9",
+          "name": "书法",
+          "type": "topic"
+        },
+        {
+          "id": "5e76bed10000000001009048",
+          "name": "陋室铭",
+          "type": "topic"
+        }
+      ],
+      "user": {
+        "userId": "558e3ff3f5a2634941b372e0",
+        "nickname": "字曰",
+        "avatar": "https://sns-avatar-qc.xhscdn.com/avatar/5e0445e72863550001f8fe05.jpg"
+      },
+      "interactInfo": {
+        "likedCount": "1315",
+        "collectedCount": "890",
+        "commentCount": "38",
+        "shareCount": "237"
+      },
+      "imageList": [
+        {
+          "url": "",
+          "width": 1400,
+          "height": 2065
+        },
+        {
+          "url": "",
+          "width": 1127,
+          "height": 2048
+        },
+        {
+          "url": "",
+          "width": 1218,
+          "height": 1744
+        }
+      ],
+      "time": 1772355639000,
+      "lastUpdateTime": 1772345522000,
+      "shareInfo": {
+        "un_share": false
+      }
+    },
+    {
+      "noteId": "69931940000000001a02daca",
+      "keyword": "书法",
+      "xsecToken": "ABOQ7ZwwpBGYQZGbafDJ7KFjoPOkn1QQEtv9QYocIMv9E=",
+      "title": "",
+      "desc": "2025，我的书法班人数再创新高；我的股票收益再创新高；我的小红书粉丝数成为全常州书法老师中最高\n2026，愿我继续在书法的世界里落笔从容，心有山海；在股市里知行合一，复利奔跑[害羞R][害羞R][害羞R]",
+      "type": "normal",
+      "tagList": [],
+      "user": {
+        "userId": "5f3009870000000001004f23",
+        "nickname": "青山书法王老师",
+        "avatar": "https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo31n2b0bd3mg6g5npg163g8jp3mo1sj70"
+      },
+      "interactInfo": {
+        "likedCount": "325",
+        "collectedCount": "23",
+        "commentCount": "237",
+        "shareCount": "25"
+      },
+      "imageList": [
+        {
+          "url": "",
+          "width": 1080,
+          "height": 2400
+        },
+        {
+          "url": "",
+          "width": 840,
+          "height": 422
+        },
+        {
+          "url": "",
+          "width": 1053,
+          "height": 1132
+        }
+      ],
+      "time": 1771247936000,
+      "lastUpdateTime": 1771247937000,
+      "shareInfo": {
+        "un_share": false
+      }
+    },
+    {
+      "noteId": "6a2fa7dc000000001702c61c",
+      "keyword": "书法",
+      "xsecToken": "ABaBYBHHOnDvLMMF4i3yIrvtMkXQMmgvAGp37RizKbaUk=",
+      "title": "",
+      "desc": "打字也是一种文化",
+      "type": "normal",
+      "tagList": [],
+      "user": {
+        "userId": "696e28c3000000003700025e",
+        "nickname": "温文尔雅",
+        "avatar": "https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo31rh8nl4j0a6g5qbe531to0iupn0hjr0"
+      },
+      "interactInfo": {
+        "likedCount": "119",
+        "collectedCount": "37",
+        "commentCount": "697",
+        "shareCount": "6"
+      },
+      "imageList": [
+        {
+          "url": "",
+          "width": 1080,
+          "height": 1356
+        }
+      ],
+      "time": 1781508060000,
+      "lastUpdateTime": 1781508061000,
+      "shareInfo": {
+        "un_share": false
+      }
+    },
+    {
+      "noteId": "69e384430000000023022bfc",
+      "keyword": "书法",
+      "xsecToken": "ABrEf3--OwDiKCn6EQB3IDfeSJgzUi8_To2WMECrU9jfk=",
+      "title": "练习书法",
+      "desc": "#感恩父母[话题]# #愿天下所有的父母身体健康[话题]# #愿天下父母健康长寿[话题]# #愿天下所有老人都健康长寿[话题]# #家人最重要[话题]# #愿所有人平安健康[话题]# #身体健康[话题]# #书法作品[话题]# #身体健康才是福[话题]# #父母健康[话题]#",
+      "type": "normal",
+      "tagList": [
+        {
+          "id": "5c3204360000000009027925",
+          "name": "感恩父母",
+          "type": "topic"
+        },
+        {
+          "id": "61d26d4700000000010007bd",
+          "name": "愿天下所有的父母身体健康",
+          "type": "topic"
+        },
+        {
+          "id": "611f57cd000000000100140e",
+          "name": "愿天下父母健康长寿",
+          "type": "topic"
+        },
+        {
+          "id": "625a43740000000001007392",
+          "name": "愿天下所有老人都健康长寿",
+          "type": "topic"
+        },
+        {
+          "id": "5c21bf0d000000000301193c",
+          "name": "家人最重要",
+          "type": "topic"
+        },
+        {
+          "id": "610752030000000001003280",
+          "name": "愿所有人平安健康",
+          "type": "topic"
+        },
+        {
+          "id": "5be43351f4fc960001f969e1",
+          "name": "身体健康",
+          "type": "topic"
+        },
+        {
+          "id": "5c43ce2b000000000f0352f6",
+          "name": "书法作品",
+          "type": "topic"
+        },
+        {
+          "id": "6333b48c000000000101f96e",
+          "name": "身体健康才是福",
+          "type": "topic"
+        },
+        {
+          "id": "5bfd57e32698c300014d3b02",
+          "name": "父母健康",
+          "type": "topic"
+        }
+      ],
+      "user": {
+        "userId": "6713b9b7000000001d032c57",
+        "nickname": "松松的潦草小狗",
+        "avatar": "https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo31scusghq5c005pojn6rneb2n1pnvp6o"
+      },
+      "interactInfo": {
+        "likedCount": "249",
+        "collectedCount": "9",
+        "commentCount": "13",
+        "shareCount": "0"
+      },
+      "imageList": [
+        {
+          "url": "",
+          "width": 1776,
+          "height": 2364
+        }
+      ],
+      "time": 1776518211000,
+      "lastUpdateTime": 1776518211000,
+      "shareInfo": {
+        "un_share": false
+      }
+    },
+    {
+      "noteId": "6900261d000000000501238b",
+      "keyword": "书法",
+      "xsecToken": "ABfZkuWMCVm_x3M1YTzGpF_RolgJn5VLbDJorfx-QLxmc=",
+      "title": "相逢已是上上签，何须相思煮余年。",
+      "desc": "#书法日课[话题]# #相见便是缘[话题]# #写字是一种态度[话题]# #小楷[话题]##诗词的浪漫[话题]#",
+      "type": "normal",
+      "tagList": [
+        {
+          "type": "topic",
+          "id": "5c1c99410000000009006e74",
+          "name": "书法日课"
+        },
+        {
+          "name": "相见便是缘",
+          "type": "topic",
+          "id": "63d4a4a400000000010097d2"
+        },
+        {
+          "id": "5f112566000000000101e631",
+          "name": "写字是一种态度",
+          "type": "topic"
+        },
+        {
+          "id": "5bfb8a7fd71bbf0001cbc5fd",
+          "name": "小楷",
+          "type": "topic"
+        },
+        {
+          "name": "诗词的浪漫",
+          "type": "topic",
+          "id": "630ae6cf0000000001001441"
+        }
+      ],
+      "user": {
+        "userId": "63d71796000000002702831f",
+        "nickname": "宁之爱书写",
+        "avatar": "https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo31k091e9fj4505oun2ub9t0ovm525gl8"
+      },
+      "interactInfo": {
+        "likedCount": "3042",
+        "collectedCount": "1313",
+        "commentCount": "351",
+        "shareCount": "121"
+      },
+      "imageList": [
+        {
+          "url": "",
+          "width": 1682,
+          "height": 3892
+        }
+      ],
+      "time": 1761617437000,
+      "lastUpdateTime": 1761617513000,
+      "shareInfo": {
+        "un_share": false
+      }
+    },
+    {
+      "noteId": "6a48c1ba0000000016026ca9",
+      "keyword": "书法",
+      "xsecToken": "AB2W6nP5urHR2l8RmNmN2rF0yO1y1K6n-tZTxcAyXtsG0=",
+      "title": "",
+      "desc": "想给孩子找个书法班上，目前试听了两家，一家是机构，教孩子顿笔，握笔姿势，可以每晚去上课，一家是自己教，教了一个多小时的控笔，改握笔姿势，说是他那不教顿笔，控笔会让书写速度慢，时间上只有周六有时间去上课，价格差不多，该选哪家呢？#书法学习[话题]#",
+      "type": "normal",
+      "tagList": [
+        {
+          "id": "5c2d77cc000000000901b3e2",
+          "name": "书法学习",
+          "type": "topic"
+        }
+      ],
+      "user": {
+        "userId": "5e53aeb30000000001009b6b",
+        "nickname": "夏末未至",
+        "avatar": "https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo31bp7upf510605nijlqpg96rbgcf5geg"
+      },
+      "interactInfo": {
+        "likedCount": "57",
+        "collectedCount": "34",
+        "commentCount": "355",
+        "shareCount": "10"
+      },
+      "imageList": [
+        {
+          "url": "",
+          "width": 1200,
+          "height": 1600
+        }
+      ],
+      "time": 1783153082000,
+      "lastUpdateTime": 1783153082000,
+      "shareInfo": {
+        "un_share": false
+      }
+    },
+    {
+      "noteId": "68d0bd1d00000000070285db",
+      "keyword": "书法",
+      "xsecToken": "ABBqSI1BDuJyATjKbm_03PoqJdP-XkGo1yOOWj-hP7AxE=",
+      "title": "……",
+      "desc": "#写字是一种生活[话题]# #每天坚持练字[话题]# #就是因为热爱[话题]#",
+      "type": "normal",
+      "tagList": [
+        {
+          "id": "5bff9cf7a209fd000162c599",
+          "name": "写字是一种生活",
+          "type": "topic"
+        },
+        {
+          "id": "6182798b000000000100a8f5",
+          "name": "每天坚持练字",
+          "type": "topic"
+        },
+        {
+          "id": "600027990000000001002058",
+          "name": "就是因为热爱",
+          "type": "topic"
+        }
+      ],
+      "user": {
+        "userId": "68d0ba3b00000000210275d6",
+        "nickname": "聽君",
+        "avatar": "https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo31mnh8qvmli605q6gn8toctemau8g038"
+      },
+      "interactInfo": {
+        "likedCount": "2053",
+        "collectedCount": "500",
+        "commentCount": "110",
+        "shareCount": "44"
+      },
+      "imageList": [
+        {
+          "url": "",
+          "width": 2160,
+          "height": 3838
+        },
+        {
+          "url": "",
+          "width": 2160,
+          "height": 3838
+        },
+        {
+          "url": "",
+          "width": 2160,
+          "height": 3838
+        },
+        {
+          "url": "",
+          "width": 2160,
+          "height": 3838
+        }
+      ],
+      "time": 1758510365000,
+      "lastUpdateTime": 1758510509000,
+      "shareInfo": {
+        "un_share": false
+      }
+    },
+    {
+      "noteId": "6a4f7ff1000000001102ece6",
+      "keyword": "书法",
+      "xsecToken": "ABJgIYPayrBsfHo_eYimeytsDa2aG-8mZP4yt8Olmx2gU=",
+      "title": "我的书法分享",
+      "desc": "#书法[话题]# #我的书法分享[话题]# #书法作品[话题]# #书法打卡挑战[话题]# #书法创作[话题]# #书法的力量[话题]# #爱书法爱生活[话题]# #书法时间到[话题]# #原创书法作品[话题]# #今日书法练习[话题]#",
+      "type": "video",
+      "tagList": [
+        {
+          "id": "5be3a82e695ea90001e82ad9",
+          "name": "书法",
+          "type": "topic"
+        },
+        {
+          "id": "5eb3985f0000000001004280",
+          "name": "我的书法分享",
+          "type": "topic"
+        },
+        {
+          "type": "topic",
+          "id": "5c43ce2b000000000f0352f6",
+          "name": "书法作品"
+        },
+        {
+          "id": "64e6d3400000000018019089",
+          "name": "书法打卡挑战",
+          "type": "topic"
+        },
+        {
+          "id": "5d88d16c000000000103da43",
+          "name": "书法创作",
+          "type": "topic"
+        },
+        {
+          "name": "书法的力量",
+          "type": "topic",
+          "id": "60e94fc2000000000101ed3b"
+        },
+        {
+          "name": "爱书法爱生活",
+          "type": "topic",
+          "id": "619a149900000000010005db"
+        },
+        {
+          "id": "63427f7c000000000101c865",
+          "name": "书法时间到",
+          "type": "topic"
+        },
+        {
+          "type": "topic",
+          "id": "61079975000000000100793f",
+          "name": "原创书法作品"
+        },
+        {
+          "id": "6183f17c00000000010033c9",
+          "name": "今日书法练习",
+          "type": "topic"
+        }
+      ],
+      "user": {
+        "userId": "69d0698e00000000320365e1",
+        "nickname": "PP",
+        "avatar": "https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo32138tslk725g5qegd67cmpf16ilp5mo"
+      },
+      "interactInfo": {
+        "likedCount": "1015",
+        "collectedCount": "27",
+        "commentCount": "58",
+        "shareCount": "0"
+      },
+      "imageList": [
+        {
+          "url": "",
+          "width": 1032,
+          "height": 1920
+        }
+      ],
+      "time": 1783594993000,
+      "lastUpdateTime": 1783594994000,
+      "shareInfo": {
+        "un_share": false
+      }
+    },
+    {
+      "noteId": "66d3d536000000001d03a2fe",
+      "keyword": "书法",
+      "xsecToken": "ABK_o8XwR82ZiqQE08ZEH4g3K-xQtROsDx9zbrBc3qoLQ=",
+      "title": "书法班日常别光拍孩子上课的样子了",
+      "desc": "作为一位书法老师，在朋友圈展示自己的专业和亲和力是赢得家长信任的关键。\n别再只拍孩子的上课日常了，以下是一些建议，可以帮助你更好地利用朋友圈来展示自己：\n\t\n[樱花R]学生作品展示：\n[看R]发学生书法作品的前后对比图，展示他们的进步和你的教学质量。\n[看R]分享学生在书法比赛中获奖的作品，强调你的教学成果。\n[樱花R]课堂实录：\n[看R]捕捉并分享学生专注练习的瞬间，展示他们对书法的热爱和投入。\n[看R]记录课堂上的有趣互动，如学生之间的友好竞赛，或是你如何用创意方法激发学生兴趣。\n[樱花R]教学成果：\n[看R]分享学生的学习心得和家长的正面反馈，用真实的声音证明你的教学效果。\n[看R]展示学生通过学习书法带来的变化，如耐心、专注力的提升。\n[樱花R]个人作品：\n[看R]定期发布自己的书法创作，展示你的艺术才华和专业水准。\n[看R]分享你的创作过程，让家长和学生看到你对书法艺术的热情和执着。\n[樱花R]书法活动：\n[看R]宣传即将举行的书法比赛或活动，鼓励学生参与并展示他们的才华。\n[看R]分享比赛或活动的现场照片和回顾，记录学生的成长和经历。\n[樱花R]书法艺术欣赏：\n[看R]分享历史上著名书法家的作品，简单介绍其艺术特点和历史背景。\n[看R]引导学生欣赏并学习传统书法艺术，培养他们的审美能力。\n[樱花R]书法趣闻：\n[看R]分享书法相关的小故事或趣闻轶事，增加朋友圈的趣味性。\n[看R]通过轻松愉快的内容，让学生和家长在轻松的氛围中了解书法文化。\n[樱花R]传统文化元素：\n[看R]结合诗词、印章等传统文化元素，展示书法艺术的深厚底蕴。\n[看R]通过展示与书法相关的文化知识，提升自己的文化品位和教育价值。\n记得，朋友圈的内容要真实、自然，避免过度包装或夸大其词。通过持续地分享有价值的内容，你不仅能展示自己的专业能力，还能建立起与家长和学生之间的信任和联系。#书法作品形式[话题]# #书法培训[话题]# #传承书法艺术[话题]# #少儿书法[话题]# #教培机构[话题]#",
+      "type": "normal",
+      "tagList": [
+        {
+          "id": "6260f5ac000000000100bf79",
+          "name": "书法作品形式",
+          "type": "topic"
+        },
+        {
+          "id": "5c835b9e000000000e00f66a",
+          "name": "书法培训",
+          "type": "topic"
+        },
+        {
+          "id": "620c81cc00000000010053a1",
+          "name": "传承书法艺术",
+          "type": "topic"
+        },
+        {
+          "id": "5cc853df000000000d005872",
+          "name": "少儿书法",
+          "type": "topic"
+        },
+        {
+          "id": "601d0c01000000000100894e",
+          "name": "教培机构",
+          "type": "topic"
+        }
+      ],
+      "user": {
+        "userId": "5ca45a5b000000001703db55",
+        "nickname": "Nelly奶粒",
+        "avatar": "https://sns-avatar-qc.xhscdn.com/avatar/62a17b90b664f9b166c29382.jpg"
+      },
+      "interactInfo": {
+        "likedCount": "1140",
+        "collectedCount": "1252",
+        "commentCount": "24",
+        "shareCount": "335"
+      },
+      "imageList": [
+        {
+          "url": "",
+          "width": 1920,
+          "height": 2560
+        }
+      ],
+      "time": 1725158710000,
+      "lastUpdateTime": 1725158711000,
+      "shareInfo": {
+        "un_share": false
+      }
+    },
+    {
+      "noteId": "6a4a69230000000006021452",
+      "keyword": "书法",
+      "xsecToken": "AB-sgi_ISw-fxYt_26z0ZNqaEP5YdmvFPf6lUGcK3nZVg=",
+      "title": "当我练字时，心情也变好了",
+      "desc": "[星R]\n\t\n真正有价值的事情，\n都不是轻松舒服就能完成的。\n那些晨间的寂静，不眠的星光，\n清醒的克制，孤军奋战的坚持，\n暗暗许下的承诺，\n才是我热爱自己的时刻。\n#荆霄鹏行楷[话题]# #手写[话题]# #惊艳到你的句子[话题]# #练字静心[话题]# #文案[话题]# #书法打卡挑战[话题]# #崔方圆书法[话题]# #手写摘抄[话题]# #每日练字打卡[话题]# #随笔[话题]#",
+      "type": "normal",
+      "tagList": [
+        {
+          "id": "5ddaa2e8000000000100a20c",
+          "name": "荆霄鹏行楷",
+          "type": "topic"
+        },
+        {
+          "id": "5be689d896f68c00017ccea9",
+          "name": "手写",
+          "type": "topic"
+        },
+        {
+          "id": "5a4222be092b5b5f9696d0fc",
+          "name": "惊艳到你的句子",
+          "type": "topic"
+        },
+        {
+          "id": "5fe9cefc000000000100a88a",
+          "name": "练字静心",
+          "type": "topic"
+        },
+        {
+          "id": "5bfba3484283b500010f59fe",
+          "name": "文案",
+          "type": "topic"
+        },
+        {
+          "type": "topic",
+          "id": "64e6d3400000000018019089",
+          "name": "书法打卡挑战"
+        },
+        {
+          "type": "topic",
+          "id": "672592250000000021020864",
+          "name": "崔方圆书法"
+        },
+        {
+          "id": "5d3708e000000000180001bf",
+          "name": "手写摘抄",
+          "type": "topic"
+        },
+        {
+          "type": "topic",
+          "id": "59449ba5cd30d845ea0e146b",
+          "name": "每日练字打卡"
+        },
+        {
+          "name": "随笔",
+          "type": "topic",
+          "id": "53cfbd98b4c4d64f4a22afe5"
+        }
+      ],
+      "user": {
+        "userId": "67342c54000000001c01810e",
+        "nickname": "芷如练字",
+        "avatar": "https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo31ajpsros7c0g5ppk5ha7308emmi3a2o"
+      },
+      "interactInfo": {
+        "likedCount": "51",
+        "collectedCount": "15",
+        "commentCount": "21",
+        "shareCount": "2"
+      },
+      "imageList": [
+        {
+          "url": "",
+          "width": 3496,
+          "height": 4960
+        },
+        {
+          "url": "",
+          "width": 3326,
+          "height": 4846
+        },
+        {
+          "url": "",
+          "width": 4364,
+          "height": 6331
+        },
+        {
+          "url": "",
+          "width": 4369,
+          "height": 6332
+        }
+      ],
+      "time": 1783261475000,
+      "lastUpdateTime": 1783261476000,
+      "shareInfo": {
+        "un_share": false
+      }
+    },
+    {
+      "noteId": "6a4119d0000000000803e8d2",
+      "keyword": "书法",
+      "xsecToken": "ABEF6fzrKj8Wsall8nQkX4ONgxpO9Us6eFaGnq2-CsLi0=",
+      "title": "",
+      "desc": "有没有温州市区的练字搭子，写硬笔，有时候一个人静不下心（心理上有点障碍难以集中注意力）[哭惹R]#书法老师[话题]# #日常练字[话题]# #温州[话题]# #搭子[话题]# #书法搭子[话题]# #鹿城[话题]# #龙湾[话题]# #瓯海[话题]# #温州图书馆[话题]# #城市书房[话题]# #温州搭子[话题]# #行楷[话题]# 不是练字的其实也可以但是需要你很专注做事[皱眉R]初高中内容还记得也可以交流倘若需要的话[捂脸R]",
+      "type": "normal",
+      "tagList": [
+        {
+          "type": "topic",
+          "id": "5f1915a50000000001006652",
+          "name": "书法老师"
+        },
+        {
+          "id": "5c5e8e3b000000000f03da21",
+          "name": "日常练字",
+          "type": "topic"
+        },
+        {
+          "type": "topic",
+          "id": "540e746eb4c4d60f94ee755d",
+          "name": "温州"
+        },
+        {
+          "id": "618f8aed0000000001008a8f",
+          "name": "搭子",
+          "type": "topic"
+        },
+        {
+          "id": "64027b32000000001803931c",
+          "name": "书法搭子",
+          "type": "topic"
+        },
+        {
+          "id": "5e7ad02c0000000001006aa2",
+          "name": "鹿城",
+          "type": "topic"
+        },
+        {
+          "id": "5f5223b9000000000101cdf2",
+          "name": "龙湾",
+          "type": "topic"
+        },
+        {
+          "id": "60c441fa000000000101eb47",
+          "name": "瓯海",
+          "type": "topic"
+        },
+        {
+          "name": "温州图书馆",
+          "type": "topic",
+          "id": "5dbee77d000000000103a9d9"
+        },
+        {
+          "name": "城市书房",
+          "type": "topic",
+          "id": "5d258229000000000f03636d"
+        },
+        {
+          "type": "topic",
+          "id": "63e78ed5000000000100bbf3",
+          "name": "温州搭子"
+        },
+        {
+          "id": "5c3ff133000000000e0206c1",
+          "name": "行楷",
+          "type": "topic"
+        }
+      ],
+      "user": {
+        "userId": "66018aec000000000600df2c",
+        "nickname": "余烬",
+        "avatar": "https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo322281q4f7k005pg1hbm1hnpcvl7ffqo"
+      },
+      "interactInfo": {
+        "likedCount": "4",
+        "collectedCount": "0",
+        "commentCount": "8",
+        "shareCount": "1"
+      },
+      "imageList": [
+        {
+          "url": "",
+          "width": 1200,
+          "height": 1600
+        }
+      ],
+      "time": 1782651344000,
+      "lastUpdateTime": 1782651345000,
+      "shareInfo": {
+        "un_share": false
+      }
+    },
+    {
+      "noteId": "6a4f3d9d000000001c025910",
+      "keyword": "书法",
+      "xsecToken": "ABJgIYPayrBsfHo_eYimeytuFnhHj_DzfICH7keQ1qN_Y=",
+      "title": "自学书法，骂醒一个是一个！别想太天真",
+      "desc": "自学书法半年才懂：选对方向比瞎练更重要\n\t\n自学练字半年，最大的感悟就是：书法真的不是拼时间、拼数量的事。找对方法、避开新手常见误区，改掉自己的坏书写习惯，练字效率真的能提升一大截。\n\t\n入门打基础：稳稳扎根，不走歪路\n1. 别跟风乱选字帖\n很多新手刚开始练字，盲目跟风网红字帖、难度极高的古帖，风格太偏、技法太难，完全驾驭不了，越写越挫败。新手入门最稳妥的选择是唐楷，像《颜勤礼碑》《九成宫》，笔法规整、结构清晰，特别适合打基础。\n\t\n2. 忽视握笔和坐姿\n我刚开始只盯着写字，完全不注重姿势，每次练半小时手腕就又酸又累，长期下来还会养成坏毛病。新手直接用标准五指执笔法就够，笔杆控制在45到60度之间，姿势端正，练字才能持久不伤手。\n\t\n3. 跳过描红直接临摹\n不少人觉得描红没用，上手就直接对临，结果字形永远不准、结构混乱。正确的新手流程很简单：先花一两周描红，熟悉字体轮廓框架，再摹写找准笔画位置，最后再对临。日常练字可以按1:3的比例搭配描红和临写，慢慢把字写规整。\n\t\n进阶提分：拒绝内耗，高效精进\n1. 切忌贪多求快\n以前我每天狂写几十个字，看着特别用功，复盘却发现毫无进步。后来彻底调整方法，每天只精抠3到5个字，单个字反复练写，先打磨好起笔、行笔、收笔的细节，再调整字的疏密、倾斜结构，吃透一个字再练下一个，进步肉眼可见。\n\t\n2. 只动笔、不读帖\n单纯照着字帖照猫画虎，永远写不出字体的韵味。练字前一定要预留十分钟读帖，认真观察笔画的粗细、走向、轻重变化，读懂字体的书写逻辑，带着理解去临摹，才算有效练字。\n\t\n长期深耕：放平心态，稳步提升\n1. 急于自创字体\n很多人临摹还没学扎实，就急于自创风格、写怪异字体，写出来的字没有根基、杂乱无章。正确的节奏是先临摹做到形似，再慢慢意临，多看名家字帖吸收优点，循序渐进沉淀出自己的书写风格。\n\t\n2. 忽视章法与墨法\n平时只专注练单个字，不注重整篇书写，后期写整段、整幅字就会排版混乱、没有层次。建议每周抽一点时间通篇临摹原帖，感受字距、行距，练习墨色的浓淡干湿变化，提升整体篇章书写质感。\n#我的书法分享[话题]# #自学书法[话题]# #书法入门[话题]# #书法时间到[话题]# #今日书法练习[话题]# #书法打卡挑战[话题]# #书法是一种生活状态[话题]# #毛笔书法[话题]# #书法日课[话题]# #书法的力量[话题]#",
+      "type": "normal",
+      "tagList": [
+        {
+          "id": "5eb3985f0000000001004280",
+          "name": "我的书法分享",
+          "type": "topic"
+        },
+        {
+          "name": "自学书法",
+          "type": "topic",
+          "id": "5d307e6f000000000f009483"
+        },
+        {
+          "id": "5cfeefe9000000000d01b1be",
+          "name": "书法入门",
+          "type": "topic"
+        },
+        {
+          "id": "63427f7c000000000101c865",
+          "name": "书法时间到",
+          "type": "topic"
+        },
+        {
+          "type": "topic",
+          "id": "6183f17c00000000010033c9",
+          "name": "今日书法练习"
+        },
+        {
+          "type": "topic",
+          "id": "64e6d3400000000018019089",
+          "name": "书法打卡挑战"
+        },
+        {
+          "id": "626653830000000001006176",
+          "name": "书法是一种生活状态",
+          "type": "topic"
+        },
+        {
+          "id": "5bff4e7602ebf80001cf077f",
+          "name": "毛笔书法",
+          "type": "topic"
+        },
+        {
+          "id": "5c1c99410000000009006e74",
+          "name": "书法日课",
+          "type": "topic"
+        },
+        {
+          "id": "60e94fc2000000000101ed3b",
+          "name": "书法的力量",
+          "type": "topic"
+        }
+      ],
+      "user": {
+        "userId": "68157f27000000000a03cdc6",
+        "nickname": "爱吃小当家",
+        "avatar": "https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo31thgdcae5k005q0lfsjinje6vpfo2tg"
+      },
+      "interactInfo": {
+        "likedCount": "5",
+        "collectedCount": "4",
+        "commentCount": "0",
+        "shareCount": "0"
+      },
+      "imageList": [
+        {
+          "url": "",
+          "width": 3024,
+          "height": 4032
+        },
+        {
+          "url": "",
+          "width": 3024,
+          "height": 4032
+        },
+        {
+          "url": "",
+          "width": 3024,
+          "height": 4032
+        },
+        {
+          "url": "",
+          "width": 3024,
+          "height": 4032
+        },
+        {
+          "url": "",
+          "width": 3024,
+          "height": 4032
+        },
+        {
+          "url": "",
+          "width": 3024,
+          "height": 4032
+        },
+        {
+          "url": "",
+          "width": 3024,
+          "height": 4032
+        },
+        {
+          "url": "",
+          "width": 3024,
+          "height": 4032
+        }
+      ],
+      "time": 1783579202000,
+      "lastUpdateTime": 1783578014000,
+      "shareInfo": {
+        "un_share": false
+      }
+    }
+  ],
+  "failures": [
+    {
+      "noteId": "570356606690414380",
+      "xsecToken": "ABBSg37Dtr2v5xCES8lJcReo7X9L77qOuN1zSZCkDeq05t6BsPnxLBm-3t0kjfHNWB",
+      "code": -510000,
+      "msg": "笔记不存在"
+    },
+    {
+      "noteId": "570356591960138450",
+      "xsecToken": "ABD9JfqSpRNcvs9jbJoT2lJ_efpW-6yO-A4erWwn5t9e5DGNh9OeNCHLDjZa5LMZEs",
+      "code": -510000,
+      "msg": "笔记不存在"
+    },
+    {
+      "noteId": "570356646737788539",
+      "xsecToken": "ABHT6IWzajeDQKhric6pwqaeg_SNKfCf10rOy317lxDmCFqZcg8O2bpT60bjn2hFmJ",
+      "code": -510000,
+      "msg": "笔记不存在"
+    },
+    {
+      "noteId": "570356606812482973",
+      "xsecToken": "ABBSg37Dtr2v5xCES8lJcRem67LyaP-lqrI4dTXWOPfyB6iPLqJWaM2ioGcrpt7_EE",
+      "code": -510000,
+      "msg": "笔记不存在"
+    }
+  ]
+}

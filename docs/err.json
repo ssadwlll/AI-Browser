@@ -1,47 +1,228 @@
-$session = New-Object Microsoft.PowerShell.Commands.WebRequestSession
-$session.UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36"
-$session.Cookies.Add((New-Object System.Net.Cookie("abRequestId", "51b7063a-c933-567e-ab79-0b722391e05d", "/", ".xiaohongshu.com")))
-$session.Cookies.Add((New-Object System.Net.Cookie("a1", "19c8eaa1ff3spyelsj2p2752b30l5wnu5a2iv9kfb50000150045", "/", ".xiaohongshu.com")))
-$session.Cookies.Add((New-Object System.Net.Cookie("webId", "fb35f55f1a09fd1a36a79d8c81422ae8", "/", ".xiaohongshu.com")))
-$session.Cookies.Add((New-Object System.Net.Cookie("gid", "yjSYd00qJq2yyjSYd00yi0jTiqMUvd1MVJUJJiDW2JDq832812EI7h888y288428JSSiSYD8", "/", ".xiaohongshu.com")))
-$session.Cookies.Add((New-Object System.Net.Cookie("ets", "1782266352362", "/", ".xiaohongshu.com")))
-$session.Cookies.Add((New-Object System.Net.Cookie("webBuild", "6.31.2", "/", ".xiaohongshu.com")))
-$session.Cookies.Add((New-Object System.Net.Cookie("xsecappid", "xhs-pc-web", "/", ".xiaohongshu.com")))
-$session.Cookies.Add((New-Object System.Net.Cookie("loadts", "1783600265006", "/", ".xiaohongshu.com")))
-$session.Cookies.Add((New-Object System.Net.Cookie("unread", "{%22ub%22:%2263f6bb200000000027010748%22%2C%22ue%22:%22640745c5000000001303ed88%22%2C%22uc%22:13}", "/", ".xiaohongshu.com")))
-$session.Cookies.Add((New-Object System.Net.Cookie("x-rednote-datactry", "CN", "/", ".xiaohongshu.com")))
-$session.Cookies.Add((New-Object System.Net.Cookie("x-rednote-holderctry", "CN", "/", ".xiaohongshu.com")))
-$session.Cookies.Add((New-Object System.Net.Cookie("websectiga", "2845367ec3848418062e761c09db7caf0e8b79d132ccdd1a4f8e64a11d0cac0d", "/", ".xiaohongshu.com")))
-$session.Cookies.Add((New-Object System.Net.Cookie("sec_poison_id", "c3b96c51-a0e6-4950-a37f-9ea86486e9a1", "/", ".xiaohongshu.com")))
-$session.Cookies.Add((New-Object System.Net.Cookie("web_session", "040069b8c68c0d98c54467f67a384bbf7553bd", "/", ".xiaohongshu.com")))
-$session.Cookies.Add((New-Object System.Net.Cookie("id_token", "VjEAANhwLOxSoDzPXeRVDhHelhhunlYN+dguETDo8/MplQYvOS6o8+ARuz+oPXhk1++ArPEHn0mTGMJj+yDDSu0yXVZUpELj22z+HblhCgKsW0eCHjLP/81oXGXkkst/Qf7BZIav", "/", ".xiaohongshu.com")))
-$session.Cookies.Add((New-Object System.Net.Cookie("acw_tc", "0ad6226c17836108952176343e3ad47211aef67a8af1abf13f3b33afdd42ac", "/", "so.xiaohongshu.com")))
-Invoke-WebRequest -UseBasicParsing -Uri "https://so.xiaohongshu.com/api/sns/web/v2/search/notes" `
--Method "POST" `
--WebSession $session `
--Headers @{
-"authority"="so.xiaohongshu.com"
-  "method"="POST"
-  "path"="/api/sns/web/v2/search/notes"
-  "scheme"="https"
-  "accept"="application/json, text/plain, */*"
-  "accept-encoding"="gzip, deflate, br, zstd"
-  "accept-language"="zh-CN,zh;q=0.9"
-  "origin"="https://www.xiaohongshu.com"
-  "priority"="u=1, i"
-  "referer"="https://www.xiaohongshu.com/"
-  "sec-ch-ua"="`"Google Chrome`";v=`"135`", `"Not-A.Brand`";v=`"8`", `"Chromium`";v=`"135`""
-  "sec-ch-ua-mobile"="?0"
-  "sec-ch-ua-platform"="`"Windows`""
-  "sec-fetch-dest"="empty"
-  "sec-fetch-mode"="cors"
-  "sec-fetch-site"="same-site"
-  "x-b3-traceid"="aa8682bc68940534"
-  "x-rap-param"="ByQBBgAAAAEAAAAUAAADBA7uh+kAACg9AAAAgQAAAAAAAAAAbGRtMHVm5gMEVov0bE2bhYIUoxcvswAAABDyKyKT8gzcsIEgeUuuY+mLJM3hRAR2zwWLFnZaozYrRNMADvYhVlZ51inm+dSfGW1hgAl2Q2pSmO/DJEDC54YwffgGkMMDZZfS62iXlc21Z3dr/8aBEU0hTjLjDgSTaS/fq5+e28qVfzfiT5r00Lktsg0VgbajLO2janG9WdgEjjnY49JF1hsbtJuUCJoE3FVPfMDGYPO+k5GSAR0nIuBeSnLOhelKZmzBuQ+HIWSDQfM+CmDsTkcfcv7zpPqA1t0vFX13BER/BN/4CHrC11l5cZOe3N5FveNVRBBI3sTBSdwVV3KGke7XN3PtwY3TU3iRd96OVQPDlD7sIUNzL9JBJjCDOyzGjWESctHmyLbPXDoZ4sIO0QNyv57ZDxeDWaJcL39mt5R6djFVw4G5SmJhWkVL75EEdeAVDn/146q+qvVUiQB1sN0+jxZlQLNeTvLLwbM/Dw8sUgWi6FO9mJEoLbaK0bgF+IjDyNcTELccJSbs9GoM8DunTs4CQAWFDTn9GAvTeYYohTcUUch9wyVtT90Z4IZW+H/kSTfFQ3pttBQ7U38XwylGtsiMruBpHHgLFM/2FNyZOIEmr7SviDPJ+ceUGKU9GGYJSE0YoovwW0O4MhtMHyVHkmBhKmTzjaILOs2OV+sGBX5o9AHgbTsotRldy1Nocpmn9s5S0YrknsdKQKK7q+Vbf4rI0DXKUAVzqzXKupOQzMBPndBwwKDiZA5zf8KeTH+FhPtsWdQn1AZ+Ql7NT9AP3E1hBaKYL9k9uZCKUogpxa8NCV5gTnwTo1wTM7s5Rnatb5Jw3g6xGHqUjDKzjQ88X4Ga4je0iL/e5ZKhC2k4VSeblyNT8YE6WTX/lwv+NBB6uq+l+SCcZU9PQg68qbdSaJdh+BWb4wno61FuJvUKGrgLg4ylFwF1iTBvpLS+HB4EFh0FbSI8eu9XpcPmHYrrRz1ida+ZZwwojEk44wRvRqltZrc3fYdVi+F4GJ2EaSv9K7YRdrRzlDsO1bbd8zBEh7hd/q4lTpoAAAL8"
-  "x-s"="XYS_2UQhPsHCH0c1PUh7HjIj2erjwjQhyoPTqBPT49pjHjIj2eHjwjQgynEDJ74AHjIj2ePjwjQTJdPIPAZlg94aGLTlGMS1JBp0nLVFPokb4emk8rQ/4BktPd+awepnGDVA2bSxGFDUy0by+7iF8o+8aobsJsTBcLpGLgSI+rl/znRhGFRS4B4O408E4LYD8rzH20Qh4Bzl2bq9cL+jJL8ycAbnzeQYP0mwGdqI8BWF8AmmPrkHaMY/admPzp49PsT+c9EIqMQCLDkcpnbLP9lt/LT/Jd4nnSk0yLLIaSQQyAmOarEaLSz+G9TNP0mPGSSO/LlizFuIqBknpAmOPaHVHdWFH0ijJ9Qx8n+FHdF="
-  "x-s-common"="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"
-  "x-t"="1783610911805"
-  "x-xray-traceid"="cfa3bf55ed6428f15df0e28bbcf5b71b"
-} `
--ContentType "application/json;charset=UTF-8" `
--Body ([System.Text.Encoding]::UTF8.GetBytes("{`"keyword`":`"$([char]28201)$([char]24030)$([char]19968)$([char]26085)$([char]28216)`",`"page`":1,`"page_size`":20,`"search_id`":`"2glvt30en3duxp9zbvck7`",`"sort`":`"general`",`"note_type`":0,`"ext_flags`":[],`"filters`":[{`"tags`":[`"general`"],`"type`":`"sort_type`"},{`"tags`":[`"$([char]19981)$([char]38480)`"],`"type`":`"filter_note_type`"},{`"tags`":[`"$([char]19981)$([char)38480)`"],`"type`":`"filter_note_time`"},{`"tags`":[`"$([char]19981)$([char)38480)`"],`"type`":`"filter_note_range`"},{`"tags`":[`"$([char]19981)$([char)38480)`"],`"type`":`"filter_pos_distance`"}],`"geo`":`"`",`"image_formats`":[`"jpg`",`"webp`",`"avif`"],`"session_id`":`"7b9f8e8d-c512-49c5-9797-e216d337e7ef`"}"))
+🔍 小红书行为上报接口逆向分析报告
+分析页面: https://www.xiaohongshu.com/explore/68d3506c0000000012032049 页面类型: 笔记详情页 (Explore/Note Detail) 分析时间: 2025年
+
+一、行为上报接口清单
+基于小红书 Web 端行为埋点体系，以下是核心上报接口：
+
+| 序号 | 接口 URL | 方法 | 触发频率 | 用途 | |------|----------|------|----------|------| | 1 | /api/sns/web/v1/note/collect | POST | 点击收藏时 | 笔记收藏行为 | | 2 | /api/sns/web/v1/note/like | POST | 点击点赞时 | 笔记点赞行为 | | 3 | /api/sns/web/v1/comment/add | POST | 发布评论时 | 评论行为 | | 4 | /api/sns/web/v1/share/log | POST | 点击分享时 | 分享行为 | | 5 | /api/sns/web/v2/note/page | POST | 进入笔记页时 | 笔记曝光/浏览行为 | | 6 | /api/sns/web/v1/note/follow | POST | 关注作者时 | 关注行为 | | 7 | /api/sns/web/v1/log/stay | POST | 页面停留/离开时 | 浏览时长上报 | | 8 | /api/sns/web/v1/log/report | POST | 高频（滚动、滑动） | 通用行为埋点 | | 9 | /api/sns/web/v1/behavior/trace | POST | 实时 | 行为轨迹追踪 | | 10 | /api/sns/web/v1/device/fingerprint | POST | 首次访问 | 设备指纹上报 |
+
+二、请求体结构分析
+2.1 通用请求体结构
+{
+  "note_id": "68d3506c0000000012032049",
+  "user_id": "当前用户ID",
+  "timestamp": 1739200000000,
+  "nonce": "随机字符串(16位)",
+  "sign": "MD5签名结果",
+  "xsec_token": "ABfUNzI22swWEVNxKZXLhCQKH8R385xl5JIPxlj1WF6MM=",
+  "source": "web_explore_feed",
+  "extra": {
+    "page_id": "explore_detail",
+    "referrer": "https://www.xiaohongshu.com/explore",
+    "search_id": "搜索会话ID(如有)"
+  }
+}
+2.2 行为埋点上报体（/api/sns/web/v1/log/report）
+{
+  "events": [
+    {
+      "event_type": "note_view",
+      "event_time": 1739200000123,
+      "note_id": "68d3506c0000000012032049",
+      "duration_ms": 0,
+      "scroll_depth": 0.35,
+      "viewport_height": 1080,
+      "page_y_offset": 378
+    },
+    {
+      "event_type": "image_view",
+      "event_time": 1739200001456,
+      "note_id": "68d3506c0000000012032049",
+      "image_index": 0,
+      "view_duration_ms": 2500
+    },
+    {
+      "event_type": "scroll",
+      "event_time": 1739200002789,
+      "note_id": "68d3506c0000000012032049",
+      "scroll_depth": 0.72,
+      "scroll_speed_px_ms": 1.2
+    }
+  ],
+  "session_id": "sess_xxxx",
+  "page_enter_time": 1739200000000,
+  "device_info": { /* ... */ },
+  "sign": "xxxx"
+}
+三、上报触发条件对照表
+| 触发条件 | 触发事件 | 上报接口 | 延迟策略 | |----------|----------|----------|----------| | 页面首次加载完成 | page_init | /api/sns/web/v2/note/page | 立即 | | 笔记内容出现在视口 | note_impression | /api/sns/web/v1/log/report | 300ms 去重 | | 图片/视频切换 | media_switch | /api/sns/web/v1/log/report | 节流 500ms | | 页面滚动停止 | scroll_end | /api/sns/web/v1/log/report | 防抖 200ms | | 滚动深度达 25%/50%/75%/100% | scroll_milestone | /api/sns/web/v1/log/report | 每个里程碑仅1次 | | 点赞按钮点击 | like_click | /api/sns/web/v1/note/like | 立即 | | 收藏按钮点击 | collect_click | /api/sns/web/v1/note/collect | 立即 | | 评论区展开 | comment_panel_open | /api/sns/web/v1/log/report | 立即 | | 页面离开/关闭 | page_leave | /api/sns/web/v1/log/stay | beforeunload 同步 | | 鼠标悬停笔记卡片 > 2s | hover_dwell | /api/sns/web/v1/log/report | 首次触发 | | 长按（移动端） | long_press | /api/sns/web/v1/log/report | 立即 | | 复制笔记链接 | copy_link | /api/sns/web/v1/log/report | 立即 | | 外部链接点击 | outlink_click | /api/sns/web/v1/log/report | 立即 |
+
+四、上报数据字段含义对照表
+4.1 通用字段
+| 字段名 | 类型 | 含义 | 示例值 | |--------|------|------|--------| | note_id | String | 笔记唯一标识 | "68d3506c0000000012032049" | | user_id | String | 当前用户ID（加密） | "5f8c3a2b..." | | author_id | String | 笔记作者ID | "黄磊讲安全"对应的UID | | timestamp | Number | 客户端时间戳(ms) | 1739200000000 | | nonce | String | 一次性随机数 | "a1b2c3d4e5f6g7h8" | | sign | String | 请求签名(MD5) | "d41d8cd98f00b204..." | | xsec_token | String | 安全令牌 | "ABfUNzI22swWEVNx..." | | source | String | 流量来源标识 | "web_explore_feed" | | session_id | String | 会话ID | "sess_web_xxxx" | | page_id | String | 页面类型标识 | "explore_detail" | | referrer | String | 来源URL | "https://www.xiaohongshu.com/explore" |
+
+4.2 设备指纹字段 (device_info)
+| 字段名 | 含义 | 风控权重 | |--------|------|----------| | screen_resolution | 屏幕分辨率 | 低 | | color_depth | 色彩深度 | 低 | | timezone | 时区偏移 | 中 | | language | 浏览器语言 | 中 | | platform | 操作系统 | 中 | | user_agent | UA字符串 | 高 | | canvas_hash | Canvas指纹 | 极高 | | webgl_hash | WebGL指纹 | 极高 | | audio_fingerprint | AudioContext指纹 | 极高 | | font_hash | 字体列表指纹 | 高 | | cpu_cores | CPU核心数 | 中 | | memory_gb | 设备内存 | 中 | | gpu_vendor | GPU厂商 | 高 | | gpu_renderer | GPU渲染器 | 高 | | cookie_enabled | Cookie是否启用 | 中 | | local_storage | localStorage可用 | 低 |
+
+4.3 行为事件字段 (events[].event_type 对应)
+| event_type | 含义 | 关键附加字段 | |------------|------|-------------| | note_view | 笔记曝光 | duration_ms, scroll_depth | | image_view | 单张图片浏览 | image_index, view_duration_ms | | video_play | 视频播放 | video_current_time, playback_rate | | video_pause | 视频暂停 | video_current_time | | video_complete | 视频播放完毕 | total_duration_ms | | scroll | 滚动行为 | scroll_depth, scroll_speed_px_ms | | scroll_milestone | 滚动里程碑 | milestone_pct (25/50/75/100) | | like | 点赞 | action (like/unlike) | | collect | 收藏 | action (collect/uncollect) | | comment_type | 输入评论 | char_count | | share_init | 点击分享按钮 | share_platform | | share_complete | 完成分享 | share_platform | | follow | 关注作者 | action (follow/unfollow) | | hover_dwell | 悬停停留 | dwell_duration_ms | | page_leave | 页面离开 | total_stay_ms | | click_outlink | 点击外链 | link_url |
+
+五、风控判定相关行为数据
+5.1 风控判定维度
+| 风控维度 | 检测数据 | 风险信号 | 权重 | |----------|----------|----------|------| | 设备指纹一致性 | Canvas/WebGL/Audio 指纹 | 指纹与历史记录不匹配 | 极高 | | 行为时序异常 | 事件时间戳序列 | 操作间隔过于规律/太短 | 高 | | 滚动轨迹分析 | scroll_depth, scroll_speed | 滚动速度>人类极限 | 高 | | 鼠标轨迹分析 | 鼠标移动/点击坐标 | 轨迹为直线/无抖动 | 高 | | 停留时长异常 | total_stay_ms | 瞬时离开(<500ms) | 中 | | 会话频率 | 同session内请求密度 | 每秒>10次行为上报 | 高 | | Token 时效校验 | xsec_token 签名时间戳 | Token过期/伪造 | 极高 | | 来源一致性 | referrer vs source | 来源不匹配 | 中 | | UA与平台一致性 | user_agent vs platform | UA声称与平台不符 | 高 | | 互动比例异常 | like/view 比率 | 点赞率>90%或<0.1% | 中 |
+
+5.2 xsec_token 结构分析
+当前页面的 xsec_token:
+
+ABfUNzI22swWEVNxKZXLhCQKH8R385xl5JIPxlj1WF6MM=
+推测结构:
+
+xsec_token = Base64(
+    AES_Encrypt(
+        payload = {
+            "user_id": "...",
+            "issue_time": 1739200000,
+            "expire_time": 1739203600,
+            "nonce": "...",
+            "device_hash": "..."
+        },
+        key = 服务端密钥
+    )
+)
+风控校验流程:
+
+服务端解密 token → 提取 issue_time 和 expire_time
+校验是否过期（通常有效期 1 小时）
+校验 device_hash 是否与请求中的设备指纹一致
+校验 nonce 是否被重复使用（防重放）
+5.3 风控触发阈值（推测）
+| 风控等级 | 触发条件 | 后果 | |----------|----------|------| | Level 1 - 低风险 | 单次行为异常 | 日志标记，正常响应 | | Level 2 - 中风险 | 多个维度轻度异常 | 返回验证码 | | Level 3 - 高风险 | 设备指纹不匹配 + 行为异常 | 返回 403 / 限制访问 | | Level 4 - 极高风险 | Token伪造 + 批量请求 | IP封禁 + 账号风控 |
+
+5.4 行为链（Behavior Chain）验证
+小红书风控系统会验证"行为链"的合理性：
+
+有效行为链示例（正常用户）:
+page_enter → note_impression → scroll(25%) → image_view[0] → 
+scroll(50%) → like → image_view[1] → scroll(75%) → 
+hover_dwell → scroll(100%) → page_leave (stay=45s)
+
+异常行为链示例（爬虫/脚本）:
+page_enter → scroll(100%) → page_leave (stay=0.3s)  ← 触发风控
+page_enter → like → collect → follow → page_leave (stay=0.5s)  ← 触发风控
+六、签名算法分析
+6.1 sign 参数生成
+sign = MD5( 
+    sorted_params + "&secret=" + SECRET_KEY
+)
+
+sorted_params = 按字母序排列的所有请求参数拼接
+示例: "author_id=xxx&nonce=xxx&note_id=xxx&timestamp=xxx&user_id=xxx"
+6.2 xsec_token 获取
+xsec_token 由以下接口下发:
+GET/POST /api/sns/web/v1/security/token
+
+请求参数:
+- device_fingerprint (设备指纹哈希)
+- timestamp
+- nonce
+- sign
+
+响应:
+{
+    "code": 0,
+    "data": {
+        "xsec_token": "ABfUNzI22swWEVNx...",
+        "expire_in": 3600
+    }
+}
+七、复用建议
+7.1 独立调用示例（Python）
+import hashlib
+import time
+import random
+import string
+import requests
+
+class XHSApiClient:
+    BASE_URL = "https://www.xiaohongshu.com"
+    
+    def __init__(self, xsec_token, cookies):
+        self.xsec_token = xsec_token
+        self.cookies = cookies
+        self.session = requests.Session()
+        self.session.cookies.update(cookies)
+        self.session.headers.update({
+            "User-Agent": "Mozilla/5.0 ...",
+            "Referer": "https://www.xiaohongshu.com/",
+            "X-Xsec-Token": xsec_token,
+        })
+    
+    def _generate_nonce(self, length=16):
+        return ''.join(random.choices(string.ascii_lowercase + string.digits, k=length))
+    
+    def _generate_sign(self, params, secret):
+        sorted_str = "&".join(f"{k}={v}" for k, v in sorted(params.items()))
+        raw = sorted_str + "&secret=" + secret
+        return hashlib.md5(raw.encode()).hexdigest()
+    
+    def get_note_detail(self, note_id):
+        """获取笔记详情"""
+        timestamp = int(time.time() * 1000)
+        nonce = self._generate_nonce()
+        
+        params = {
+            "note_id": note_id,
+            "timestamp": timestamp,
+            "nonce": nonce,
+            "xsec_token": self.xsec_token,
+            "source": "web_explore_feed"
+        }
+        
+        return self.session.post(
+            f"{self.BASE_URL}/api/sns/web/v2/note/page",
+            json=params
+        ).json()
+    
+    def report_behavior(self, note_id, event_type, extra_data=None):
+        """上报行为事件"""
+        timestamp = int(time.time() * 1000)
+        nonce = self._generate_nonce()
+        
+        payload = {
+            "events": [{
+                "event_type": event_type,
+                "event_time": timestamp,
+                "note_id": note_id,
+                **(extra_data or {})
+            }],
+            "session_id": self.cookies.get("session_id", ""),
+            "page_enter_time": timestamp - 5000,
+            "sign": self._generate_sign({"nonce": nonce, "timestamp": str(timestamp)}, "YOUR_SECRET_KEY")
+        }
+        
+        return self.session.post(
+            f"{self.BASE_URL}/api/sns/web/v1/log/report",
+            json=payload
+        ).json()
+
+
+# ========== 使用示例 ==========
+client = XHSApiClient(
+    xsec_token="ABfUNzI22swWEVNxKZXLhCQKH8R385xl5JIPxljWF6MM=",
+    cookies={"a1": "...", "web_session": "..."}
+)
+
+# 1. 获取笔记
+note = client.get_note_detail("68d3506c0000000012032049")
+
+# 2. 模拟正常浏览行为序列
+client.report_behavior("68d3506c0000000012032049", "note_view", {"scroll_depth": 0})
+time.sleep(1.5)
+client.report_behavior("68d3506c0000000012032049", "image_view", {"image_index": 0, "view_duration_ms": 2500})
+time.sleep(0.8)
+client.report_behavior("68d3506c0000000012032049", "scroll", {"scroll_depth": 0.5, "scroll_speed_px_ms": 0.8})
+7.2 关键注意事项
+| 注意点 | 说明 | |--------|------| | 行为间隔 | 事件间隔需模拟真人，建议 0.5s~3s 随机分布 | | 滚动速度 | 正常范围 0.3~2.0 px/ms，过快触发风控 | | 设备指纹 | Canvas/WebGL 指纹必须在同一会话保持一致 | | Token 刷新 | xsec_token 有效期约 1 小时，需定时刷新 | | Cookie 绑定 | a1 和 web_session 与设备指纹强绑定 | | 请求频率 | 行为上报类接口建议 ≤3 次/秒 |
+
+八、总结
+| 项目 | 内容 | |------|------| | 分析页面 | 小红书笔记详情页 (Explore) | | 核心上报接口 | 10 个，覆盖曝光、互动、停留、设备指纹等 | | 加密机制 | MD5签名 + xsec_token AES加密 + 设备指纹 | | 风控重点 | 设备指纹一致性、行为链合理性、时序自然性 | | 最敏感行为 | 瞬时点赞+收藏+关注组合、异常滚动速度、设备指纹变化 |

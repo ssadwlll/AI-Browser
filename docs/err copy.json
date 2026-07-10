@@ -1,1 +1,94 @@
-Invoke-WebRequest -Uri "" -Method POST -Headers @{ "Accept" = "application/json, text/plain, */*" } -Headers @{ "Content-Type" = "application/json;charset=UTF-8" } -Headers @{ "Referer" = "" } -Headers @{ "User-Agent" = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.6478.234 Safari/537.36" } -Headers @{ "X-S-Common" = "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" } -Headers @{ "X-s" = "XYS_2UQhPsHCH0c1PUh7HjIj2erjwjQhyoPTqBPT49pjHjIj2eHjwjQgynEDJ74AHjIj2ePjwjQTJdPIPAZlg94aGLTl4npNJeQDzF8CnoSb4emk8epLyrEcPd+awepnGURx2bDFnLWUy0mg+FDF8b8dGDksGFYTtAmdLgSI+sTtySHhG0mLJ94T2L4c4BRgzSm/JdpQweGIGgQy4UVIc74y/0pPqr8Pzemw+Lu78bDE+A+mPrkHaMY/Pb4nwbcMPn8+c9EIqMQCLDkcpnbLP9I7LDT/JfznnSklyLLIaSQQyFzOarEaLSz+qFl3PDWApFL3qb8PJdiIy0zSpSbTpaHVHdWFH0ijJ9Qx8n+FHdF=" } -Headers @{ "X-t" = "1783596427046" } -Headers @{ "sec-ch-ua" = "\"Not/A)Brand\";v=\"8\", \"Chromium\";v=\"126\"" } -Headers @{ "sec-ch-ua-mobile" = "?0" } -Headers @{ "sec-ch-ua-platform" = "\"Windows\"" } -Headers @{ "x-b3-traceid" = "58fb4e107876648a" } -Headers @{ "x-xray-traceid" = "cfa350d390d309bdd12212cfb8d448a2" } -Headers @{ "Cookie" = "abRequestId=5c483ae6-79d8-57ec-be38-abca8c253755; ets=1782176482325; xsecappid=xhs-pc-web; a1=19ef1ff04eeqxhoa67yhlcnc072p8uizom2zryxwh50000227212; webId=c3b4a3c1474b840014e039cacc58fa9b; gid=yjdiyiiyKSliyjdiyii846vCddACxl0KWvx1JExSIS8WJu28UY73uF888JJWJyJ8f4YYKKyf; id_token=VjEAAG8r5UKRvyfqt1VUI2n2DtpZm2hn4yvwKwzM0KneIeMQ2zMpfkk3GzIllFk6EwrXe8ylrpaGIUbGATMeb8YB9zvXAfkXAnQ/DSS+DVbtXOb2mPHtuydkkJsiCVkdwDIxl+2b; x-rednote-datactry=CN; x-rednote-holderctry=CN; acw_tc=0a00d88117835946926277063e03885ec2dad033b81f155116b2004cab7849; web_session=030037ad0a8e90574d779ec2372d4aff24e69e; websectiga=88%3B6be45f388a1ee7bf611a69f3e174cae48f1ea02c0f8ec3256031b8be9c7ee; sec_poison_id=265fb8be-0274-421b-9f79-d5a8df4473c5; webBuild=6.31.2; loadts=1783596384709; unread={%22ub%22:%226a2b5fad000000003501e174%22%2C%22ue%22:%226a2627b8000000003502a056%22%2C%22uc%22:26}" } -Body '{"verifyType":"209","verifyUuid":"b79cceb8-4068-40f4-b672-5db0aef2e795","verifyBiz":471,"sourceSite":"","rid":"676f0520ed554f9dbb5ff49bbedac156"}'
+分析小红书网页向服务器提交的行为数据，找出所有行为上报接口和上报内容。
+
+步骤：
+1. 调用 get_captured_requests，urlFilter 设为空，resourceType 设为 XHR，includeBody 设为 true，limit 设为 50
+2. 从捕获的请求中筛选出所有 POST 请求，特别是包含以下关键词的 URL：
+   - report / track / log / metric / behavior / profile / shield / webprofile
+   - 注意 /api/sec/v1/shield/webprofile 这个端点
+3. 对每个行为上报请求，提取并分析：
+   - 请求 URL 和路径
+   - 请求体（JSON 结构、字段含义）
+   - 请求头中与行为相关的字段（x-b3-traceid, x-rap-param, x-s, x-s-common）
+   - 响应状态和内容
+4. 重点关注：哪些用户行为会触发上报（如页面加载、滚动、点击、停留时长、鼠标移动）
+5. 分析上报数据中是否包含：设备指纹、鼠标轨迹、滚动深度、停留时长、页面可见性变化
+6. 调用 execute_js 检查 window 对象上是否有行为采集相关的全局变量或事件监听器：
+   - 检查 window.addEventListener 的事件类型列表
+   - 检查 document 上 visibilitychange、scroll、click、mousemove 等事件监听器
+   - 检查是否有 MutationObserver 或 IntersectionObserver 用于行为采集
+
+输出：
+- 行为上报接口清单（URL、方法、请求体结构）
+- 上报触发条件（什么操作会触发上报）
+- 上报数据字段含义对照表
+- 哪些行为数据影响风控判定（如停留时长过短 = 机器人特征）
+
+
+
+分析小红书 x-rap-param 请求头的生成机制，找出如何动态生成该参数。
+
+步骤：
+1. 调用 get_captured_requests，urlFilter 设为 "edith.xiaohongshu.com"，resourceType 设为 XHR，includeBody 设为 true
+2. 从捕获请求的 requestHeaders 中提取 x-rap-param 的完整值，记录其 Base64 编码内容
+3. 调用 execute_js，在页面中解码 x-rap-param 的结构：
+   ```javascript
+   // 获取最近请求的 x-rap-param
+   var entries = performance.getEntriesByType('resource').filter(e => e.name.includes('edith.xiaohongshu.com'));
+   // 检查 window 上是否有 rap 相关全局变量
+   var rapKeys = Object.keys(window).filter(k => k.toLowerCase().includes('rap') || k.toLowerCase().includes('param'));
+   // 检查 localStorage 中是否有 rap 相关数据
+   var lsKeys = [];
+   for (var i = 0; i < localStorage.length; i++) {
+     var key = localStorage.key(i);
+     if (key.toLowerCase().includes('rap') || key.toLowerCase().includes('sign') || key.toLowerCase().includes('sdt')) {
+       lsKeys.push({ key, value: localStorage.getItem(key).substring(0, 500) });
+     }
+   }
+   return { rapKeys, lsKeys, entryCount: entries.length };
+
+```
+4.调用 get_captured_requests，urlFilter 设为 "so.xiaohongshu.com"，对比搜索请求和详情请求的 x-rap-param 是否不同
+5.如果 x-rap-param 在不同请求中值不同，说明是动态生成的；如果相同，说明是静态的
+6.调用 fetch_script_source 获取 vendor-dynamic.js 源码（URL 从页面 script 标签中获取），搜索 "rap" 或 "x-rap" 关键词
+7.调用 execute_js，在页面中搜索 x-rap-param 的设置位置：
+
+```JavaScript
+
+// 检查 fetch/XHR 拦截器
+var origFetch = window.fetch.toString();
+var origXHR = window.XMLHttpRequest.prototype.open.toString();
+var origSetHeader = window.XMLHttpRequest.prototype.setRequestHeader.toString();
+// 检查是否有 axios 拦截器
+var hasAxios = typeof window.axios !== 'undefined';
+// 检查 sdt_source_storage_key 配置
+var sdtConfig = localStorage.getItem('sdt_source_storage_key');
+return { origFetch: origFetch.substring(0, 500), origSetHeader: origSetHeader.substring(0, 500), hasAxios, sdtConfig: sdtConfig ? JSON.parse(sdtConfig) : null };
+调用 execute_js，尝试触发一次 API 请求并观察 x-rap-param 的生成：
+
+JavaScript
+
+// 拦截 setRequestHeader 捕获 x-rap-param
+var captured = [];
+var orig = XMLHttpRequest.prototype.setRequestHeader;
+XMLHttpRequest.prototype.setRequestHeader = function(name, value) {
+  if (name.toLowerCase() === 'x-rap-param') {
+    captured.push({ name, value: value.substring(0, 200), time: Date.now() });
+  }
+  return orig.apply(this, arguments);
+};
+// 等待 3 秒后返回捕获结果
+return new Promise(resolve => {
+  setTimeout(() => {
+    XMLHttpRequest.prototype.setRequestHeader = orig;
+    resolve({ captured, count: captured.length });
+  }, 3000);
+});
+```
+输出：
+
+x-rap-param 是静态还是动态（不同请求中值是否变化）
+x-rap-param 的生成位置（哪个 JS 文件、哪个函数）
+x-rap-param 的数据结构（解码后的字段含义）
+x-rap-param 与设备指纹/会话的关系
+是否可以通过 execute_js 调用页面函数动态生成新的 x-rap-param
+搜索 API 和详情 API 的 x-rap-param 是否可以互换使用

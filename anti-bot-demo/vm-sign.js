@@ -1,299 +1,533 @@
 /**
  * anti-bot-demo/vm-sign.js
  *
- * v3: 真正的二进制字节码 VM — 算法不再以 JS 源码形式存在
+ * v4: 深度防护 VM 签名引擎
  *
- * 核心变化 (v2 → v3):
- *   v2 问题: generateObfuscatedClientVM() 返回的是直接实现算法的 JS 代码
- *            AI 读取 _0x 变量名后能理解 atob + HMAC 流程，10 秒破解
- *   v3 修复: generateObfuscatedClientVM() 返回通用 VM 解释器 + 二进制字节码
- *            解释器是通用的 while+switch，不包含任何算法逻辑
- *            算法完全编码在 61 字节字节码中，AI 必须反汇编才能理解
- *
- * v3 防护层次:
- *   1. 通用 VM 解释器: AI 可读，但只学到 opcode 定义，不知道算法
- *   2. 二进制字节码: 61 字节，含垃圾指令/跳转/环境检测/反调试
- *   3. 控制流混淆: JMP 跳过垃圾块，PUSH/POP 干扰，诱饵代码路径
- *   4. 环境检测: ENV_CHECK 验证 window/document/navigator/screen
- *   5. 反调试: DBG_CHECK 通过时间差检测 debugger 暂停
- *   6. 动态挑战盐: per-session 随机盐，5 分钟过期 (v2 保留)
- *
- * AI 破解 v3 需要:
- *   1. 阅读 VM 解释器 → 学习 18 种 opcode 的语义
- *   2. 编写反汇编器 → 将 61 字节十六进制转为可读指令
- *   3. 分析字节码 → 区分真实指令与垃圾指令 (NOP/POP/PUSH_INT)
- *   4. 追踪跳转 → 理解 JMP 跳过的垃圾块
- *   5. 提取算法 → DECODE_KEY → LOAD → CONCAT4 → HMAC → RETURN
- *   6. 提取密钥 → 从 STR_POOL 反向 base64 解码
- *   对比 v2 (AI 直接读 JS): v3 至少需要人工分析 + 反汇编
+ * 改进点:
+ *   P0: 消除 crypto.subtle → 自定义 SBOX 哈希（无标准加密 API）
+ *   P0: 字节码 61 → 2000+ 字节（垃圾块 + 假分支）
+ *   P0: 密钥由字节码 XOR 链 + SBOX 查表生成 → 不在 STR_POOL 中
+ *   P1: 变长 varint 操作数编码
+ *   P1: 双层 VM 嵌套（外层解密+调度，内层执行）
+ *   P1: 浏览器依赖数组（26 项）+ 自定义 Base64
+ *   P2: 环境特征参与签名 + 静默反调试 + 签名动态性
  */
 
 'use strict';
 
-const crypto = require('crypto');
+const { compile } = require('./vm-compiler');
 
-// ======================= v3 指令集 (18 opcodes) =======================
+// ======================= S-Box =======================
+
+const SBOX = new Uint8Array(256);
+(function initSBox() {
+  for (let i = 0; i < 256; i++) SBOX[i] = i;
+  let seed = 0xDEADBEEF;
+  for (let i = 255; i > 0; i--) {
+    seed = (seed * 1103515245 + 12345) & 0x7FFFFFFF;
+    const j = seed % (i + 1);
+    [SBOX[i], SBOX[j]] = [SBOX[j], SBOX[i]];
+  }
+})();
+const SBOX_HEX = Buffer.from(SBOX).toString('hex');
+
+// ======================= 自定义 Base64 =======================
+
+const B64_ALPHABET = 'ZmserbBoHQtNP+wOcza/LpngG8yJq42KWYj0DSfdikx3VT16IlUAFM97hECvuRX5';
+
+function customB64Encode(data) {
+  const bytes = typeof data === 'string' ? Buffer.from(data, 'utf8') : Buffer.from(data);
+  let result = '';
+  for (let i = 0; i < bytes.length; i += 3) {
+    const a = bytes[i];
+    const b = i + 1 < bytes.length ? bytes[i + 1] : 0;
+    const c = i + 2 < bytes.length ? bytes[i + 2] : 0;
+    result += B64_ALPHABET[a >> 2];
+    result += B64_ALPHABET[((a & 3) << 4) | (b >> 4)];
+    result += i + 1 < bytes.length ? B64_ALPHABET[((b & 15) << 2) | (c >> 6)] : '=';
+    result += i + 2 < bytes.length ? B64_ALPHABET[c & 63] : '=';
+  }
+  return result;
+}
+
+// ======================= Varint 编码 =======================
+
+function encodeVarint(n) {
+  if (n < 0) throw new Error('varint negative: ' + n);
+  const bytes = [];
+  do {
+    let b = n & 0x7F;
+    n = Math.floor(n / 128);
+    if (n > 0) b |= 0x80;
+    bytes.push(b);
+  } while (n > 0);
+  return bytes;
+}
+
+function varintSize(n) {
+  if (n < 0) throw new Error('varint negative: ' + n);
+  if (n === 0) return 1;
+  let size = 0, v = n;
+  while (v > 0) { size++; v = Math.floor(v / 128); }
+  return size;
+}
+
+// ======================= 辅助函数 =======================
+
+function hexToBytes(hex) {
+  const bytes = new Uint8Array(hex.length / 2);
+  for (let i = 0; i < hex.length; i += 2) {
+    bytes[i / 2] = parseInt(hex.substr(i, 2), 16);
+  }
+  return bytes;
+}
+
+function bytesToHex(bytes) {
+  let hex = '';
+  for (let i = 0; i < bytes.length; i++) {
+    hex += (bytes[i] & 0xFF).toString(16).padStart(2, '0');
+  }
+  return hex;
+}
+
+// ======================= Opcode 定义 (35 个) =======================
+
+const OP = {
+  PUSH_STR: 0x01, PUSH_INT: 0x02, POP: 0x03, LOAD_REG: 0x04, STORE_REG: 0x05,
+  JMP: 0x06, JMP_IF: 0x07, XOR: 0x08, ADD: 0x09, SHL: 0x0A, SHR: 0x0B,
+  ROTL: 0x0C, ROTR: 0x0D, SBOX_L: 0x0E, CONCAT: 0x0F, STR_AT: 0x10,
+  STR_LEN: 0x11, B64_ENC: 0x12, B64_DEC: 0x13, LOAD_DEP: 0x14,
+  ENV_FEAT: 0x15, RAND: 0x16, CMP_EQ: 0x17, MUL: 0x18,
+  HASH_INIT: 0x19, HASH_UPDATE: 0x1A, HASH_FINAL: 0x1B,
+  NOP: 0x1C, DBG_CHECK: 0x1D, RETURN: 0x1E, DUP: 0x1F, SWAP: 0x20,
+  TO_STR: 0x21, MOD: 0x22, DECRYPT_INNER: 0x23, EXEC_INNER: 0x24,
+};
+
+// ======================= 浏览器依赖数组 (26 项) =======================
+
+function createDeps(isBrowser) {
+  var mockNav = {
+    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36',
+    platform: 'Win32',
+  };
+  var mockDoc = {
+    createElement: function() { return { getContext: function() { return null; }, style: {} }; },
+    cookie: '', referrer: '',
+  };
+  // typeof 检查避免 ReferenceError，在非浏览器环境自动降级到 mock
+  var _doc = (typeof document !== 'undefined') ? document : mockDoc;
+  var _nav = (typeof navigator !== 'undefined') ? navigator : mockNav;
+  var _perf = (typeof performance !== 'undefined') ? performance : require('perf_hooks').performance;
+  var _te = (typeof TextEncoder !== 'undefined') ? TextEncoder : require('util').TextEncoder;
+  var _evt = (typeof Event !== 'undefined') ? Event : function Event(t) { this.type = t; };
+  return [
+    undefined, {}, globalThis, undefined,
+    _perf,
+    encodeURIComponent, Array,
+    _te,
+    Date, Math, Uint8Array,
+    _doc,
+    setTimeout, RegExp, unescape, parseInt,
+    Object,
+    _nav,
+    undefined, Set, Function, String, Error,
+    undefined,
+    _evt,
+    Reflect,
+  ];
+}
+
+// ======================= 字节码汇编器 =======================
+
+function assemble(insts) {
+  const positions = new Array(insts.length).fill(0);
+  let offset = 0;
+  for (let i = 0; i < insts.length; i++) {
+    positions[i] = offset;
+    const inst = insts[i];
+    if (inst.label) continue;
+    let size = 1;
+    if (inst.op === OP.JMP || inst.op === OP.JMP_IF) {
+      size += 2;
+    } else if (inst.args) {
+      for (const a of inst.args) size += varintSize(a);
+    }
+    offset += size;
+  }
+  const labels = {};
+  for (let i = 0; i < insts.length; i++) {
+    if (insts[i].label) labels[insts[i].label] = positions[i];
+  }
+  const bytes = [];
+  for (let i = 0; i < insts.length; i++) {
+    const inst = insts[i];
+    if (inst.label) continue;
+    bytes.push(inst.op);
+    if (inst.op === OP.JMP || inst.op === OP.JMP_IF) {
+      const target = labels[inst.jump];
+      if (target === undefined) throw new Error('Unknown label: ' + inst.jump);
+      const rel = target - (positions[i] + 3);
+      bytes.push((rel >> 8) & 0xFF, rel & 0xFF);
+    } else if (inst.args) {
+      for (const a of inst.args) bytes.push(...encodeVarint(a));
+    }
+  }
+  return bytesToHex(new Uint8Array(bytes));
+}
+
+// ======================= 签名算法 DSL 源码 =======================
+// 开发者只需修改这段 DSL 即可改变签名算法，编译器自动处理:
+//   - 常量分裂 (字面常量不出现在字节码中)
+//   - 垃圾指令插入 (语句间随机混淆)
+//   - 假分支 (永真跳转跳过垃圾块)
+//   - 死代码 (RETURN 后追加不可达块)
+//   - 每次编译产生不同字节码
+
+const ALGORITHM_DSL = `
+func sign(path, body, ts, nonce, salt):
+    dbg_check()
+    env = env_feat()
+    rnd = rand()
+    seed1 = 0xA3 ^ 0x5C ^ 0x7E ^ 0x21
+    seed2 = 0x1F ^ 0x8B ^ 0xD4 ^ 0x06
+    key = ""
+    for i = 0 to 14:
+        k = sbox[sbox[seed1 ^ i] ^ seed2]
+        k = sbox[k ^ i]
+        key = key + char(k)
+    endfor
+    key = salt + key
+    keylen = len(key)
+    data = path + body + ts + nonce
+    data = data + char(env)
+    data = data + char(rnd)
+    datalen = len(data)
+    hash_init()
+    for counter = 0 to datalen:
+        kb = key[counter % keylen]
+        db = data[counter]
+        t1 = sbox[db ^ kb]
+        t2 = sbox[t1 ^ kb ^ counter]
+        hash_update(t2)
+    endfor
+    hash_update(sbox[env ^ rnd])
+    hash_update(sbox[seed1 ^ seed2])
+    dbg_check()
+    return hash_final()
+endfunc
+`;
+
+// ======================= 内层字节码加密 =======================
+
+function encryptBytecode(innerHex) {
+  const bytes = hexToBytes(innerHex);
+  const encrypted = new Uint8Array(bytes.length);
+  for (let i = 0; i < bytes.length; i++) {
+    encrypted[i] = bytes[i] ^ SBOX[i % 256];
+  }
+  return bytesToHex(encrypted);
+}
+
+// ======================= 预计算 (编译器只执行一次) =======================
 //
-// opcode  助记符       操作数      说明
-// 0x01    PUSH_STR    <hi><lo>    压入 STR_POOL[(hi<<8)|lo]
-// 0x02    PUSH_INT    <val>       压入整数
-// 0x03    POP                     弹出并丢弃栈顶
-// 0x04    LOAD        <idx>       压入 registers[idx]
-// 0x05    STORE       <idx>       弹出存入 registers[idx]
-// 0x06    JMP         <off>       pc += off (前向跳转)
-// 0x07    JMP_IF      <off>       弹出条件，为真则 pc += off
-// 0x08    DECODE_KEY              重组密钥 → R7 (baseKey + salt)
-// 0x09    CONCAT2                 弹出 a,b → 压入 a+b
-// 0x0A    CONCAT4                 弹出 a,b,c,d → 压入 a+b+c+d
-// 0x0B    HMAC                    弹出 key,data → 压入 HMAC-SHA256(key,data)
-// 0x0C    ENV_CHECK   <idx>       检查环境对象 [window,document,navigator,screen]
-// 0x0D    XOR_DECODE  <idx>       XOR 解码 STR_POOL[idx] (key=0x5A)
-// 0x0E    RETURN                  返回栈顶
-// 0x0F    NOP                     空操作 (垃圾指令)
-// 0x10    DBG_CHECK               反调试: 检测执行时间差
-// 0x11    CMP_EQ                  弹出 a,b → 压入 (a===b)
-// 0x12    HASH                    弹出 data → 压入 SHA256(data)
+// 流程: DSL源码 → compile() → 指令序列 + 字符串池
+//      → assemble() → 内层字节码
+//      → encryptBytecode() → 加密内层
+//      → 追加到字符串池末尾
+//      → 外层字节码引用字符串池最后一个元素 (加密内层)
 
-// ======================= 密钥编码 (同 v2) =======================
+const COMPILED = compile(ALGORITHM_DSL);
+const INNER_BC = assemble(COMPILED.instructions);
+const ENCRYPTED_INNER = encryptBytecode(INNER_BC);
+// 完整字符串池 = 编译器输出的字符串 + 加密内层字节码
+const STR_POOL = [...COMPILED.strPoolStrings, ENCRYPTED_INNER];
+// 加密内层在字符串池中的索引 (最后一个)
+const INNER_POOL_IDX = STR_POOL.length - 1;
+// 外层字节码: 解密内层 → 执行内层 → 返回
+const OUTER_BC = assemble([
+  { op: OP.DECRYPT_INNER, args: [INNER_POOL_IDX] },
+  { op: OP.EXEC_INNER },
+  { op: OP.RETURN },
+]);
 
-const KEY_RAW_PARTS = ['anti-bot-', 'demo-secr', 'et-2026'];
-const KEY_ENCODED = KEY_RAW_PARTS.map(p =>
-  Buffer.from(p, 'utf8').toString('base64').split('').reverse().join('')
-);
+// ======================= VM 类 =======================
 
-// ======================= 字符串池 (v3: 7 条目) =======================
-//
-// 索引 0-2: 密钥片段（打乱顺序，base64 逆转编码）
-// 索引 3:   重组顺序 [1, 2, 0]
-// 索引 4-6: 垃圾诱饵字符串（干扰分析）
-
-const STR_POOL = [
-  KEY_ENCODED[2],   // 0: "et-2026" 编码
-  KEY_ENCODED[0],   // 1: "anti-bot-" 编码
-  KEY_ENCODED[1],   // 2: "demo-secr" 编码
-  '\x01\x02\x00',   // 3: 重组顺序 [1, 2, 0]
-  'k7Px2mQ9rT3v',   // 4: 垃圾诱饵
-  'jB5cF1yD8wL2',   // 5: 垃圾诱饵
-  'nH6gV4xK9pM7',   // 6: 垃圾诱饵
-];
-
-// ======================= 字节码 (v3: 61 字节) =======================
-//
-// 反汇编:
-//   pc  hex         指令               说明
-//   0   0C 00       ENV_CHECK window    环境检测
-//   2   06 04       JMP +4             → 跳到 pc=8
-//   4   0F          NOP                 ┐ 垃圾
-//   5   02 39       PUSH_INT 57         │
-//   7   03          POP                 ┘
-//   8   0C 01       ENV_CHECK document  环境检测
-//  10   06 02       JMP +2             → 跳到 pc=14
-//  12   0F          NOP                 ┐ 垃圾
-//  13   0F          NOP                 ┘
-//  14   0C 02       ENV_CHECK navigator 环境检测
-//  16   0C 03       ENV_CHECK screen    环境检测
-//  18   10          DBG_CHECK           反调试检测
-//  19   06 08       JMP +8             → 跳到 pc=29
-//  21   01 00 04    PUSH_STR 4          ┐ 诱饵块
-//  24   04 05       LOAD R5             │ (全部跳过)
-//  26   09          CONCAT2             │
-//  27   05 06       STORE R6            │
-//  29   02 48       PUSH_INT 72         ┐ 垃圾 (执行但无效果)
-//  31   03          POP                 ┘
-//  32   0F          NOP
-//  33   08          DECODE_KEY          R7 = baseKey + salt
-//  34   04 00       LOAD R0             栈: [path]
-//  36   04 01       LOAD R1             栈: [path, body]
-//  38   06 01       JMP +1             → 跳到 pc=41
-//  40   0F          NOP                 ┐ 垃圾
-//  41   04 02       LOAD R2             栈: [path, body, ts]
-//  43   04 03       LOAD R3             栈: [path, body, ts, nonce]
-//  45   0A          CONCAT4             栈: [path+body+ts+nonce]
-//  46   01 00 05    PUSH_STR 5          ┐ 垃圾
-//  49   03          POP                 ┘
-//  50   02 63       PUSH_INT 99         ┐ 垃圾
-//  52   03          POP                 ┘
-//  53   01 00 06    PUSH_STR 6          ┐ 垃圾
-//  56   03          POP                 ┘
-//  57   04 07       LOAD R7             栈: [data, key]
-//  59   0B          HMAC                栈: [signature]
-//  60   0E          RETURN              返回 signature
-
-const BYTECODE_HEX = '0c0006040f0239030c0106020f0f0c020c0310060801000404050905060248030f080400040106010f040204030a010005030263030100060304070b0e';
-
-// ======================= VM 解释器 (服务端) =======================
-
-class SimpleVM {
-  constructor(bytecodeHex, strPool) {
-    this.bytecode = Buffer.from(bytecodeHex, 'hex');
+class VM {
+  constructor(sboxHex, b64Alphabet, bytecodeHex, strPool, isBrowser) {
+    this.sbox = hexToBytes(sboxHex);
+    this.b64 = b64Alphabet;
+    this.bytecode = hexToBytes(bytecodeHex);
     this.strPool = strPool;
-    this.pc = 0;
+    this.deps = createDeps(isBrowser);
     this.stack = [];
-    this.registers = new Array(8).fill(null);
-    this.startTime = Date.now();
+    this.registers = new Array(16).fill(0);
+    this.hashState = null;
+    this.hashIdx = 0;
+    this.dbgStartTime = 0;
+    this.dbgTriggered = false;
   }
 
-  decodeKey() {
-    const orderBytes = Buffer.from(this.strPool[3]);
-    const parts = [];
-    for (let i = 0; i < orderBytes.length; i++) {
-      const idx = orderBytes[i];
-      const encoded = this.strPool[idx];
-      const reversed = encoded.split('').reverse().join('');
-      parts.push(Buffer.from(reversed, 'base64').toString('utf8'));
+  readVarint(code, pc) {
+    let result = 0, shift = 0;
+    while (true) {
+      const byte = code[pc++];
+      result |= (byte & 0x7F) << shift;
+      shift += 7;
+      if (!(byte & 0x80)) break;
     }
-    const baseKey = parts.join('');
-    const salt = this.registers[4] || '';
-    return baseKey + salt;
+    return { value: result, nextPc: pc };
   }
 
-  run(args) {
-    for (let i = 0; i < Math.min(args.length, 5); i++) {
-      this.registers[i] = String(args[i]);
+  b64Encode(data) {
+    const str = typeof data === 'string' ? data : String(data);
+    const bytes = [];
+    for (let i = 0; i < str.length; i++) bytes.push(str.charCodeAt(i) & 0xFF);
+    let result = '';
+    for (let i = 0; i < bytes.length; i += 3) {
+      const a = bytes[i];
+      const b = i + 1 < bytes.length ? bytes[i + 1] : 0;
+      const c = i + 2 < bytes.length ? bytes[i + 2] : 0;
+      result += this.b64[a >> 2];
+      result += this.b64[((a & 3) << 4) | (b >> 4)];
+      result += i + 1 < bytes.length ? this.b64[((b & 15) << 2) | (c >> 6)] : '=';
+      result += i + 2 < bytes.length ? this.b64[c & 63] : '=';
     }
+    return result;
+  }
 
-    while (this.pc < this.bytecode.length) {
-      const op = this.bytecode[this.pc++];
+  run(path, body, ts, nonce, salt) {
+    this.stack = [];
+    this.registers = new Array(32).fill(0);
+    this.hashState = null;
+    this.hashIdx = 0;
+    this.dbgStartTime = this.deps[4].now();
+    this.dbgTriggered = false;
+    this.registers[0] = path;
+    this.registers[1] = body;
+    this.registers[2] = ts;
+    this.registers[3] = nonce;
+    this.registers[4] = salt;
+    return this.execute(this.bytecode, 0);
+  }
 
+  execute(code, startPc) {
+    let pc = startPc;
+    const stack = this.stack;
+    const regs = this.registers;
+    const sbox = this.sbox;
+    const deps = this.deps;
+
+    while (pc < code.length) {
+      const op = code[pc++];
       switch (op) {
-        case 0x01: { // PUSH_STR <hi> <lo>
-          const hi = this.bytecode[this.pc++];
-          const lo = this.bytecode[this.pc++];
-          this.stack.push(this.strPool[(hi << 8) | lo]);
+        case OP.PUSH_STR: { const r = this.readVarint(code, pc); pc = r.nextPc; stack.push(this.strPool[r.value]); break; }
+        case OP.PUSH_INT: { const r = this.readVarint(code, pc); pc = r.nextPc; stack.push(r.value); break; }
+        case OP.POP: stack.pop(); break;
+        case OP.LOAD_REG: { const r = this.readVarint(code, pc); pc = r.nextPc; stack.push(regs[r.value]); break; }
+        case OP.STORE_REG: { const r = this.readVarint(code, pc); pc = r.nextPc; regs[r.value] = stack.pop(); break; }
+        case OP.JMP: { const hi = code[pc++]; const lo = code[pc++]; let rel = (hi << 8) | lo; if (rel & 0x8000) rel -= 0x10000; pc += rel; break; }
+        case OP.JMP_IF: { const hi = code[pc++]; const lo = code[pc++]; let rel = (hi << 8) | lo; if (rel & 0x8000) rel -= 0x10000; if (stack.pop()) pc += rel; break; }
+        case OP.XOR: { const b = stack.pop(); const a = stack.pop(); stack.push((a ^ b) & 0xFF); break; }
+        case OP.ADD: { const b = stack.pop(); const a = stack.pop(); stack.push(a + b); break; }
+        case OP.SHL: { const n = stack.pop(); const a = stack.pop(); stack.push((a << n) & 0xFF); break; }
+        case OP.SHR: { const n = stack.pop(); const a = stack.pop(); stack.push((a >> n) & 0xFF); break; }
+        case OP.ROTL: { const n = stack.pop(); const a = stack.pop(); stack.push(((a << n) | (a >> (8 - n))) & 0xFF); break; }
+        case OP.ROTR: { const n = stack.pop(); const a = stack.pop(); stack.push(((a >> n) | (a << (8 - n))) & 0xFF); break; }
+        case OP.SBOX_L: { const idx = stack.pop(); stack.push(sbox[idx & 0xFF]); break; }
+        case OP.CONCAT: { const b = stack.pop(); const a = stack.pop(); stack.push(String(a) + String(b)); break; }
+        case OP.STR_AT: { const idx = stack.pop(); const str = stack.pop(); stack.push(String(str).charCodeAt(idx) || 0); break; }
+        case OP.STR_LEN: { const str = stack.pop(); stack.push(String(str).length); break; }
+        case OP.B64_ENC: { stack.push(this.b64Encode(stack.pop())); break; }
+        case OP.B64_DEC: { stack.push(this.b64Encode(stack.pop())); break; } // simplified
+        case OP.LOAD_DEP: { const r = this.readVarint(code, pc); pc = r.nextPc; stack.push(deps[r.value]); break; }
+        case OP.ENV_FEAT: {
+          let feat = 0;
+          const nav = deps[15], doc = deps[11];
+          if (nav && typeof nav === 'object' && 'userAgent' in nav) feat ^= 0x21;
+          if (doc && typeof doc === 'object' && 'createElement' in doc) feat ^= 0x43;
+          if (deps[4] && typeof deps[4].now === 'function') feat ^= 0x55;
+          if (deps[7]) feat ^= 0x67;
+          if (deps[22] && typeof deps[22] === 'function') feat ^= 0x33;
+          stack.push(feat);
           break;
         }
-        case 0x02: { // PUSH_INT <val>
-          this.stack.push(this.bytecode[this.pc++]);
+        case OP.RAND: {
+          const nonce = String(regs[3]);
+          let h = 0;
+          for (let i = 0; i < nonce.length; i++) h = ((h << 3) ^ nonce.charCodeAt(i)) & 0xFF;
+          stack.push(h);
           break;
         }
-        case 0x03: { // POP
-          this.stack.pop();
+        case OP.CMP_EQ: { const b = stack.pop(); const a = stack.pop(); stack.push(a === b ? 1 : 0); break; }
+        case OP.MUL: { const b = stack.pop(); const a = stack.pop(); stack.push(a * b); break; }
+        case OP.HASH_INIT: {
+          this.hashState = new Uint8Array(32);
+          for (let i = 0; i < 32; i++) this.hashState[i] = sbox[i] ^ 0x5A;
+          this.hashIdx = 0;
           break;
         }
-        case 0x04: { // LOAD <idx>
-          this.stack.push(this.registers[this.bytecode[this.pc++]]);
+        case OP.HASH_UPDATE: {
+          const byte = stack.pop() & 0xFF;
+          const idx = this.hashIdx;
+          const mixed = sbox[byte ^ this.hashState[idx]];
+          this.hashState[idx] = (this.hashState[idx] ^ mixed) & 0xFF;
+          const nextIdx = (idx + 7) % 32;
+          this.hashState[nextIdx] = (this.hashState[nextIdx] ^ sbox[mixed ^ 0xA5]) & 0xFF;
+          this.hashIdx = (idx + 1) % 32;
           break;
         }
-        case 0x05: { // STORE <idx>
-          this.registers[this.bytecode[this.pc++]] = this.stack.pop();
-          break;
-        }
-        case 0x06: { // JMP <off>
-          this.pc += this.bytecode[this.pc++];
-          break;
-        }
-        case 0x07: { // JMP_IF <off>
-          const off = this.bytecode[this.pc++];
-          if (this.stack.pop()) this.pc += off;
-          break;
-        }
-        case 0x08: { // DECODE_KEY
-          this.registers[7] = this.decodeKey();
-          break;
-        }
-        case 0x09: { // CONCAT2
-          const b = this.stack.pop();
-          const a = this.stack.pop();
-          this.stack.push(a + b);
-          break;
-        }
-        case 0x0A: { // CONCAT4
-          const d = this.stack.pop();
-          const c = this.stack.pop();
-          const b = this.stack.pop();
-          const a = this.stack.pop();
-          this.stack.push(a + b + c + d);
-          break;
-        }
-        case 0x0B: { // HMAC
-          const key = this.stack.pop();
-          const data = this.stack.pop();
-          const sig = crypto.createHmac('sha256', key).update(data, 'utf8').digest('hex');
-          this.stack.push(sig);
-          break;
-        }
-        case 0x0C: { // ENV_CHECK <idx> — 服务端跳过
-          this.pc++; // 跳过操作数
-          break;
-        }
-        case 0x0D: { // XOR_DECODE <idx>
-          const idx = this.bytecode[this.pc++];
-          const encoded = this.strPool[idx];
-          let decoded = '';
-          for (let i = 0; i < encoded.length; i++) {
-            decoded += String.fromCharCode(encoded.charCodeAt(i) ^ 0x5A);
+        case OP.HASH_FINAL: {
+          let hex = '';
+          for (let i = 0; i < 32; i++) hex += this.hashState[i].toString(16).padStart(2, '0');
+          if (this.dbgTriggered) {
+            let corrupted = '';
+            for (let i = 0; i < hex.length; i++) corrupted += (parseInt(hex[i], 16) ^ 0x5).toString(16);
+            hex = corrupted;
           }
-          this.stack.push(decoded);
+          stack.push(hex);
           break;
         }
-        case 0x0E: { // RETURN
-          return this.stack.pop();
-        }
-        case 0x0F: { // NOP
+        case OP.NOP: break;
+        case OP.DBG_CHECK: {
+          if (this.dbgStartTime > 0) {
+            const elapsed = deps[4].now() - this.dbgStartTime;
+            if (elapsed > 500) this.dbgTriggered = true;
+          }
           break;
         }
-        case 0x10: { // DBG_CHECK — 服务端跳过
+        case OP.RETURN: return stack.pop();
+        case OP.DUP: stack.push(stack[stack.length - 1]); break;
+        case OP.SWAP: { const t = stack[stack.length - 1]; stack[stack.length - 1] = stack[stack.length - 2]; stack[stack.length - 2] = t; break; }
+        case OP.TO_STR: { const v = stack.pop(); stack.push(typeof v === 'number' ? String.fromCharCode(v & 0xFF) : String(v)); break; }
+        case OP.MOD: { const b = stack.pop(); const a = stack.pop(); stack.push(b === 0 ? 0 : a % b); break; }
+        case OP.DECRYPT_INNER: {
+          const r = this.readVarint(code, pc); pc = r.nextPc;
+          const encBytes = hexToBytes(this.strPool[r.value]);
+          const decBytes = new Uint8Array(encBytes.length);
+          for (let i = 0; i < encBytes.length; i++) decBytes[i] = encBytes[i] ^ sbox[i % 256];
+          regs[31] = bytesToHex(decBytes);
           break;
         }
-        case 0x11: { // CMP_EQ
-          const b = this.stack.pop();
-          const a = this.stack.pop();
-          this.stack.push(a === b);
+        case OP.EXEC_INNER: {
+          const innerBytes = hexToBytes(regs[31]);
+          const result = this.execute(innerBytes, 0);
+          stack.push(result);
           break;
         }
-        case 0x12: { // HASH
-          const data = this.stack.pop();
-          const hash = crypto.createHash('sha256').update(data, 'utf8').digest('hex');
-          this.stack.push(hash);
-          break;
-        }
-        default:
-          throw new Error(`未知 opcode: 0x${op.toString(16).padStart(2, '0')} at pc=${this.pc - 1}`);
+        default: throw new Error('Unknown opcode: 0x' + op.toString(16));
       }
     }
-    return this.stack.pop();
+    return stack.length > 0 ? stack[stack.length - 1] : null;
   }
 }
 
-// ======================= 对外接口 =======================
+// ======================= 服务端签名函数 =======================
 
-function vmSign(path, body, timestamp, nonce, salt) {
-  const vm = new SimpleVM(BYTECODE_HEX, STR_POOL);
-  return vm.run([path, body, timestamp, nonce, salt]);
+function vmSign(path, body, ts, nonce, salt) {
+  try {
+    const vm = new VM(SBOX_HEX, B64_ALPHABET, OUTER_BC, STR_POOL, false);
+    return vm.run(path, body, ts, nonce, salt);
+  } catch (e) {
+    return 'ERR:' + Math.random().toString(36).substr(2, 10);
+  }
 }
 
-/**
- * 生成浏览器端 VM 引擎代码 (v3 核心)
- *
- * v3 关键变化: 返回通用 VM 解释器 + 二进制字节码，而非直接算法 JS
- *
- * AI 能看到: while+switch 解释器 (通用，不含算法)
- * AI 看不到: 算法逻辑 (编码在 61 字节字节码中)
- *
- * 结构:
- *   (function(){
- *     var POOL = [hex-escaped strings];
- *     var BC = "bytecode hex";
- *     var VM = parse(BC);
- *     function decodeKey(r) { ... }
- *     var ENV = [window, document, navigator, screen];
- *     return async function(path, body, ts, nonce, salt) {
- *       // 通用 VM 解释器: while + switch(18 opcodes)
- *     }
- *   })()
- */
+// ======================= 客户端 VM 代码生成 =======================
+
+// ===== 客户端 VM 源码加密 =====
+//
+// 安全模型:
+//   旧方案: VM.toString() 直接输出 class VM 源码 → AI 阅读 → 生成 Node.js 脚本 → 破解
+//   新方案: VM 源码经双层 XOR 加密 → 解码器桩在浏览器中解密 → new Function 执行
+//
+//   解码器桩逻辑:
+//     1. 从 hex 重建 SBOX
+//     2. 浏览器环境检查 → 从 SBOX 查表获取检查值 (非硬编码常量)
+//     3. 派生密钥: key[j] = SBOX[(salt+ko[j])%256] ^ checkVal[j]
+//     4. 解密: src[i] = enc[i] ^ SBOX[(i+salt)%256] ^ key[i%4]
+//     5. new Function(src)() 执行
+//
+//   在浏览器中: 4 项检查全部通过 → 检查值正确 → 密钥正确 → 源码正确解密
+//   在 Node.js 中: 检查失败 → 检查值=0 → 密钥错误 → 源码乱码 → 无法执行
+//
+//   每次页面加载: salt + 检查位置随机 → 加密结果不同 → 防重放
+
 function generateObfuscatedClientVM() {
-  function hexEscape(s) {
-    let r = '"';
-    for (let i = 0; i < s.length; i++) {
-      r += '\\x' + s.charCodeAt(i).toString(16).padStart(2, '0');
-    }
-    return r + '"';
-  }
-  const poolStr = STR_POOL.map(hexEscape).join(',');
+  // 1. 构建 VM 完整源码 (所有依赖打包为一个字符串)
+  const vmSource = [
+    'var OP=' + JSON.stringify(OP) + ';',
+    'var B64_ALPHABET=' + JSON.stringify(B64_ALPHABET) + ';',
+    'var SBOX_HEX=' + JSON.stringify(SBOX_HEX) + ';',
+    hexToBytes.toString(),
+    bytesToHex.toString(),
+    createDeps.toString(),
+    VM.toString(),
+    'var __vm=new VM(SBOX_HEX,B64_ALPHABET,' + JSON.stringify(OUTER_BC) + ',' + JSON.stringify(STR_POOL) + ',true);',
+    'return function(p,b,t,n,s){return __vm.run(p,b,t,n,s);};',
+  ].join('\n');
 
-  // 通用 VM 解释器 — 不含算法逻辑，算法在字节码中
-  return `(function(){var _0xP=[${poolStr}];var _0xB="${BYTECODE_HEX}";var _0xV=new Uint8Array(_0xB.length/2);for(var _0xi=0;_0xi<_0xB.length;_0xi+=2){_0xV[_0xi/2]=parseInt(_0xB.substr(_0xi,2),16);}function _0xDK(_0xr){var _0xo=[];for(var _0xi=0;_0xi<_0xP[3].length;_0xi++){_0xo.push(_0xP[3].charCodeAt(_0xi));}var _0xp=[];for(var _0xj=0;_0xj<_0xo.length;_0xj++){_0xp.push(atob(_0xP[_0xo[_0xj]].split("").reverse().join("")));}return _0xp.join("")+(_0xr[4]||"");}var _0xE=[window,document,navigator,screen];return async function(_0xa0,_0xa1,_0xa2,_0xa3,_0xa4){var _0xR=[_0xa0,_0xa1,_0xa2,_0xa3,_0xa4,null,null,null];var _0xS=[];var _0xpc=0;var _0xT=performance.now();while(_0xpc<_0xV.length){var _0xop=_0xV[_0xpc++];switch(_0xop){case 1:{var _0xh=_0xV[_0xpc++];var _0xl=_0xV[_0xpc++];_0xS.push(_0xP[(_0xh<<8)|_0xl]);break;}case 2:{_0xS.push(_0xV[_0xpc++]);break;}case 3:{_0xS.pop();break;}case 4:{_0xS.push(_0xR[_0xV[_0xpc++]]);break;}case 5:{_0xR[_0xV[_0xpc++]]=_0xS.pop();break;}case 6:{_0xpc+=_0xV[_0xpc++];break;}case 7:{var _0xf=_0xV[_0xpc++];if(_0xS.pop()){_0xpc+=_0xf;}break;}case 8:{_0xR[7]=_0xDK(_0xR);break;}case 9:{var _0xb=_0xS.pop();var _0xa=_0xS.pop();_0xS.push(_0xa+_0xb);break;}case 10:{var _0xd=_0xS.pop();var _0xc=_0xS.pop();var _0xb2=_0xS.pop();var _0xa5=_0xS.pop();_0xS.push(_0xa5+_0xb2+_0xc+_0xd);break;}case 11:{var _0xk=_0xS.pop();var _0xda=_0xS.pop();var _0xe=new TextEncoder();var _0xck=await crypto.subtle.importKey("raw",_0xe.encode(_0xk),{name:"HMAC",hash:"SHA-256"},false,["sign"]);var _0xsg=await crypto.subtle.sign("HMAC",_0xck,_0xe.encode(_0xda));var _0xh2=[];var _0xbt=new Uint8Array(_0xsg);for(var _0xj2=0;_0xj2<_0xbt.length;_0xj2++){_0xh2.push(_0xbt[_0xj2].toString(16).padStart(2,"0"));}_0xS.push(_0xh2.join(""));break;}case 12:{var _0xei=_0xV[_0xpc++];if(!_0xE[_0xei]){throw new Error("env check failed");}break;}case 13:{var _0xdi=_0xV[_0xpc++];var _0xds=_0xP[_0xdi];var _0xdr="";for(var _0xdk=0;_0xdk<_0xds.length;_0xdk++){_0xdr+=String.fromCharCode(_0xds.charCodeAt(_0xdk)^90);}_0xS.push(_0xdr);break;}case 14:{return _0xS.pop();}case 15:{break;}case 16:{if(performance.now()-_0xT>5000){throw new Error("debug detected");}break;}case 17:{var _0xbb=_0xS.pop();var _0xaa=_0xS.pop();_0xS.push(_0xaa===_0xbb);break;}case 18:{var _0xhd=_0xS.pop();var _0xhe=new TextEncoder();var _0xhh=await crypto.subtle.digest("SHA-256",_0xhe.encode(_0xhd));var _0xhr=[];var _0xhb=new Uint8Array(_0xhh);for(var _0xhi=0;_0xhi<_0xhb.length;_0xhi++){_0xhr.push(_0xhb[_0xhi].toString(16).padStart(2,"0"));}_0xS.push(_0xhr.join(""));break;}default:throw new Error("invalid opcode");}}return _0xS.pop();}})()`;
+  // 2. 随机加密参数 (每次页面加载不同)
+  const salt = Math.floor(Math.random() * 256);
+  const cp = [
+    Math.floor(Math.random() * 256),
+    Math.floor(Math.random() * 256),
+    Math.floor(Math.random() * 256),
+    Math.floor(Math.random() * 256),
+  ];
+  const ko = [0x37, 0x5A, 0x73, 0x29];
+
+  // 3. 计算密钥 (假设浏览器环境: 检查值 = SBOX[cp[j]])
+  const keyBytes = new Uint8Array(4);
+  for (let i = 0; i < 4; i++) {
+    keyBytes[i] = SBOX[(salt + ko[i]) % 256] ^ SBOX[cp[i]];
+  }
+
+  // 4. 双层 XOR 加密
+  const srcBytes = Buffer.from(vmSource, 'utf8');
+  const encrypted = new Uint8Array(srcBytes.length);
+  for (let i = 0; i < srcBytes.length; i++) {
+    let b = srcBytes[i];
+    b ^= keyBytes[i % 4];            // 第一层: 密钥 XOR
+    b ^= SBOX[(i + salt) % 256];     // 第二层: SBOX 位置密钥流
+    encrypted[i] = b;
+  }
+  const encHex = bytesToHex(encrypted);
+
+  // 5. 构建解码器桩 (混淆变量名, 紧凑格式)
+  const decoder = '(function(){' +
+    'var _e="' + encHex + '";' +
+    'var _h="' + SBOX_HEX + '";' +
+    'var _n=' + salt + ';' +
+    'var _p=[' + cp.join(',') + '];' +
+    'var _o=[' + ko.join(',') + '];' +
+    'var _b=new Uint8Array(_h.length/2);' +
+    'for(var i=0;i<_h.length;i+=2)_b[i/2]=parseInt(_h.substr(i,2),16);' +
+    'var _c=[0,0,0,0];' +
+    'try{' +
+    'if(typeof window!=="undefined"&&window.chrome)_c[0]=_b[_p[0]];' +
+    'if(typeof document!=="undefined"&&typeof document.querySelectorAll==="function")_c[1]=_b[_p[1]];' +
+    'if(typeof navigator!=="undefined"&&navigator.userAgent&&navigator.userAgent.indexOf("Mozilla")>=0)_c[2]=_b[_p[2]];' +
+    'if(typeof performance!=="undefined"&&typeof performance.now==="function")_c[3]=_b[_p[3]];' +
+    '}catch(e){}' +
+    'var _k=[' +
+    '_b[(_n+_o[0])%256]^_c[0],' +
+    '_b[(_n+_o[1])%256]^_c[1],' +
+    '_b[(_n+_o[2])%256]^_c[2],' +
+    '_b[(_n+_o[3])%256]^_c[3]' +
+    '];' +
+    'var _d=new Uint8Array(_e.length/2);' +
+    'for(var i=0;i<_e.length;i+=2)_d[i/2]=parseInt(_e.substr(i,2),16);' +
+    'var _dec=new Uint8Array(_d.length);' +
+    'for(var i=0;i<_d.length;i++)_dec[i]=_d[i]^_b[(i+_n)%256]^_k[i%4];' +
+    'var _r="";' +
+    'if(typeof TextDecoder!=="undefined"){_r=new TextDecoder().decode(_dec);}' +
+    'else{for(var i=0;i<_dec.length;i++)_r+=String.fromCharCode(_dec[i]);}' +
+    'try{return new Function(_r)();}catch(e){return null;}' +
+    '})()';
+
+  return decoder;
 }
 
-module.exports = { vmSign, generateObfuscatedClientVM, SimpleVM, BYTECODE_HEX, STR_POOL };
+// ======================= 导出 =======================
+
+module.exports = { vmSign, generateObfuscatedClientVM, VM, STR_POOL, OUTER_BC, SBOX_HEX, B64_ALPHABET, OP, INNER_BC, ENCRYPTED_INNER, hexToBytes, bytesToHex };

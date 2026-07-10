@@ -577,6 +577,300 @@ class SignServer {
           return
         }
 
+        // POST /scrape-note — DOM采集单条笔记（点击卡片→SSR提取→关闭弹窗）
+        // 请求体: { index }  笔记在搜索列表中的索引
+        if (req.method === 'POST' && url.pathname === '/scrape-note') {
+          const body = await this._readBody(req)
+          const { index } = JSON.parse(body)
+
+          const bv = this.getBrowserView()
+          if (!bv) {
+            res.writeHead(200)
+            res.end(JSON.stringify({ ok: false, error: '无活动标签页' }))
+            return
+          }
+
+          const scrapeScript = `
+(function(targetIndex) {
+  return (async function() {
+    function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+    function safeStr(v) { return (v === null || v === undefined) ? '' : String(v); }
+    function safeNum(v) { if (v === null || v === undefined) return 0; var n = Number(v); return isNaN(n) ? 0 : n; }
+
+    function getNoteElements() {
+      var els = document.querySelectorAll('section.note-item, [class*="note-item"]');
+      if (els.length === 0) {
+        els = document.querySelectorAll('.feeds-page .note-item, .feeds-container section');
+      }
+      return Array.from(els).filter(function(el) {
+        return !el.querySelector('.query-note-wrapper, .query-note-item');
+      });
+    }
+
+    function getNoteId(el) {
+      var link = el.querySelector('a[href*="/search_result/"], a[href*="/explore/"], a.cover');
+      if (link) {
+        var match = link.href.match(/\\/(?:search_result|explore)\\/([a-zA-Z0-9]+)/);
+        if (match) return match[1];
+      }
+      return el.getAttribute('data-index') || 'unknown-' + Date.now();
+    }
+
+    async function humanMouseMove(targetEl) {
+      var rect = targetEl.getBoundingClientRect();
+      var tx = rect.left + rect.width * (0.25 + Math.random() * 0.5);
+      var ty = rect.top + rect.height * (0.25 + Math.random() * 0.5);
+      var sx = window.innerWidth * (0.15 + Math.random() * 0.7);
+      var sy = window.innerHeight * (0.15 + Math.random() * 0.7);
+      var steps = 6 + Math.floor(Math.random() * 8);
+      for (var i = 0; i <= steps; i++) {
+        var t = i / steps;
+        var ease = t < 0.5 ? 2*t*t : -1+(4-2*t)*t;
+        var cx = sx + (tx - sx) * ease + (Math.random()-0.5) * 25;
+        var cy = sy + (ty - sy) * ease + (Math.random()-0.5) * 25;
+        document.dispatchEvent(new MouseEvent('mousemove', {
+          clientX: cx, clientY: cy, bubbles: true, cancelable: true, view: window
+        }));
+        await sleep(12 + Math.random() * 30);
+      }
+    }
+
+    async function waitForDetailOpen(timeout) {
+      timeout = timeout || 10000;
+      var start = Date.now();
+      while (Date.now() - start < timeout) {
+        var mask = document.querySelector('.close-mask-dark, .mask, [class*="overlay"]');
+        var detail = document.querySelector('[class*="note-detail"], .note-scroller, #detail-desc, #detail-title');
+        if (mask || detail) {
+          await sleep(500 + Math.random() * 300);
+          return true;
+        }
+        await sleep(250);
+      }
+      return false;
+    }
+
+    async function closeDetail() {
+      var closeBtn = document.querySelector('.close-mask-dark, .close-circle, [class*="close-mask"]');
+      if (closeBtn) {
+        closeBtn.click();
+      } else {
+        document.dispatchEvent(new KeyboardEvent('keydown', {
+          key: 'Escape', code: 'Escape', keyCode: 27, which: 27, bubbles: true
+        }));
+        await sleep(200);
+        var altClose = document.querySelector('[class*="close-modal"], [class*="close-btn"]');
+        if (altClose) altClose.click();
+      }
+      var start = Date.now();
+      while (Date.now() - start < 6000) {
+        if (!document.querySelector('.close-mask-dark, [class*="note-detail"]')) {
+          await sleep(200);
+          break;
+        }
+        await sleep(200);
+      }
+      await sleep(300 + Math.random() * 200);
+    }
+
+    function extractFromSSR(noteId) {
+      var state = window.__INITIAL_STATE__;
+      if (!state || !state.note || !state.note.noteDetailMap) return null;
+      var detailMap = state.note.noteDetailMap;
+      var noteData = null;
+      if (noteId && detailMap[noteId]) {
+        noteData = detailMap[noteId];
+      } else {
+        var keys = Object.keys(detailMap);
+        if (keys.length === 0) return null;
+        noteData = detailMap[keys[keys.length - 1]];
+        noteId = keys[keys.length - 1];
+      }
+      if (!noteData) return null;
+      var note = noteData.note || noteData;
+      if (!note) return null;
+
+      var result = {
+        noteId: noteId,
+        title: safeStr(note.title || ''),
+        desc: safeStr(note.desc || ''),
+        type: safeStr(note.type || ''),
+        user: {
+          userId: safeStr(note.user && note.user.userId || ''),
+          nickname: safeStr(note.user && note.user.nickname || ''),
+          avatar: safeStr(note.user && note.user.avatar || '')
+        },
+        interactInfo: {
+          likedCount: safeStr(note.interactInfo && note.interactInfo.likedCount || '0'),
+          collectedCount: safeStr(note.interactInfo && note.interactInfo.collectedCount || '0'),
+          commentCount: safeStr(note.interactInfo && note.interactInfo.commentCount || '0'),
+          shareCount: safeStr(note.interactInfo && note.interactInfo.shareCount || '0')
+        },
+        imageList: [],
+        video: null,
+        tagList: [],
+        time: safeStr(note.time || ''),
+        lastUpdateTime: safeStr(note.lastUpdateTime || ''),
+        ipLocation: safeStr(note.ipLocation || ''),
+        _extractMethod: 'ssr'
+      };
+      if (note.imageList && note.imageList.length) {
+        for (var i = 0; i < note.imageList.length; i++) {
+          var img = note.imageList[i];
+          if (img) result.imageList.push({
+            url: safeStr(img.urlDefault || img.url || ''),
+            width: safeNum(img.width), height: safeNum(img.height)
+          });
+        }
+      }
+      if (note.video) {
+        result.video = {
+          url: safeStr(note.video.media && note.video.media.url || ''),
+          firstFrame: safeStr(note.video.firstFrame || ''),
+          duration: safeNum(note.video.cap && note.video.cap.duration || 0)
+        };
+      }
+      if (note.tagList && note.tagList.length) {
+        for (var j = 0; j < note.tagList.length; j++) {
+          var tag = note.tagList[j];
+          if (tag) result.tagList.push({
+            id: safeStr(tag.id || ''), name: safeStr(tag.name || ''), type: safeStr(tag.type || '')
+          });
+        }
+      }
+      return result;
+    }
+
+    function extractFromDOM() {
+      var data = {
+        noteId: '', title: '', desc: '', type: 'image',
+        user: { userId: '', nickname: '', avatar: '' },
+        interactInfo: { likedCount: '0', collectedCount: '0', commentCount: '0', shareCount: '0' },
+        imageList: [], tagList: [], time: '', _extractMethod: 'dom'
+      };
+      var titleEl = document.querySelector('#detail-title, .note-title, h1[class*="title"]');
+      data.title = titleEl ? titleEl.textContent.trim() : '';
+      var descEl = document.querySelector('#detail-desc, .note-text, [class*="note-text"], .desc');
+      data.desc = descEl ? descEl.textContent.trim() : '';
+      var authorEl = document.querySelector('.author-wrapper .name, .username, [class*="author"] [class*="name"]');
+      data.user.nickname = authorEl ? authorEl.textContent.trim() : '';
+      var likeEl = document.querySelector('[class*="like-wrapper"] [class*="count"], .like-count');
+      data.interactInfo.likedCount = likeEl ? likeEl.textContent.trim() : '0';
+      var collectEl = document.querySelector('[class*="collect-wrapper"] [class*="count"], .collect-count');
+      data.interactInfo.collectedCount = collectEl ? collectEl.textContent.trim() : '0';
+      var commentEl = document.querySelector('[class*="comment-wrapper"] [class*="count"], .comment-count');
+      data.interactInfo.commentCount = commentEl ? commentEl.textContent.trim() : '0';
+      var imgs = document.querySelectorAll('.note-scroller img, [class*="swiper"] img');
+      imgs.forEach(function(img) {
+        if (img.src && img.src.indexOf('xhscdn') >= 0) {
+          data.imageList.push({ url: img.src, width: img.naturalWidth || 0, height: img.naturalHeight || 0 });
+        }
+      });
+      return data;
+    }
+
+    try {
+      var notes = getNoteElements();
+      var noteCount = notes.length;
+      if (targetIndex >= notes.length) {
+        return { ok: false, error: '索引超出范围(' + targetIndex + '>=' + notes.length + ')', noteCount: noteCount };
+      }
+      var noteEl = notes[targetIndex];
+      var noteId = getNoteId(noteEl);
+      noteEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      await sleep(500 + Math.random() * 400);
+      var coverLink = noteEl.querySelector('a.cover') || noteEl.querySelector('a.title, a[href*="/search_result/"]') || noteEl.querySelector('a');
+      if (!coverLink) return { ok: false, error: '找不到笔记链接', noteCount: noteCount };
+      await humanMouseMove(coverLink);
+      await sleep(150 + Math.random() * 250);
+      coverLink.click();
+      var opened = await waitForDetailOpen(10000);
+      if (!opened) {
+        return { ok: false, error: '详情弹窗未打开(超时)', noteId: noteId, noteCount: noteCount };
+      }
+      await sleep(800 + Math.random() * 500);
+      var data = extractFromSSR(noteId);
+      if (!data) { data = extractFromDOM(); }
+      await closeDetail();
+      return { ok: true, data: data, noteId: noteId, noteCount: noteCount };
+    } catch(e) {
+      try { await closeDetail(); } catch(ee) {}
+      return { ok: false, error: e.message, noteCount: getNoteElements().length };
+    }
+  })();
+})(${index})
+`
+          try {
+            const result = await bv.webContents.executeJavaScript(scrapeScript, true)
+            res.writeHead(200)
+            res.end(JSON.stringify(result))
+          } catch (e) {
+            res.writeHead(200)
+            res.end(JSON.stringify({ ok: false, error: e.message }))
+          }
+          return
+        }
+
+        // POST /scroll-search — 搜索页滚动加载更多
+        if (req.method === 'POST' && url.pathname === '/scroll-search') {
+          const bv = this.getBrowserView()
+          if (!bv) {
+            res.writeHead(200)
+            res.end(JSON.stringify({ ok: false, noteCount: 0 }))
+            return
+          }
+          try {
+            const body = await this._readBody(req)
+            const { amount, waitMs } = body ? JSON.parse(body) : {}
+            const scrollScript = `
+(async function() {
+  function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+  var px = __AMOUNT__;
+  var jitter = (Math.random() - 0.5) * 80;
+  var steps = 3 + Math.floor(Math.random() * 4);
+  var perStep = (px + jitter) / steps;
+  for (var i = 0; i < steps; i++) {
+    window.scrollBy({ top: perStep + (Math.random()-0.5)*40, behavior: 'smooth' });
+    await sleep(60 + Math.random() * 100);
+  }
+  await sleep(__WAIT_MS__);
+  var els = document.querySelectorAll('section.note-item, [class*="note-item"]');
+  return { ok: true, noteCount: els.length };
+})()`
+            const script = scrollScript
+              .replace('__AMOUNT__', String(amount || (400 + Math.floor(Math.random() * 300))))
+              .replace('__WAIT_MS__', String(waitMs || 2500))
+            const result = await bv.webContents.executeJavaScript(script, true)
+            res.writeHead(200)
+            res.end(JSON.stringify(result))
+          } catch (e) {
+            res.writeHead(200)
+            res.end(JSON.stringify({ ok: false, error: e.message }))
+          }
+          return
+        }
+
+        // GET /note-count — 获取当前搜索页笔记数量
+        if (req.method === 'GET' && url.pathname === '/note-count') {
+          const bv = this.getBrowserView()
+          if (!bv) {
+            res.writeHead(200)
+            res.end(JSON.stringify({ ok: false, noteCount: 0 }))
+            return
+          }
+          try {
+            const count = await bv.webContents.executeJavaScript(
+              'document.querySelectorAll(\'section.note-item, [class*="note-item"]\').length', true
+            )
+            res.writeHead(200)
+            res.end(JSON.stringify({ ok: true, noteCount: count }))
+          } catch (e) {
+            res.writeHead(200)
+            res.end(JSON.stringify({ ok: false, error: e.message }))
+          }
+          return
+        }
+
         // 未知路由
         res.writeHead(404)
         res.end(JSON.stringify({ error: 'Unknown route: ' + req.method + ' ' + url.pathname }))
