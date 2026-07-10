@@ -304,16 +304,16 @@ const START_FROM_INDEX = process.env.START_INDEX ? parseInt(process.env.START_IN
 
 const PAGES_PER_KEYWORD = 3;
 const PAGE_SIZE = 20;
-const SEARCH_DELAY = 800;
-const FEED_DELAY_MIN = 2000;      // 详情采集间隔 2-5s
-const FEED_DELAY_MAX = 5000;
-const FEED_RETRY_DELAY = 30000;   // 限流重试等待 30s
-const CONSECUTIVE_FAIL_PAUSE = 60000; // 连续3次失败暂停 60s
+const SEARCH_DELAY = 500;
+const FEED_DELAY_MIN = 800;       // 详情采集间隔 0.8-2s
+const FEED_DELAY_MAX = 2000;
+const FEED_RETRY_DELAY = 15000;   // 限流重试等待 15s
+const CONSECUTIVE_FAIL_PAUSE = 30000; // 连续3次失败暂停 30s
 const BATCH_SIZE = 100;
-const BATCH_PAUSE_MIN = 30000;    // 批次暂停 30-60s
-const BATCH_PAUSE_MAX = 60000;
-const KEYWORD_PAUSE_MIN = 10000;  // 关键词间暂停 10-20s
-const KEYWORD_PAUSE_MAX = 20000;
+const BATCH_PAUSE_MIN = 15000;    // 批次暂停 15-30s
+const BATCH_PAUSE_MAX = 30000;
+const KEYWORD_PAUSE_MIN = 5000;   // 关键词间暂停 5-10s
+const KEYWORD_PAUSE_MAX = 10000;
 
 // ======================= 工具函数 =======================
 
