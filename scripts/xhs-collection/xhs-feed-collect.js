@@ -195,16 +195,16 @@ const START_FROM_INDEX = process.env.START_INDEX ? parseInt(process.env.START_IN
 
 const PAGES_PER_KEYWORD = 3;
 const PAGE_SIZE = 20;
-const SEARCH_DELAY = 1500;        // 搜索间隔加大到1.5s
-const FEED_DELAY_MIN = 6000;      // 详情采集最小间隔加大到6s
-const FEED_DELAY_MAX = 12000;     // 详情采集最大间隔加大到12s（更大随机抖动）
-const FEED_RETRY_DELAY = 90000;   // 限流重试等待加大到90s
-const CONSECUTIVE_FAIL_PAUSE = 300000; // 连续3次失败暂停加大到300s（5分钟）
-const BATCH_SIZE = 100;           // 每100条暂停一次（降低批次大小，更频繁暂停）
-const BATCH_PAUSE_MIN = 90000;    // 批次暂停最小时间加大到90s（1.5分钟）
-const BATCH_PAUSE_MAX = 180000;   // 批次暂停最大时间加大到180s（3分钟）
-const KEYWORD_PAUSE_MIN = 30000;  // 关键词间最小暂停加大到30s
-const KEYWORD_PAUSE_MAX = 60000;  // 关键词间最大暂停加大到60s（1分钟）
+const SEARCH_DELAY = 800;
+const FEED_DELAY_MIN = 2000;      // 详情采集间隔 2-5s
+const FEED_DELAY_MAX = 5000;
+const FEED_RETRY_DELAY = 30000;   // 限流重试等待 30s
+const CONSECUTIVE_FAIL_PAUSE = 60000; // 连续3次失败暂停 60s
+const BATCH_SIZE = 100;
+const BATCH_PAUSE_MIN = 30000;    // 批次暂停 30-60s
+const BATCH_PAUSE_MAX = 60000;
+const KEYWORD_PAUSE_MIN = 10000;  // 关键词间暂停 10-20s
+const KEYWORD_PAUSE_MAX = 20000;
 
 // ======================= 工具函数 =======================
 
