@@ -360,24 +360,32 @@ async function fetchFeed(noteId, xsecToken) {
     }
   }
 
-  // === 采集策略（2026-07-10 修复 v2）===
+  // === 采集策略（2026-07-10 修复 v3）===
   // XYS_ 签名（Node.js 生成）+ 浏览器 fetch（真实 Chrome TLS）
-  //   x-s: XYS_ 格式（xys-sign-node.js 生成，不触发 300015）
-  //   fetch: 浏览器内发起，credentials:'include'，真实 Chrome TLS 指纹
-  //   x-s-common: Node.js xs-common-node.js 生成
-  //   → XYS_ 不触发环境检测 + Chrome TLS 不被聚类检测
+  //   关键：XYS_ 不触发 300015，浏览器 fetch TLS 不被聚类检测
+  //   禁止回退 Node.js（Node.js TLS 必触发 300015）
   //
-  // 回退：Node.js 直接请求（XYS_ + Node.js TLS）
-  if (signServerAvailable) {
+  // 路径选择：
+  //   A) signServer可用 + XYS_签名就绪 → browserFetch（最优）
+  //   B) signServer可用 + XYS_签名失败 → browserFetch 让 /fetch 回退 _webmsxyw（可能 300015）
+  //   C) signServer不可用 → Node.js 直接请求（~300条后 TLS 聚类风控）
+  if (signServerAvailable && dynamicXs) {
+    // 路径 A：XYS_ + 浏览器 fetch
     const result = await browserFetch(apiPath, body, dynamicXsc, FEED_RAP_PARAM, dynamicXs, dynamicXt);
     if (result.ok) {
       return result.data;
     }
-    if (result.error) {
-      log(`  [详情] BrowserView fetch 失败: ${result.error}，回退 Node.js`);
-    }
+    // browserFetch 失败（超时/网络错误），跳过此笔记，不回退 Node.js
+    log(`  [详情] BrowserView fetch 失败: ${result.error || '未知'}，跳过`);
+    return { code: -996, msg: 'browserFetch失败: ' + (result.error || '未知') };
   }
 
+  if (signServerAvailable && !dynamicXs) {
+    // XYS_ 签名生成失败，不能用 browserFetch（会回退 _webmsxyw → XYW_ → 300015）
+    log(`  [详情] XYS_ 签名未就绪，使用 Node.js 直接请求`);
+  }
+
+  // 路径 C：Node.js 直接请求（回退，可能触发 TLS 风控）
   return fetchFeedFallback(noteId, xsecToken, bodyStr);
 }
 
@@ -586,9 +594,42 @@ async function collectKeyword(keyword, keywordIndex) {
       log(`  ⛔ 账号被风控（账号异常）！停止采集`);
       return { notes, details, failures, stopped: true };
     } else if (resp.code === 300015) {
-      // 300015 = 环境检测，必须停止
-      log(`  ⛔ 触发环境检测（300015）！停止采集`);
-      return { notes, details, failures, stopped: true };
+      // 300015 = 环境检测，等待后重试一次
+      log(`  ⚠️ 触发环境检测（300015），等待30s后重试...`);
+      await sleep(30000);
+      // 刷新 cookies 后重试
+      if (signServerAvailable) {
+        const freshCookies = await getBrowserCookies();
+        if (freshCookies && freshCookies.a1) {
+          Object.assign(COMMON_COOKIES, freshCookies);
+          if (freshCookies.acw_tc) { SEARCH_ACW_TC = freshCookies.acw_tc; FEED_ACW_TC = freshCookies.acw_tc; }
+        }
+      }
+      const retry = await fetchFeed(note.noteId, note.xsecToken);
+      if (retry.code === 0) {
+        details.push(extractDetail(retry, note));
+        success++;
+        consecutiveFail = 0;
+        log(`  [详情] 300015 重试成功`);
+        await sleep(randomDelay(FEED_DELAY_MIN, FEED_DELAY_MAX));
+        continue;
+      }
+      if (retry.code === 300015) {
+        log(`  ⛔ 300015 重试仍失败，停止采集`);
+        log(`  提示: 请确认已重启 Electron 应用加载最新 sign_server.js`);
+        return { notes, details, failures, stopped: true };
+      }
+      // 重试返回其他错误，按正常流程处理
+      resp = retry;
+      if (resp.code === 0) {
+        details.push(extractDetail(resp, note));
+        success++;
+        consecutiveFail = 0;
+        await sleep(randomDelay(FEED_DELAY_MIN, FEED_DELAY_MAX));
+        continue;
+      }
+      fail++;
+      failures.push({ noteId: note.noteId, xsecToken: note.xsecToken, code: resp.code, msg: resp.msg || '300015重试后失败' });
     } else if (resp.code === -510000 || resp.code === 300031) {
       // 笔记不存在或已下架
       fail++;
