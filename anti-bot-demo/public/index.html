@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>API 防刷防采集四层防御体系演示</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="app">
+    <header>
+      <h1>API 防刷防采集四层防御体系演示</h1>
+      <p class="subtitle">借鉴小红书反爬体系设计的轻量级防刷架构</p>
+    </header>
+
+    <!-- 统计概览 -->
+    <section class="stats-overview">
+      <div class="stat-card">
+        <div class="stat-value" id="stat-total">0</div>
+        <div class="stat-label">总请求</div>
+      </div>
+      <div class="stat-card pass">
+        <div class="stat-value" id="stat-allowed">0</div>
+        <div class="stat-label">放行</div>
+      </div>
+      <div class="stat-card block">
+        <div class="stat-value" id="stat-blocked">0</div>
+        <div class="stat-label">拦截</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value" id="stat-rate">0%</div>
+        <div class="stat-label">拦截率</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value" id="stat-devices">0</div>
+        <div class="stat-label">活跃设备</div>
+      </div>
+    </section>
+
+    <!-- 防御层状态 -->
+    <section class="defense-layers">
+      <h2>防御层状态</h2>
+      <div class="layer-grid">
+        <div class="layer-card" id="layer-1">
+          <div class="layer-header">
+            <span class="layer-badge">L1</span>
+            <span class="layer-name">HTTP 请求头指纹</span>
+          </div>
+          <p class="layer-desc">检测非浏览器客户端、伪造 UA、缺失特征头</p>
+          <div class="layer-detail">检查: Accept, Accept-Language, sec-ch-ua, sec-fetch-*</div>
+        </div>
+        <div class="layer-card" id="layer-2">
+          <div class="layer-header">
+            <span class="layer-badge">L2</span>
+            <span class="layer-name">请求签名验证</span>
+          </div>
+          <p class="layer-desc">HMAC 绑定路径+请求体+时间戳+nonce</p>
+          <div class="layer-detail">算法: HMAC-SHA256 | 窗口: 5min | 防重放: nonce</div>
+        </div>
+        <div class="layer-card" id="layer-3">
+          <div class="layer-header">
+            <span class="layer-badge">L3</span>
+            <span class="layer-name">设备指纹追踪</span>
+          </div>
+          <p class="layer-desc">设备 ID 一致性校验、设备劫持检测</p>
+          <div class="layer-detail">追踪: deviceId, fingerprint, requestCount</div>
+        </div>
+        <div class="layer-card" id="layer-4">
+          <div class="layer-header">
+            <span class="layer-badge">L4</span>
+            <span class="layer-name">行为分析引擎</span>
+          </div>
+          <p class="layer-desc">频率限制 + 间隔规律性 + sigCount 模式</p>
+          <div class="layer-detail">突发: 8/5s | 持续: 60/min | CV&lt;0.15 = 机器人</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 测试控制台 -->
+    <section class="test-console">
+      <h2>测试控制台</h2>
+      <div class="test-controls">
+        <div class="control-group">
+          <label>测试模式</label>
+          <select id="test-mode">
+            <option value="human">正常用户（人类行为模拟）</option>
+            <option value="bot-rapid">机器人 - 高频请求</option>
+            <option value="bot-linear">机器人 - sigCount 线性递增</option>
+            <option value="bot-constant">机器人 - sigCount 恒定</option>
+            <option value="bot-replay">机器人 - 重放攻击</option>
+            <option value="bot-noheader">机器人 - 缺失请求头</option>
+            <option value="bot-badsig">机器人 - 伪造签名</option>
+          </select>
+        </div>
+        <div class="control-group">
+          <label>请求数量</label>
+          <input type="number" id="test-count" value="15" min="1" max="100">
+        </div>
+        <div class="control-group">
+          <label>间隔(ms)</label>
+          <input type="number" id="test-interval" value="3000" min="0" max="60000">
+        </div>
+        <button id="btn-start" class="btn btn-start">开始测试</button>
+        <button id="btn-stop" class="btn btn-stop" disabled>停止</button>
+        <button id="btn-reset" class="btn btn-reset">重置数据</button>
+      </div>
+      <div class="test-progress">
+        <div class="progress-bar" id="progress-bar"></div>
+      </div>
+    </section>
+
+    <!-- 两栏布局：设备列表 + 请求日志 -->
+    <div class="dual-panel">
+      <!-- 设备列表 -->
+      <section class="devices-panel">
+        <h2>设备追踪</h2>
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>设备ID</th>
+              <th>请求数</th>
+              <th>平均间隔</th>
+              <th>CV(变异系数)</th>
+              <th>sigCount</th>
+            </tr>
+          </thead>
+          <tbody id="devices-tbody">
+            <tr><td colspan="5" class="empty">暂无设备</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <!-- 请求日志 -->
+      <section class="logs-panel">
+        <h2>请求日志 <span class="badge" id="log-count">0</span></h2>
+        <div class="log-list" id="log-list">
+          <div class="empty">暂无请求</div>
+        </div>
+      </section>
+    </div>
+
+    <!-- 拦截原因分布 -->
+    <section class="block-reasons">
+      <h2>拦截原因分布</h2>
+      <div id="reasons-list" class="reasons-list">
+        <div class="empty">暂无拦截记录</div>
+      </div>
+    </section>
+
+    <footer>
+      <p>签名密钥: anti-bot-demo-secret-2026 | HMAC(path + body + timestamp + nonce, secret) | 窗口: 5 分钟</p>
+    </footer>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

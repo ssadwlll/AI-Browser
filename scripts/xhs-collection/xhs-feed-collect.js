@@ -275,6 +275,19 @@ async function fetchSearch(keyword, page) {
     }
   }
 
+  // 动态生成 x-s-common（与 Feed 一致，避免静态复用被检测）
+  searchSigCount++;
+  if (searchSigCount > 20) searchSigCount = Math.floor(Math.random() * 3) + 1;
+  const dynamicSearchXsc = generateXsCommon({
+    platform: 'PC',
+    url: apiPath,
+    cookieA1: COMMON_COOKIES.a1,
+    fingerprint: '',
+    version: '4.3.7',
+    dsl: '',
+    sigCount: searchSigCount,
+  });
+
   return httpPost('so.xiaohongshu.com', apiPath, {
     'accept': 'application/json, text/plain, */*',
     'accept-encoding': 'gzip, deflate, br, zstd',
@@ -289,7 +302,7 @@ async function fetchSearch(keyword, page) {
     'sec-fetch-dest': 'empty', 'sec-fetch-mode': 'cors', 'sec-fetch-site': 'same-site',
     'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36',
     'x-b3-traceid': randomHex(8), 'x-rap-param': SEARCH_RAP_PARAM,
-    'x-s': xS, 'x-s-common': SEARCH_X_S_COMMON,
+    'x-s': xS, 'x-s-common': dynamicSearchXsc,
     'x-t': xT, 'x-xray-traceid': randomHex(16),
   }, bodyStr);
 }
@@ -298,6 +311,7 @@ async function fetchSearch(keyword, page) {
 
 // sigCount 模拟真实浏览器的签名计数（保持在低值，避免被风控检测）
 let feedSigCount = Math.floor(Math.random() * 5) + 1; // 起始 1-5
+let searchSigCount = Math.floor(Math.random() * 3) + 1; // 搜索签名计数
 
 // 全局详情采集计数（跨关键词，用于触发批次暂停）
 let totalDetailsCollected = 0;
