@@ -678,6 +678,144 @@ class SignServer {
             res.writeHead(200)
             res.end(JSON.stringify(result))
           } catch (e) {
+            res.writeHead(200)
+            res.end(JSON.stringify({ ok: false, error: e.message }))
+          }
+          return
+        }
+
+        // POST /click-search — 点击首页搜索框（用于异常恢复）
+        // 流程：找到搜索框 → 鼠标移动 → 点击 → 输入随机关键词 → 点击搜索按钮
+        if (req.method === 'POST' && url.pathname === '/click-search') {
+          const bv = this.getBrowserView()
+          if (!bv) {
+            res.writeHead(200)
+            res.end(JSON.stringify({ ok: false, error: '无活动标签页' }))
+            return
+          }
+          try {
+            const result = await bv.webContents.executeJavaScript(`
+              (async function() {
+                function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+                // 等待搜索框出现（textarea#search-input）
+                var searchInput = null;
+                for (var i = 0; i < 10; i++) {
+                  searchInput = document.querySelector('textarea#search-input');
+                  if (searchInput) break;
+                  await sleep(500);
+                }
+                if (!searchInput) return { ok: false, error: '未找到搜索框 textarea#search-input' };
+
+                // 滚动到可见
+                searchInput.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                await sleep(500 + Math.random() * 300);
+
+                // 获取目标位置
+                var rect = searchInput.getBoundingClientRect();
+                var tx = rect.left + rect.width * (0.3 + Math.random() * 0.4);
+                var ty = rect.top + rect.height * (0.3 + Math.random() * 0.4);
+
+                // 贝塞尔曲线鼠标移动
+                var sx = window.innerWidth * (0.15 + Math.random() * 0.7);
+                var sy = window.innerHeight * (0.15 + Math.random() * 0.7);
+                var steps = 6 + Math.floor(Math.random() * 8);
+                for (var i = 0; i <= steps; i++) {
+                  var t = i / steps;
+                  var ease = t < 0.5 ? 2*t*t : -1+(4-2*t)*t;
+                  var cx = sx + (tx - sx) * ease + (Math.random()-0.5) * 25;
+                  var cy = sy + (ty - sy) * ease + (Math.random()-0.5) * 25;
+                  document.dispatchEvent(new MouseEvent('mousemove', {
+                    clientX: cx, clientY: cy, bubbles: true, cancelable: true, view: window
+                  }));
+                  await sleep(12 + Math.random() * 30);
+                }
+
+                await sleep(150 + Math.random() * 250);
+
+                // 点击搜索框
+                searchInput.dispatchEvent(new MouseEvent('mousedown', {
+                  clientX: tx, clientY: ty, bubbles: true, cancelable: true, view: window
+                }));
+                await sleep(40 + Math.random() * 80);
+                searchInput.dispatchEvent(new MouseEvent('mouseup', {
+                  clientX: tx, clientY: ty, bubbles: true, cancelable: true, view: window
+                }));
+                await sleep(20 + Math.random() * 40);
+                searchInput.dispatchEvent(new MouseEvent('click', {
+                  clientX: tx, clientY: ty, bubbles: true, cancelable: true, view: window
+                }));
+                try { searchInput.focus(); } catch(e) {}
+                await sleep(300 + Math.random() * 200);
+
+                // 输入随机关键词（从常见词池选）
+                var keywords = ['美食', '穿搭', '护肤', '旅行', '家居', '健身', '美妆', '读书', '电影', '音乐'];
+                var keyword = keywords[Math.floor(Math.random() * keywords.length)];
+                searchInput.value = keyword;
+                searchInput.dispatchEvent(new Event('input', { bubbles: true }));
+                await sleep(500 + Math.random() * 300); // 等待弹窗完全打开
+
+                // 等待搜索弹窗出现，查找搜索按钮（svg.submit-button）
+                var searchBtn = null;
+                var searchBtnInfo = '';
+                for (var retry = 0; retry < 5; retry++) {
+                  // 优先查找 .submit-button（SVG 图标）
+                  searchBtn = document.querySelector('.submit-button');
+                  if (searchBtn) {
+                    searchBtnInfo = '找到 .submit-button';
+                    break;
+                  }
+                  await sleep(300);
+                }
+
+                if (searchBtn) {
+                  var btnRect = searchBtn.getBoundingClientRect();
+                  var bx = btnRect.left + btnRect.width * (0.3 + Math.random() * 0.4);
+                  var by = btnRect.top + btnRect.height * (0.3 + Math.random() * 0.4);
+
+                  // 贝塞尔曲线移动到按钮
+                  var sx2 = window.innerWidth * (0.15 + Math.random() * 0.7);
+                  var sy2 = window.innerHeight * (0.15 + Math.random() * 0.7);
+                  var steps2 = 5 + Math.floor(Math.random() * 5);
+                  for (var i = 0; i <= steps2; i++) {
+                    var t = i / steps2;
+                    var ease = t < 0.5 ? 2*t*t : -1+(4-2*t)*t;
+                    var cx2 = sx2 + (bx - sx2) * ease + (Math.random()-0.5) * 15;
+                    var cy2 = sy2 + (by - sy2) * ease + (Math.random()-0.5) * 15;
+                    document.dispatchEvent(new MouseEvent('mousemove', {
+                      clientX: cx2, clientY: cy2, bubbles: true, cancelable: true, view: window
+                    }));
+                    await sleep(10 + Math.random() * 20);
+                  }
+
+                  await sleep(100 + Math.random() * 150);
+
+                  // 点击按钮
+                  searchBtn.dispatchEvent(new MouseEvent('mousedown', {
+                    clientX: bx, clientY: by, bubbles: true, cancelable: true, view: window
+                  }));
+                  await sleep(40 + Math.random() * 60);
+                  searchBtn.dispatchEvent(new MouseEvent('mouseup', {
+                    clientX: bx, clientY: by, bubbles: true, cancelable: true, view: window
+                  }));
+                  await sleep(20 + Math.random() * 30);
+                  searchBtn.dispatchEvent(new MouseEvent('click', {
+                    clientX: bx, clientY: by, bubbles: true, cancelable: true, view: window
+                  }));
+                  try { searchBtn.click(); } catch(e) {}
+
+                  return { ok: true, keyword: keyword, btnClicked: true, btnInfo: searchBtnInfo };
+                } else {
+                  return { ok: true, keyword: keyword, btnClicked: false, btnInfo: '未找到搜索按钮 div.bottom-box-right' };
+                }
+              })()
+            `, true)
+
+            await new Promise(r => setTimeout(r, 1500))
+            console.log(`[SignServer] 点击搜索: ok=${result.ok} keyword=${result.keyword}`)
+            res.writeHead(200)
+            res.end(JSON.stringify(result))
+          } catch (e) {
             console.error('[SignServer] 点击推荐笔记失败:', e.message)
             res.writeHead(200)
             res.end(JSON.stringify({ ok: false, error: e.message }))

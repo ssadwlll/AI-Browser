@@ -9,8 +9,10 @@
 <body>
   <div id="app">
     <header>
-      <h1>API 防刷防采集四层防御体系演示</h1>
-      <p class="subtitle">借鉴小红书反爬体系设计的轻量级防刷架构</p>
+      <h1>API 防刷防采集四层防御体系演示<!-- BEGIN SENSITIVE --> <span class="badge-v5">v5 加强版</span><!-- END SENSITIVE --></h1>
+      <!-- BEGIN SENSITIVE -->
+      <p class="subtitle">借鉴小红书反爬体系设计的轻量级防刷架构 + 多重环境绑定 + 综合风险评分</p>
+      <!-- END SENSITIVE -->
     </header>
 
     <!-- 统计概览 -->
@@ -46,36 +48,53 @@
             <span class="layer-badge">L1</span>
             <span class="layer-name">HTTP 请求头指纹</span>
           </div>
+          <!-- BEGIN SENSITIVE -->
           <p class="layer-desc">检测非浏览器客户端、伪造 UA、缺失特征头</p>
           <div class="layer-detail">检查: Accept, Accept-Language, sec-ch-ua, sec-fetch-*</div>
+          <!-- END SENSITIVE -->
         </div>
         <div class="layer-card" id="layer-2">
           <div class="layer-header">
             <span class="layer-badge">L2</span>
             <span class="layer-name">请求签名验证</span>
+            <!-- BEGIN SENSITIVE --><span class="v5-tag">v5</span><!-- END SENSITIVE -->
           </div>
-          <p class="layer-desc">HMAC 绑定路径+请求体+时间戳+nonce</p>
-          <div class="layer-detail">算法: HMAC-SHA256 via VM | 窗口: 5min | 防重放: nonce | 密钥: VM字节码 + 动态挑战盐</div>
+          <!-- BEGIN SENSITIVE -->
+          <p class="layer-desc">HMAC 绑定路径+请求体+时间戳+nonce+环境指纹+IP</p>
+          <div class="layer-detail">VM 字节码 + 动态盐 | 窗口: 5min | 防重放: nonce | <b>v5: IP绑定 + Canvas/WebGL 指纹</b></div>
+          <!-- END SENSITIVE -->
         </div>
         <div class="layer-card" id="layer-3">
           <div class="layer-header">
             <span class="layer-badge">L3</span>
             <span class="layer-name">设备指纹追踪</span>
+            <!-- BEGIN SENSITIVE --><span class="v5-tag">v5</span><!-- END SENSITIVE -->
           </div>
-          <p class="layer-desc">设备 ID 一致性校验、设备劫持检测</p>
-          <div class="layer-detail">追踪: deviceId, fingerprint, requestCount</div>
+          <!-- BEGIN SENSITIVE -->
+          <p class="layer-desc">设备 ID 一致性校验、设备劫持检测、挑战计数</p>
+          <div class="layer-detail">deviceId, fingerprint, requestCount, <b>v5: challengeCount</b></div>
+          <!-- END SENSITIVE -->
         </div>
         <div class="layer-card" id="layer-4">
           <div class="layer-header">
             <span class="layer-badge">L4</span>
             <span class="layer-name">行为分析引擎</span>
+            <!-- BEGIN SENSITIVE --><span class="v5-tag">v5</span><!-- END SENSITIVE -->
           </div>
-          <p class="layer-desc">频率限制 + 间隔规律性 + sigCount 模式</p>
-          <div class="layer-detail">突发: 8/5s | 持续: 60/min | CV&lt;0.15 = 机器人</div>
+          <!-- BEGIN SENSITIVE -->
+          <p class="layer-desc">频率 + 间隔规律 + sigCount + 综合风险评分</p>
+          <div class="layer-detail">突发: 8/5s | 持续: 60/min | CV&lt;0.15 = 机器人 | <b>v5: 6维风险评分 ≥70% 拦截</b></div>
+          <!-- END SENSITIVE -->
         </div>
       </div>
     </section>
 
+    <!-- 用户操作区（破解测试模式下也显示） -->
+    <section class="user-actions">
+      <button id="btn-send-human" class="btn btn-human">发送请求</button>
+    </section>
+
+    <!-- BEGIN SENSITIVE -->
     <!-- 测试控制台 -->
     <section class="test-console">
       <h2>测试控制台</h2>
@@ -108,6 +127,7 @@
         <div class="progress-bar" id="progress-bar"></div>
       </div>
     </section>
+    <!-- END SENSITIVE -->
 
     <!-- 两栏布局：设备列表 + 请求日志 -->
     <div class="dual-panel">
@@ -119,13 +139,17 @@
             <tr>
               <th>设备ID</th>
               <th>请求数</th>
+              <!-- BEGIN SENSITIVE -->
               <th>平均间隔</th>
-              <th>CV(变异系数)</th>
+              <th>CV</th>
               <th>sigCount</th>
+              <th>风险评分</th>
+              <th>风险因子</th>
+              <!-- END SENSITIVE -->
             </tr>
           </thead>
           <tbody id="devices-tbody">
-            <tr><td colspan="5" class="empty">暂无设备</td></tr>
+            <tr><td colspan="2" class="empty">暂无设备</td></tr>
           </tbody>
         </table>
       </section>
@@ -139,6 +163,7 @@
       </section>
     </div>
 
+    <!-- BEGIN SENSITIVE -->
     <!-- 拦截原因分布 -->
     <section class="block-reasons">
       <h2>拦截原因分布</h2>
@@ -146,14 +171,16 @@
         <div class="empty">暂无拦截记录</div>
       </div>
     </section>
+    <!-- END SENSITIVE -->
 
+    <!-- BEGIN SENSITIVE -->
     <footer>
-      <p>签名引擎: VM 字节码 + 动态挑战盐 | HMAC(path + body + ts + nonce) | 密钥不在代码中明文出现 | 无公开算法端点</p>
+      <p>v5 签名引擎: VM 字节码 + 动态挑战盐 + Canvas/WebGL 环境指纹 + 多重反调试 | IP 绑定 | 6维风险评分</p>
     </footer>
+    <!-- END SENSITIVE -->
   </div>
 
-  <!-- VM 引擎代码由服务端注入此处（混淆后内嵌，不通过公开 API 暴露） -->
   <script>window.__VM_ENGINE__ = {{VM_CODE}};</script>
-  <script src="app.js"></script>
+  <script src="app.js?v=20260711g"></script>
 </body>
 </html>

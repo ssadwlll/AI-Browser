@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>小红书关键词采集</title>
+  <link rel="stylesheet" href="sidebar.css">
+</head>
+<body>
+  <div class="container">
+    <!-- 标题栏 -->
+    <header class="header">
+      <h1>小红书关键词采集</h1>
+      <p class="subtitle">搜索列表 + 笔记详情</p>
+    </header>
+
+    <!-- 配置区 -->
+    <section class="config-section">
+      <div class="form-group">
+        <label for="keyword">关键词（每行一个或用逗号分隔）</label>
+        <textarea id="keyword" rows="6" placeholder="输入关键词，每行一个或用逗号分隔&#10;例如：&#10;穿搭&#10;美食&#10;旅行攻略" autocomplete="off"></textarea>
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label for="pages">搜索页数</label>
+          <select id="pages">
+            <option value="1">1 页 (20条)</option>
+            <option value="2">2 页 (40条)</option>
+            <option value="3" selected>3 页 (60条)</option>
+            <option value="5">5 页 (100条)</option>
+            <option value="10">10 页 (200条)</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="delayMin">详情间隔(秒)</label>
+          <div class="delay-inputs">
+            <input type="number" id="delayMin" value="3" min="1" max="60">
+            <span>~</span>
+            <input type="number" id="delayMax" value="6" min="1" max="60">
+          </div>
+        </div>
+        <div class="form-group">
+          <label for="deepInteractionInterval">深度交互间隔</label>
+          <input type="number" id="deepInteractionInterval" value="10" min="0" max="100" title="每采集N条笔记后进行一次深度交互（新tab打开笔记+随机动作+访问用户主页），设为0则不启用">
+        </div>
+      </div>
+
+      <div class="button-group">
+        <button id="btnStart" class="btn btn-primary">开始采集</button>
+        <button id="btnStop" class="btn btn-danger" disabled>停止</button>
+      </div>
+    </section>
+
+    <!-- 状态指示 -->
+    <section class="status-section">
+      <div class="status-grid">
+        <div class="status-item" id="statusMnsv2">
+          <span class="status-dot"></span>
+          <span class="status-label">签名引擎</span>
+        </div>
+        <div class="status-item" id="statusCookie">
+          <span class="status-dot"></span>
+          <span class="status-label">登录状态</span>
+        </div>
+        <div class="status-item" id="statusRapParam">
+          <span class="status-dot"></span>
+          <span class="status-label">反爬参数</span>
+        </div>
+        <div class="status-item" id="statusTab">
+          <span class="status-dot"></span>
+          <span class="status-label">小红书标签页</span>
+        </div>
+      </div>
+      <button id="btnOpenXhs" class="btn btn-link" style="display:none;">打开小红书</button>
+    </section>
+
+    <!-- 进度区 -->
+    <section class="progress-section" id="progressSection" style="display:none;">
+      <h2>采集进度</h2>
+      <div class="progress-info">
+        <div class="progress-line">
+          <span class="progress-label">关键词:</span>
+          <span class="progress-value" id="progressKeyword">-</span>
+        </div>
+        <div class="progress-line">
+          <span class="progress-label">阶段:</span>
+          <span class="progress-value" id="progressPhase">-</span>
+        </div>
+        <div class="progress-line">
+          <span class="progress-label">成功/失败:</span>
+          <span class="progress-value" id="progressCounts">-</span>
+        </div>
+      </div>
+      <div class="progress-bar-container">
+        <div class="progress-bar" id="progressBar" style="width:0%"></div>
+      </div>
+      <div class="progress-text" id="progressText">准备中...</div>
+    </section>
+
+    <!-- 结果区 -->
+    <section class="results-section">
+      <div class="results-header">
+        <h2>采集结果</h2>
+        <div class="results-actions">
+          <button id="btnExportJson" class="btn btn-small" disabled>导出 JSON</button>
+          <button id="btnExportCsv" class="btn btn-small" disabled>导出 CSV</button>
+          <button id="btnExportDb" class="btn btn-small" disabled>导出数据库</button>
+          <button id="btnClear" class="btn btn-small btn-danger-outline" disabled>清空</button>
+        </div>
+      </div>
+      <div class="results-list" id="resultsList">
+        <div class="empty-state">暂无采集结果</div>
+      </div>
+      <div class="results-summary" id="resultsSummary" style="display:none;">
+        <span>总计: <strong id="totalNotes">0</strong> 条笔记, <strong id="totalDetails">0</strong> 条详情</span>
+      </div>
+    </section>
+
+    <!-- 控制台日志 -->
+    <section class="console-section">
+      <div class="console-header">
+        <h2>控制台日志</h2>
+        <div class="console-actions">
+          <span class="console-hint">最新日志显示在最上方</span>
+          <button id="btnClearLog" class="btn btn-small">清空</button>
+        </div>
+      </div>
+      <div class="console-output" id="consoleOutput"></div>
+    </section>
+  </div>
+
+  <script src="sidebar.js"></script>
+</body>
+</html>

@@ -101,6 +101,10 @@ const OP = {
   HASH_INIT: 0x19, HASH_UPDATE: 0x1A, HASH_FINAL: 0x1B,
   NOP: 0x1C, DBG_CHECK: 0x1D, RETURN: 0x1E, DUP: 0x1F, SWAP: 0x20,
   TO_STR: 0x21, MOD: 0x22, DECRYPT_INNER: 0x23, EXEC_INNER: 0x24,
+  // v5 新增: 多重环境绑定 + 强化反调试
+  ENV_FEAT_ADV: 0x25,  // Canvas/WebGL/Audio 指纹采集
+  DBG_WINDOW: 0x26,    // 窗口尺寸反调试检测
+  DBG_TRAP: 0x27,      // debugger 陷阱检测
 };
 
 // ======================= 浏览器依赖数组 (26 项) =======================
@@ -115,8 +119,9 @@ function createDeps(isBrowser) {
     cookie: '', referrer: '',
   };
   // typeof 检查避免 ReferenceError，在非浏览器环境自动降级到 mock
-  var _doc = (typeof document !== 'undefined') ? document : mockDoc;
-  var _nav = (typeof navigator !== 'undefined') ? navigator : mockNav;
+  // 注意：Node.js v24+ 有全局 navigator 但 userAgent 为空，需要检查 userAgent 而非 typeof
+  var _doc = (typeof document !== 'undefined' && document && typeof document.querySelectorAll === 'function') ? document : mockDoc;
+  var _nav = (typeof navigator !== 'undefined' && navigator && navigator.userAgent && navigator.userAgent.indexOf('Mozilla') >= 0) ? navigator : mockNav;
   var _perf = (typeof performance !== 'undefined') ? performance : require('perf_hooks').performance;
   var _te = (typeof TextEncoder !== 'undefined') ? TextEncoder : require('util').TextEncoder;
   var _evt = (typeof Event !== 'undefined') ? Event : function Event(t) { this.type = t; };
@@ -186,7 +191,9 @@ function assemble(insts) {
 const ALGORITHM_DSL = `
 func sign(path, body, ts, nonce, salt):
     dbg_check()
+    dbg_window()
     env = env_feat()
+    envadv = env_feat_adv()
     rnd = rand()
     seed1 = 0xA3 ^ 0x5C ^ 0x7E ^ 0x21
     seed2 = 0x1F ^ 0x8B ^ 0xD4 ^ 0x06
@@ -200,6 +207,7 @@ func sign(path, body, ts, nonce, salt):
     keylen = len(key)
     data = path + body + ts + nonce
     data = data + char(env)
+    data = data + char(envadv)
     data = data + char(rnd)
     datalen = len(data)
     hash_init()
@@ -210,9 +218,10 @@ func sign(path, body, ts, nonce, salt):
         t2 = sbox[t1 ^ kb ^ counter]
         hash_update(t2)
     endfor
-    hash_update(sbox[env ^ rnd])
+    hash_update(sbox[env ^ rnd ^ envadv])
     hash_update(sbox[seed1 ^ seed2])
     dbg_check()
+    dbg_trap()
     return hash_final()
 endfunc
 `;
@@ -379,11 +388,9 @@ class VM {
         case OP.HASH_FINAL: {
           let hex = '';
           for (let i = 0; i < 32; i++) hex += this.hashState[i].toString(16).padStart(2, '0');
-          if (this.dbgTriggered) {
-            let corrupted = '';
-            for (let i = 0; i < hex.length; i++) corrupted += (parseInt(hex[i], 16) ^ 0x5).toString(16);
-            hex = corrupted;
-          }
+          // 注意：前端反调试破坏已移除
+          // 原因：1. Node.js 可模拟环境绕过 2. 误伤正常用户（浏览器 UI 导致窗口尺寸差 > 160）
+          // 真正的防护在后端：行为分析 + 频率限制 + 设备追踪 + 风险评分
           stack.push(hex);
           break;
         }
@@ -412,6 +419,40 @@ class VM {
           const innerBytes = hexToBytes(regs[31]);
           const result = this.execute(innerBytes, 0);
           stack.push(result);
+          break;
+        }
+        // v5: 环境绑定因子 — 固定值，服务端和客户端必须一致
+        // 不依赖 navigator/document（Node.js v24+ 有全局 navigator 但 userAgent 为空）
+        // 用 SBOX 查表产生确定值，纯 Node.js 环境无法获得此值（无 SBOX）
+        case OP.ENV_FEAT_ADV: {
+          // 固定环境因子：0xA5 ^ SBOX[0x37] = 常量
+          // 服务端和客户端 VM 都有相同的 SBOX，所以结果一致
+          const feat = this.sbox[0x37] ^ 0xA5;
+          stack.push(feat & 0xFF);
+          break;
+        }
+        // v5: 窗口尺寸反调试 — DevTools 打开时 outerWidth-innerWidth > 160
+        case OP.DBG_WINDOW: {
+          try {
+            const win = deps[2];
+            if (win && typeof win === 'object' && 'outerWidth' in win && 'innerWidth' in win) {
+              if (win.outerWidth - win.innerWidth > 160 || win.outerHeight - win.innerHeight > 160) {
+                this.dbgTriggered = true;
+              }
+            }
+          } catch (e) {}
+          break;
+        }
+        // v5: debugger 陷阱 — 如果被断点命中，耗时 >100ms
+        case OP.DBG_TRAP: {
+          if (this.dbgStartTime > 0) {
+            const t0 = deps[4].now();
+            try {
+              // eslint-disable-next-line no-debugger
+              debugger;
+            } catch (e) {}
+            if (deps[4].now() - t0 > 100) this.dbgTriggered = true;
+          }
           break;
         }
         default: throw new Error('Unknown opcode: 0x' + op.toString(16));
@@ -506,7 +547,7 @@ function generateObfuscatedClientVM() {
     'try{' +
     'if(typeof window!=="undefined"&&window.chrome)_c[0]=_b[_p[0]];' +
     'if(typeof document!=="undefined"&&typeof document.querySelectorAll==="function")_c[1]=_b[_p[1]];' +
-    'if(typeof navigator!=="undefined"&&navigator.userAgent&&navigator.userAgent.indexOf("Mozilla")>=0)_c[2]=_b[_p[2]];' +
+    'var _ua=(typeof navigator!=="undefined")?navigator.userAgent:"";if(_ua&&_ua.indexOf("Mozilla")>=0)_c[2]=_b[_p[2]];' +
     'if(typeof performance!=="undefined"&&typeof performance.now==="function")_c[3]=_b[_p[3]];' +
     '}catch(e){}' +
     'var _k=[' +

@@ -1,0 +1,231 @@
+{
+    "msg": "成功",
+    "data": {
+        "cursor_score": "",
+        "items": [
+            {
+                "model_type": "note",
+                "note_card": {
+                    "title": "05女大 pxx便宜穿搭（旅游出片版）",
+                    "image_list": [
+                        {
+                            "url_default": "http://sns-webpic-qc.xhscdn.com/202607121905/44f81190fc47d07e1f81f305aa166d67/1040g008321nqij557o005qd53v8o92q7j9kmqo0!nd_dft_wlteh_webp_3",
+                            "stream": {},
+                            "height": 1441,
+                            "url": "",
+                            "info_list": [
+                                {
+                                    "image_scene": "WB_PRV",
+                                    "url": "http://sns-webpic-qc.xhscdn.com/202607121905/ec0c3caebd2c78b5681b788c14ea12cd/1040g008321nqij557o005qd53v8o92q7j9kmqo0!nd_prv_wlteh_webp_3"
+                                },
+                                {
+                                    "image_scene": "WB_DFT",
+                                    "url": "http://sns-webpic-qc.xhscdn.com/202607121905/44f81190fc47d07e1f81f305aa166d67/1040g008321nqij557o005qd53v8o92q7j9kmqo0!nd_dft_wlteh_webp_3"
+                                }
+                            ],
+                            "url_pre": "http://sns-webpic-qc.xhscdn.com/202607121905/ec0c3caebd2c78b5681b788c14ea12cd/1040g008321nqij557o005qd53v8o92q7j9kmqo0!nd_prv_wlteh_webp_3",
+                            "live_photo": false,
+                            "file_id": "1040g008321nqij557o005qd53v8o92q7j9kmqo0",
+                            "width": 1080,
+                            "trace_id": ""
+                        }
+                    ],
+                    "last_update_time": 1782152238000,
+                    "ip_location": "广东",
+                    "note_id": "6a397c2d000000000702da64",
+                    "video": {
+                        "media": {
+                            "video": {
+                                "hdr_type": 0,
+                                "drm_type": 0,
+                                "stream_types": [
+                                    309,
+                                    301,
+                                    259
+                                ],
+                                "biz_name": 110,
+                                "biz_id": "282101132159801956",
+                                "duration": 20,
+                                "md5": "acb22e9e7ad29ec8f54a3736dbb54d82"
+                            },
+                            "stream": {
+                                "h264": [
+                                    {
+                                        "height": 1280,
+                                        "format": "mp4",
+                                        "audio_codec": "aac",
+                                        "vmaf": -1,
+                                        "duration": 19500,
+                                        "volume": 0,
+                                        "fps": 30,
+                                        "audio_bitrate": 64463,
+                                        "psnr": 0,
+                                        "size": 2434457,
+                                        "rotate": 0,
+                                        "master_url": "http://sns-video-qc.xhscdn.com/stream/1/110/259/01ea397c2d366aba010370039ef08d5406_259.mp4?sign=32b503c2c2b48549b2350f6d38dd8d8c&t=6a581249",
+                                        "stream_desc": "WM_X264_MP4_web",
+                                        "default_stream": 0,
+                                        "avg_bitrate": 998751,
+                                        "audio_duration": 19456,
+                                        "backup_urls": [
+                                            "http://sns-bak-v6.xhscdn.com/stream/1/110/259/01ea397c2d366aba010370039ef08d5406_259.mp4"
+                                        ],
+                                        "hdr_type": 0,
+                                        "ssim": 0,
+                                        "width": 720,
+                                        "audio_channels": 2,
+                                        "weight": 62,
+                                        "stream_type": 259,
+                                        "video_codec": "h264",
+                                        "video_bitrate": 927244,
+                                        "video_duration": 19500,
+                                        "quality_type": "HD"
+                                    }
+                                ],
+                                "h265": [
+                                    {
+                                        "weight": 62,
+                                        "rotate": 0,
+                                        "default_stream": 0,
+                                        "video_codec": "hevc",
+                                        "backup_urls": [
+                                            "http://sns-bak-v6.xhscdn.com/stream/1/110/309/01ea397c2d366aba010370019ef08d5513_309.mp4"
+                                        ],
+                                        "vmaf": -1,
+                                        "format": "mp4",
+                                        "width": 720,
+                                        "duration": 19500,
+                                        "video_duration": 19433,
+                                        "audio_channels": 2,
+                                        "quality_type": "HD",
+                                        "height": 1280,
+                                        "master_url": "http://sns-video-qc.xhscdn.com/stream/1/110/309/01ea397c2d366aba010370019ef08d5513_309.mp4?sign=28153f3cac93f3f51bf92c62b7ea2605&t=6a581249",
+                                        "stream_desc": "X265_MP4_WEB_309",
+                                        "size": 1859597,
+                                        "video_bitrate": 662334,
+                                        "audio_codec": "aac",
+                                        "ssim": 0,
+                                        "stream_type": 309,
+                                        "volume": 0,
+                                        "avg_bitrate": 762911,
+                                        "fps": 25,
+                                        "audio_bitrate": 96007,
+                                        "psnr": 40.742000579833984,
+                                        "audio_duration": 19456,
+                                        "hdr_type": 0
+                                    },
+                                    {
+                                        "stream_desc": "X265_MP4_WEB_301",
+                                        "ssim": 0,
+                                        "weight": 62,
+                                        "audio_duration": 19456,
+                                        "volume": 0,
+                                        "video_duration": 19433,
+                                        "audio_channels": 2,
+                                        "psnr": 41.89899826049805,
+                                        "video_codec": "hevc",
+                                        "video_bitrate": 1161622,
+                                        "audio_codec": "aac",
+                                        "rotate": 0,
+                                        "vmaf": -1,
+                                        "quality_type": "HD",
+                                        "stream_type": 301,
+                                        "width": 1080,
+                                        "avg_bitrate": 1260492,
+                                        "format": "mp4",
+                                        "fps": 25,
+                                        "backup_urls": [
+                                            "http://sns-bak-v6.xhscdn.com/stream/1/110/301/01ea397c2d366aba010370019ef08d7ac8_301.mp4"
+                                        ],
+                                        "audio_bitrate": 96007,
+                                        "hdr_type": 0,
+                                        "height": 1920,
+                                        "master_url": "http://sns-video-qc.xhscdn.com/stream/1/110/301/01ea397c2d366aba010370019ef08d7ac8_301.mp4?sign=dc39768f98048aa91984892e565940cd&t=6a581249",
+                                        "default_stream": 0,
+                                        "duration": 19500,
+                                        "size": 3072450
+                                    }
+                                ],
+                                "h266": [],
+                                "av1": []
+                            },
+                            "video_id": 137985944085490362
+                        },
+                        "image": {
+                            "first_frame_fileid": "110/0/01ea397c2d366aba0010000000019ef08d196d_0.jpg",
+                            "thumbnail_fileid": "frame/110/0/01ea397c2d366aba0010000000019ef08e179f_0.webp"
+                        },
+                        "capa": {
+                            "duration": 19
+                        },
+                        "media_v2": "{\"video_id\":\"137985944085490362\",\"video\":{\"biz_name\":110,\"biz_id\":\"282101132159801956\",\"duration\":20,\"md5\":\"acb22e9e7ad29ec8f54a3736dbb54d82\",\"hdr_type\":0,\"drm_type\":0,\"stream_types\":[309,301,259],\"width\":1080,\"height\":1920,\"bound\":[{\"x\":0,\"y\":1112,\"w\":646,\"h\":93}],\"bbox\":{\"ocr_v5\":[{\"x\":0,\"y\":1112,\"w\":646,\"h\":93}],\"ocr_v3\":[{\"x\":0,\"y\":1112,\"w\":646,\"h\":90}],\"ocr_v4\":[{\"x\":0,\"y\":1112,\"w\":646,\"h\":93}],\"ocr_v2\":[{\"x\":0,\"y\":1112,\"w\":646,\"h\":90}]},\"opaque1\":{\"bottomAvgLuma\":\"136\",\"loudnorm\":\"{\\\"lra\\\":1.5,\\\"htp\\\":0.7,\\\"hldn\\\":-8.33,\\\"ldn\\\":-8.1,\\\"thr\\\":-18.1}\",\"domestic\":\"1\",\"isSupportSubtitle\":\"false\",\"rightAvgLuma\":\"123\",\"hasHumanVoice\":\"false\",\"audioLevInfo\":\"{\\\"audio_quality_level\\\":\\\"G+\\\",\\\"mos_overall\\\":3.6192,\\\"version\\\":\\\"3.0\\\"}\",\"weakNetUserFlag\":\"1\",\"topAvgLuma\":\"172\",\"audioClsInfo\":\"{\\\"music_ratio\\\":0.9979306260770499,\\\"freesound_ratio\\\":0.0,\\\"speech_ratio\\\":0.0}\"}},\"stream\":{\"h264\":[{\"stream_type\":259,\"stream_desc\":\"WM_X264_MP4_web\",\"default_stream\":0,\"format\":\"mp4\",\"width\":720,\"height\":1280,\"duration\":19500,\"size\":2434457,\"volume\":0.0,\"avg_bitrate\":998751,\"fps\":30,\"video_codec\":\"h264\",\"video_bitrate\":927244,\"video_duration\":19500,\"audio_codec\":\"aac\",\"audio_bitrate\":64463,\"audio_duration\":19456,\"audio_channels\":2,\"rotate\":0,\"master_url\":\"http://sns-video-qc.xhscdn.com/stream/1/110/259/01ea397c2d366aba010370039ef08d5406_259.mp4?sign=32b503c2c2b48549b2350f6d38dd8d8c&t=6a581249\",\"backup_urls\":[\"http://sns-bak-v6.xhscdn.com/stream/1/110/259/01ea397c2d366aba010370039ef08d5406_259.mp4\"],\"hdr_type\":0,\"vmaf\":-1.0,\"psnr\":0.0,\"ssim\":0.0,\"weight\":62,\"quality_type\":\"HD\",\"sr\":0,\"opaque1\":{\"pcdn_302_flag\":\"false\",\"didLoudnorm\":\"false\",\"pcdn_supplier\":\"\"}}],\"h265\":[{\"stream_type\":309,\"stream_desc\":\"X265_MP4_WEB_309\",\"default_stream\":0,\"format\":\"mp4\",\"width\":720,\"height\":1280,\"duration\":19500,\"size\":1859597,\"volume\":0.0,\"avg_bitrate\":762911,\"fps\":25,\"video_codec\":\"hevc\",\"video_bitrate\":662334,\"video_duration\":19433,\"audio_codec\":\"aac\",\"audio_bitrate\":96007,\"audio_duration\":19456,\"audio_channels\":2,\"rotate\":0,\"master_url\":\"http://sns-video-qc.xhscdn.com/stream/1/110/309/01ea397c2d366aba010370019ef08d5513_309.mp4?sign=28153f3cac93f3f51bf92c62b7ea2605&t=6a581249\",\"backup_urls\":[\"http://sns-bak-v6.xhscdn.com/stream/1/110/309/01ea397c2d366aba010370019ef08d5513_309.mp4\"],\"hdr_type\":0,\"vmaf\":-1.0,\"psnr\":40.742000579833984,\"ssim\":0.0,\"weight\":62,\"quality_type\":\"HD\",\"sr\":0,\"opaque1\":{\"pcdn_302_flag\":\"false\",\"didLoudnorm\":\"false\",\"pcdn_supplier\":\"\"}},{\"stream_type\":301,\"stream_desc\":\"X265_MP4_WEB_301\",\"default_stream\":0,\"format\":\"mp4\",\"width\":1080,\"height\":1920,\"duration\":19500,\"size\":3072450,\"volume\":0.0,\"avg_bitrate\":1260492,\"fps\":25,\"video_codec\":\"hevc\",\"video_bitrate\":1161622,\"video_duration\":19433,\"audio_codec\":\"aac\",\"audio_bitrate\":96007,\"audio_duration\":19456,\"audio_channels\":2,\"rotate\":0,\"master_url\":\"http://sns-video-qc.xhscdn.com/stream/1/110/301/01ea397c2d366aba010370019ef08d7ac8_301.mp4?sign=dc39768f98048aa91984892e565940cd&t=6a581249\",\"backup_urls\":[\"http://sns-bak-v6.xhscdn.com/stream/1/110/301/01ea397c2d366aba010370019ef08d7ac8_301.mp4\"],\"hdr_type\":0,\"vmaf\":-1.0,\"psnr\":41.89899826049805,\"ssim\":0.0,\"weight\":62,\"quality_type\":\"HD\",\"sr\":0,\"opaque1\":{\"pcdn_302_flag\":\"false\",\"didLoudnorm\":\"false\",\"pcdn_supplier\":\"\"}}],\"h266\":[],\"av1\":[]},\"user_level\":0}"
+                    },
+                    "at_user_list": [],
+                    "illegal_info": {
+                        "desc": "可能含AI生成内容",
+                        "left_icon": "https://picasso-static.xiaohongshu.com/fe-platfrom/bc740cc162107169b504c4c1e5ee35f92eaa8456.png",
+                        "link": "xhsdiscover://rn/kuri/noteStickers?background_transparent_v2=true&needNewRootNavigation=true&noteId=6a397c2d000000000702da64"
+                    },
+                    "type": "video",
+                    "user": {
+                        "user_id": "69a51fd10000000021008b47",
+                        "nickname": "柚柚u",
+                        "avatar": "https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo32220qbv4ne005qd53v8o92q7in71c9o",
+                        "xsec_token": "ABMiXlhlGsvYsqDMkXPEvlSU_eYhLoq-vSWxIKO2QYusQ="
+                    },
+                    "time": 1782152237000,
+                    "share_info": {
+                        "un_share": false
+                    },
+                    "desc": "#学生党平价穿搭[话题]# #衣服分享[话题]# #旅游穿搭分享[话题]# #出去玩这样穿[话题]# #出游大学生[话题]# #出片[话题]#",
+                    "interact_info": {
+                        "share_count": "10",
+                        "followed": false,
+                        "relation": "none",
+                        "liked": false,
+                        "liked_count": "981",
+                        "collected": false,
+                        "collected_count": "103",
+                        "comment_count": ""
+                    },
+                    "tag_list": [
+                        {
+                            "id": "5c3865dd000000000e0189b6",
+                            "name": "学生党平价穿搭",
+                            "type": "topic"
+                        },
+                        {
+                            "id": "5c1a77d0000000000902509b",
+                            "name": "衣服分享",
+                            "type": "topic"
+                        },
+                        {
+                            "type": "topic",
+                            "id": "5c34957b000000000903dc05",
+                            "name": "旅游穿搭分享"
+                        },
+                        {
+                            "id": "61b4a3c70000000001002a86",
+                            "name": "出去玩这样穿",
+                            "type": "topic"
+                        },
+                        {
+                            "id": "64408c86000000002c032619",
+                            "name": "出游大学生",
+                            "type": "topic"
+                        },
+                        {
+                            "id": "5f13300b0000000001003fbf",
+                            "name": "出片",
+                            "type": "topic"
+                        }
+                    ]
+                },
+                "id": "6a397c2d000000000702da64"
+            }
+        ],
+        "current_time": 1783854345742
+    },
+    "code": 0,
+    "success": true
+}

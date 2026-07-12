@@ -546,6 +546,16 @@ class CodeGen {
         this.genExpr(node.args[0]);
         this.emit(0x0E); // SBOX_L
         break;
+      // v5 新增内置函数
+      case 'env_feat_adv':
+        this.emit(0x25); // ENV_FEAT_ADV
+        break;
+      case 'dbg_window':
+        this.emit(0x26); // DBG_WINDOW
+        break;
+      case 'dbg_trap':
+        this.emit(0x27); // DBG_TRAP
+        break;
       default:
         throw new Error('CodeGen: Unknown function: ' + name);
     }

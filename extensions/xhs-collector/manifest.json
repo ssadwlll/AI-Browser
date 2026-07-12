@@ -1,0 +1,32 @@
+{
+  "manifest_version": 3,
+  "name": "小红书关键词采集",
+  "version": "1.1.0",
+  "description": "按关键词采集小红书笔记（搜索列表 + 笔记详情），基于页面原生签名函数，真实浏览器环境无风控",
+  "permissions": ["storage", "unlimitedStorage", "activeTab", "tabs", "scripting", "sidePanel", "alarms"],
+  "host_permissions": [
+    "*://*.xiaohongshu.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["*://*.xiaohongshu.com/*"],
+      "js": ["lib/md5.js", "lib/sign.js", "content/content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_title": "小红书关键词采集"
+  },
+  "side_panel": {
+    "default_path": "sidebar/sidebar.html"
+  },
+  "web_accessible_resources": [
+    {
+      "resources": ["content/injected.js"],
+      "matches": ["*://*.xiaohongshu.com/*"]
+    }
+  ]
+}

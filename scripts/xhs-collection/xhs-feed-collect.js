@@ -262,57 +262,82 @@ function browserClickExploreNote() {
   });
 }
 
+function browserClickSearch() {
+  return new Promise((resolve) => {
+    const req = http.request(`${SIGN_SERVER_URL}/click-search`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      timeout: 30000,
+    }, (res) => {
+      let data = '';
+      res.on('data', c => data += c);
+      res.on('end', () => { try { resolve(JSON.parse(data)); } catch { resolve({ ok: false }); } });
+    });
+    req.on('error', () => resolve({ ok: false }));
+    req.on('timeout', () => { req.destroy(); resolve({ ok: false, error: '超时' }); });
+    req.end();
+  });
+}
+
 /**
  * 智能异常恢复（账号被风控时自动尝试恢复）
- * 流程：等待5分钟 → 暂停行为线程 → 导航到首页点击推荐笔记 → 尝试采集验证
+ * 流程：导航到首页 → 等待(N*5分钟) → 刷新首页 → 模拟人类行为 → 点击搜索 → 尝试采集验证
  *   成功：重置异常计数，继续采集
- *   失败：等待10分钟，进入下一次检测（第三次直接结束）
+ *   失败：继续采集，下一次异常等待时间增加5分钟（无上限）
  * @param {object} note - 用于验证采集的笔记 { noteId, xsecToken }
- * @returns {boolean} true=恢复成功可继续采集, false=达到上限需停止
+ * @returns {boolean} true=可继续采集
  */
 let accountAnomalyCount = 0;
 
 async function recoverFromAnomaly(note) {
   accountAnomalyCount++;
-  log(`  [恢复] 检测到账号异常（第 ${accountAnomalyCount}/3 次）`);
-
-  if (accountAnomalyCount >= 3) {
-    log(`  ⛔ 第3次账号异常，采集结束`);
-    return false;
-  }
-
-  // 第1次等待5分钟，第2次等待10分钟
-  const waitMinutes = accountAnomalyCount === 1 ? 5 : 10;
-  log(`  [恢复] 等待 ${waitMinutes} 分钟后尝试恢复...`);
-  await sleep(waitMinutes * 60 * 1000);
+  const waitMinutes = accountAnomalyCount * 5; // 第1次5分钟，第2次10分钟，第3次15分钟...
+  log(`  [恢复] 检测到异常（第 ${accountAnomalyCount} 次），等待 ${waitMinutes} 分钟后恢复...`);
 
   // 暂停行为线程（恢复期间由采集线程接管浏览器操作）
   behaviorPaused = true;
   log(`  [恢复] 行为线程已暂停，开始恢复操作`);
 
   try {
-    // 导航到首页
+    // Step 1: 导航到首页（立即）
     log(`  [恢复] 导航到首页...`);
-    const navResult = await browserNavigate('https://www.xiaohongshu.com', randomDelay(3000, 5000));
-    if (!navResult.ok) {
-      log(`  [恢复] 导航首页失败: ${navResult.error || '未知'}`);
-    }
+    await browserNavigate('https://www.xiaohongshu.com', randomDelay(3000, 5000));
     await sleep(randomDelay(2000, 3000));
 
-    // 点击推荐笔记（产生真实浏览行为）
-    log(`  [恢复] 点击首页推荐笔记...`);
-    const clickResult = await browserClickExploreNote();
+    // Step 2: 等待（每次增加5分钟）
+    log(`  [恢复] 等待 ${waitMinutes} 分钟...`);
+    await sleep(waitMinutes * 60 * 1000);
+
+    // Step 3: 刷新首页（再次导航）
+    log(`  [恢复] 刷新首页...`);
+    await browserNavigate('https://www.xiaohongshu.com', randomDelay(3000, 5000));
+    await sleep(randomDelay(2000, 3000));
+
+    // Step 3.5: 模拟人类行为（鼠标移动 + 滚动 + 微移动）
+    log(`  [恢复] 模拟人类浏览行为...`);
+    await browserSimulate();
+    await sleep(randomDelay(1500, 2500));
+    await browserSimulate();
+    await sleep(randomDelay(1000, 2000));
+
+    // Step 4: 点击搜索框（产生真实搜索行为）
+    log(`  [恢复] 点击首页搜索框...`);
+    const clickResult = await browserClickSearch();
     if (clickResult.ok) {
-      log(`  [恢复] 推荐笔记点击成功，已产生浏览行为`);
+      if (clickResult.btnClicked) {
+        log(`  [恢复] ✅ 搜索成功，关键词: ${clickResult.keyword} | ${clickResult.btnInfo}`);
+      } else {
+        log(`  [恢复] ⚠️ 输入成功但按钮未点击，关键词: ${clickResult.keyword} | ${clickResult.btnInfo}`);
+      }
     } else {
-      log(`  [恢复] 推荐笔记点击失败: ${clickResult.error || '未知'}，在首页模拟行为`);
+      log(`  [恢复] 搜索点击失败: ${clickResult.error || '未知'}，在首页模拟行为`);
       await browserSimulate();
     }
 
     // 等待行为事件上报
     await sleep(randomDelay(3000, 5000));
 
-    // 尝试采集验证（用触发异常的笔记重试）
+    // Step 5: 尝试采集验证（用触发异常的笔记重试）
     if (note && note.noteId && note.xsecToken) {
       log(`  [恢复] 尝试采集笔记验证恢复: ${note.noteId}`);
       const testResp = await fetchFeed(note.noteId, note.xsecToken);
@@ -326,7 +351,7 @@ async function recoverFromAnomaly(note) {
       log(`  [恢复] 无可用笔记验证，假设恢复失败`);
     }
 
-    return true; // 未达到3次上限，继续采集（下一次异常会再次计数）
+    return true; // 继续采集（下一次异常会再次计数）
   } finally {
     // 恢复行为线程
     behaviorPaused = false;
@@ -397,14 +422,15 @@ const START_FROM_INDEX = process.env.START_INDEX ? parseInt(process.env.START_IN
 
 const PAGES_PER_KEYWORD = 3;
 const PAGE_SIZE = 20;
-const SEARCH_DELAY = 500;
-const FEED_DELAY_MIN = 800;       // 详情采集间隔 0.8-2s
-const FEED_DELAY_MAX = 2000;
+const SEARCH_DELAY_MIN = 1000;    // 搜索页间隔 1-1.5s
+const SEARCH_DELAY_MAX = 1500;
+const FEED_DELAY_MIN = 5000;      // 详情采集间隔 5-8s
+const FEED_DELAY_MAX = 8000;
 const FEED_RETRY_DELAY = 15000;   // 限流重试等待 15s
 const CONSECUTIVE_FAIL_PAUSE = 30000; // 连续3次失败暂停 30s
-const BATCH_SIZE = 100;
-const BATCH_PAUSE_MIN = 15000;    // 批次暂停 15-30s
-const BATCH_PAUSE_MAX = 30000;
+const BATCH_SIZE = 300;           // 每300条批次暂停
+const BATCH_PAUSE_MIN = 60000;    // 批次暂停 60-90s
+const BATCH_PAUSE_MAX = 90000;
 const KEYWORD_PAUSE_MIN = 5000;   // 关键词间暂停 5-10s
 const KEYWORD_PAUSE_MAX = 10000;
 
@@ -733,15 +759,9 @@ async function collectKeyword(keyword, keywordIndex) {
       }
     }
     log(`  [搜索] page ${page}: ${items.length} 条，有效 ${notes.length} 条`);
-    await sleep(randomDelay(1000, 2000));
+    await sleep(randomDelay(SEARCH_DELAY_MIN, SEARCH_DELAY_MAX));
   }
   log(`  [搜索] 完成，共 ${notes.length} 条有效笔记`);
-
-  // 推送到行为线程共享池（让行为线程可以浏览这些笔记）
-  for (const note of notes) {
-    sharedNotes.push({ noteId: note.noteId, xsecToken: note.xsecToken, keyword: note.keyword });
-  }
-  log(`  [共享池] 已推送 ${notes.length} 条（池总量: ${sharedNotes.length}）`);
 
   // Step 2: 逐条采集详情
   log(`  [详情] 开始采集 ${notes.length} 条笔记详情...`);
@@ -762,24 +782,21 @@ async function collectKeyword(keyword, keywordIndex) {
         log(`  [详情] 进度 ${i + 1}/${notes.length} | 成功 ${success} | 失败 ${fail}`);
       }
     } else if (resp.code === 300013) {
-      // 限流：等待后重试一次
-      log(`  [详情] ${i + 1}/${notes.length} 限流，等待 ${FEED_RETRY_DELAY / 1000}s 重试...`);
-      await sleep(FEED_RETRY_DELAY);
+      // 300013（限流/访问频繁）：触发智能恢复
+      log(`  ⚠️ 限流（300013），启动智能恢复...`);
+      await recoverFromAnomaly(note);
+      // 恢复后重试当前笔记
       const retry = await fetchFeed(note.noteId, note.xsecToken);
       if (retry.code === 0) {
         details.push(extractDetail(retry, note));
         success++;
         consecutiveFail = 0;
+        log(`  [详情] 恢复后重试成功`);
       } else {
         fail++;
         consecutiveFail++;
-        failures.push({ noteId: note.noteId, xsecToken: note.xsecToken, code: retry.code, msg: retry.msg || '重试失败' });
-        log(`  [详情] 重试仍失败: code=${retry.code} msg=${retry.msg || ''}`);
-        if (consecutiveFail >= 3) {
-          log(`  [详情] 连续 ${consecutiveFail} 次失败，暂停 ${CONSECUTIVE_FAIL_PAUSE / 1000}s`);
-          await sleep(CONSECUTIVE_FAIL_PAUSE);
-          consecutiveFail = 0;
-        }
+        failures.push({ noteId: note.noteId, xsecToken: note.xsecToken, code: retry.code, msg: retry.msg || '恢复后重试失败' });
+        log(`  [详情] 恢复后重试仍失败: code=${retry.code}`);
       }
     } else if (resp.code === -100) {
       log(`  ⛔ 登录已过期(-100)，停止采集`);
@@ -787,11 +804,7 @@ async function collectKeyword(keyword, keywordIndex) {
     } else if (resp.code === 300011 && resp.msg && resp.msg.includes('账号异常')) {
       // 300011 + "账号异常" = 账号被风控，尝试智能恢复
       log(`  ⚠️ 账号异常（300011），启动智能恢复...`);
-      const recovered = await recoverFromAnomaly(note);
-      if (!recovered) {
-        log(`  ⛔ 账号异常恢复失败（达到上限），停止采集`);
-        return { notes, details, failures, stopped: true };
-      }
+      await recoverFromAnomaly(note);
       // 恢复后重试当前笔记
       const retry = await fetchFeed(note.noteId, note.xsecToken);
       if (retry.code === 0) {
@@ -934,11 +947,56 @@ async function main() {
     log(`  XYS_ 动态签名: ⚠️ 初始化失败 (${e.message})，回退静态 XYS_`);
   }
 
-  // 启动行为线程（后台循环，不 await）
-  behaviorLoop().catch(err => log(`[行为] 行为线程异常: ${err.message}`));
-  log(`  行为线程: 已启动（后台运行）`);
+  // 行为线程已禁用（仅在异常恢复时使用浏览器操作）
+  // behaviorLoop().catch(err => log(`[行为] 行为线程异常: ${err.message}`));
+  log(`  行为线程: 已禁用（仅在异常恢复时使用）`);
 
-  log(`详情间隔: ${FEED_DELAY_MIN}-${FEED_DELAY_MAX}ms (随机) | 关键词间: ${KEYWORD_PAUSE_MIN}-${KEYWORD_PAUSE_MAX}ms (随机)`);
+  // 启动前预操作：模拟一次恢复流程（导航首页 + 模拟人类行为 + 点击搜索）
+  // 目的：产生真实行为事件，降低风控风险
+  if (signServerAvailable) {
+    log(`[预操作] 启动前模拟恢复流程...`);
+    try {
+      // Step 1: 导航到首页
+      log(`  [预操作] 导航到首页...`);
+      await browserNavigate('https://www.xiaohongshu.com', randomDelay(3000, 5000));
+      await sleep(randomDelay(2000, 3000));
+
+      // Step 2: 刷新首页
+      log(`  [预操作] 刷新首页...`);
+      await browserNavigate('https://www.xiaohongshu.com', randomDelay(3000, 5000));
+      await sleep(randomDelay(2000, 3000));
+
+      // Step 3: 模拟人类行为
+      log(`  [预操作] 模拟人类浏览行为...`);
+      await browserSimulate();
+      await sleep(randomDelay(1500, 2500));
+      await browserSimulate();
+      await sleep(randomDelay(1000, 2000));
+
+      // Step 4: 点击搜索框
+      log(`  [预操作] 点击首页搜索框...`);
+      const clickResult = await browserClickSearch();
+      if (clickResult.ok) {
+        if (clickResult.btnClicked) {
+          log(`  [预操作] ✅ 搜索成功，关键词: ${clickResult.keyword} | ${clickResult.btnInfo}`);
+        } else {
+          log(`  [预操作] ⚠️ 输入成功但按钮未点击，关键词: ${clickResult.keyword} | ${clickResult.btnInfo}`);
+        }
+      } else {
+        log(`  [预操作] ⚠️ 搜索点击失败: ${clickResult.error || '未知'}，跳过预操作`);
+      }
+
+      // 等待行为事件上报
+      await sleep(randomDelay(3000, 5000));
+      log(`[预操作] 完成，开始采集`);
+    } catch (e) {
+      log(`[预操作] ⚠️ 预操作异常: ${e.message}，直接开始采集`);
+    }
+  } else {
+    log(`[预操作] ⏭ 签名服务未连接，跳过预操作`);
+  }
+
+  log(`搜索间隔: ${SEARCH_DELAY_MIN}-${SEARCH_DELAY_MAX}ms | 详情间隔: ${FEED_DELAY_MIN}-${FEED_DELAY_MAX}ms | 关键词间: ${KEYWORD_PAUSE_MIN}-${KEYWORD_PAUSE_MAX}ms`);
   log(`批次暂停: 每 ${BATCH_SIZE} 条暂停 ${BATCH_PAUSE_MIN / 1000}-${BATCH_PAUSE_MAX / 1000}s | 限流重试: ${FEED_RETRY_DELAY / 1000}s | 连续失败暂停: ${CONSECUTIVE_FAIL_PAUSE / 1000}s`);
   if (START_FROM_INDEX > 0) {
     log(`从第 ${START_FROM_INDEX + 1} 个关键词继续采集: "${KEYWORDS[START_FROM_INDEX]}"`);
