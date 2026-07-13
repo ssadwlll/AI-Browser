@@ -358,9 +358,12 @@ async function navigateHomepageAndClick(searchUrl) {
       if (!state.collecting) return 'stopped';
       var menuResult = await clickSidebarMenuViaScripting(tabId);
       log('[行为] 侧边栏菜单点击 ' + (m + 1) + '/' + menuClicks + ': ' + menuResult);
+      // 点击后再次检查代际（clickSidebarMenuViaScripting 执行期间可能已进入新关键词）
+      if (myGeneration !== _collectGeneration) return 'aborted';
       if (menuResult.indexOf('clicked') === 0) {
         // 等待页面加载
         await waitForTabComplete(tabId);
+        if (myGeneration !== _collectGeneration) return 'aborted';
         await new Promise(function (r) { setTimeout(r, 2000 + Math.random() * 2000); });
 
         // 滚动浏览一下
@@ -376,7 +379,8 @@ async function navigateHomepageAndClick(searchUrl) {
 
         if (myGeneration !== _collectGeneration) return 'aborted';
 
-        // 返回首页
+        // 返回首页（导航前再次检查代际）
+        if (myGeneration !== _collectGeneration) return 'aborted';
         log('[行为] 返回首页...');
         await new Promise(function (resolve) {
           pluginTabsUpdate(tabId, { url: 'https://www.xiaohongshu.com/explore' }).then(resolve).catch(resolve);
@@ -388,7 +392,8 @@ async function navigateHomepageAndClick(searchUrl) {
       }
     }
 
-    // 7. 导航回搜索页
+    // 7. 导航回搜索页（导航前检查代际）
+    if (myGeneration !== _collectGeneration) return 'aborted';
     if (searchUrl) {
       log('[行为] 导航回搜索页...');
       await new Promise(function (resolve) {
@@ -1288,7 +1293,9 @@ function sendToContent(message) {
     var timeout = 120000; // 2 分钟超时（详情采集可能较久）
     if (message.type === 'COLLECT') timeout = 600000; // COLLECT 最多 10 分钟
     if (message.type === 'STOP' || message.type === 'PING' || message.type === 'CHECK_STATUS') timeout = 5000;
-    if (message.type === 'SEARCH' || message.type === 'SCROLL' || message.type === 'SCROLL_TO_TOP' || message.type === 'BIG_MOUSE_MOVE' || message.type === 'DEEP_INTERACTION') timeout = 120000;
+    if (message.type === 'SEARCH') timeout = 30000; // 搜索 30 秒超时（僵尸导航可能干扰）
+    if (message.type === 'SCROLL' || message.type === 'SCROLL_TO_TOP' || message.type === 'BIG_MOUSE_MOVE') timeout = 30000;
+    if (message.type === 'DEEP_INTERACTION') timeout = 120000;
 
     var settled = false;
     var timer = setTimeout(function () {

@@ -135,31 +135,313 @@ function selectScenario(card) {
   log('info', '切换场景: ' + currentScenario)
 }
 
-// 生成验证码图片（使用 picsum 随机图片）
-function generateCaptchaImages(count) {
+// ============ Canvas 绘图：用明确图案代替随机图片 ============
+
+// 图案绘制函数：每个函数在 canvas 上画一个可识别的物体
+const DRAW = {
+  // ---- 正确答案图案 ----
+  bicycle(ctx, w, h) {
+    const cx = w/2, cy = h/2, r = w*0.18
+    ctx.strokeStyle = '#333'; ctx.lineWidth = 3
+    // 后轮
+    ctx.beginPath(); ctx.arc(cx - r*1.2, cy + r*0.5, r, 0, Math.PI*2); ctx.stroke()
+    // 前轮
+    ctx.beginPath(); ctx.arc(cx + r*1.2, cy + r*0.5, r, 0, Math.PI*2); ctx.stroke()
+    // 车架
+    ctx.beginPath(); ctx.moveTo(cx - r*1.2, cy + r*0.5); ctx.lineTo(cx, cy - r*0.8); ctx.lineTo(cx + r*1.2, cy + r*0.5); ctx.stroke()
+    ctx.beginPath(); ctx.moveTo(cx, cy - r*0.8); ctx.lineTo(cx - r*0.3, cy + r*0.5); ctx.stroke()
+    // 把手
+    ctx.beginPath(); ctx.moveTo(cx, cy - r*0.8); ctx.lineTo(cx + r*0.5, cy - r*1.1); ctx.stroke()
+    // 座椅
+    ctx.beginPath(); ctx.moveTo(cx - r*0.5, cy - r*0.85); ctx.lineTo(cx + r*0.3, cy - r*0.85); ctx.stroke()
+    // 标注
+    ctx.fillStyle = '#6841ea'; ctx.font = `bold ${w*0.1}px sans-serif`; ctx.textAlign = 'center'
+    ctx.fillText('自行车', cx, h*0.15)
+  },
+
+  trafficLight(ctx, w, h) {
+    const cx = w/2, bw = w*0.22, bh = h*0.5
+    // 灯柱
+    ctx.fillStyle = '#666'; ctx.fillRect(cx - bw*0.15, cy = h*0.5 + bh*0.3, bw*0.3, h*0.25)
+    // 灯箱
+    ctx.fillStyle = '#333'; ctx.fillRect(cx - bw/2, h*0.18, bw, bh)
+    ctx.strokeStyle = '#555'; ctx.lineWidth = 2; ctx.strokeRect(cx - bw/2, h*0.18, bw, bh)
+    // 红灯
+    ctx.fillStyle = '#ff3333'; ctx.beginPath(); ctx.arc(cx, h*0.26, bw*0.28, 0, Math.PI*2); ctx.fill()
+    // 黄灯
+    ctx.fillStyle = '#ffcc00'; ctx.beginPath(); ctx.arc(cx, h*0.40, bw*0.28, 0, Math.PI*2); ctx.fill()
+    // 绿灯
+    ctx.fillStyle = '#33cc33'; ctx.beginPath(); ctx.arc(cx, h*0.54, bw*0.28, 0, Math.PI*2); ctx.fill()
+    // 标注
+    ctx.fillStyle = '#6841ea'; ctx.font = `bold ${w*0.1}px sans-serif`; ctx.textAlign = 'center'
+    ctx.fillText('红绿灯', cx, h*0.9)
+  },
+
+  bridge(ctx, w, h) {
+    ctx.strokeStyle = '#8B4513'; ctx.lineWidth = 4
+    // 桥面
+    ctx.fillStyle = '#D2B48C'; ctx.fillRect(w*0.1, h*0.45, w*0.8, h*0.1)
+    // 桥拱
+    ctx.beginPath(); ctx.arc(w*0.35, h*0.55, w*0.18, Math.PI, 0); ctx.stroke()
+    ctx.beginPath(); ctx.arc(w*0.65, h*0.55, w*0.18, Math.PI, 0); ctx.stroke()
+    // 水面
+    ctx.fillStyle = '#87CEEB'; ctx.fillRect(0, h*0.65, w, h*0.35)
+    // 水波
+    ctx.strokeStyle = '#4682B4'; ctx.lineWidth = 1.5
+    for (let i = 0; i < 4; i++) {
+      ctx.beginPath()
+      ctx.moveTo(0, h*0.7 + i*h*0.06)
+      ctx.bezierCurveTo(w*0.25, h*0.68 + i*h*0.06, w*0.75, h*0.72 + i*h*0.06, w, h*0.7 + i*h*0.06)
+      ctx.stroke()
+    }
+    // 标注
+    ctx.fillStyle = '#6841ea'; ctx.font = `bold ${w*0.1}px sans-serif`; ctx.textAlign = 'center'
+    ctx.fillText('桥', w/2, h*0.15)
+  },
+
+  mountain(ctx, w, h) {
+    // 天空
+    const sky = ctx.createLinearGradient(0, 0, 0, h*0.6)
+    sky.addColorStop(0, '#87CEEB'); sky.addColorStop(1, '#E0F0FF')
+    ctx.fillStyle = sky; ctx.fillRect(0, 0, w, h*0.6)
+    // 山
+    ctx.fillStyle = '#5D4E37'
+    ctx.beginPath(); ctx.moveTo(w*0.1, h*0.6); ctx.lineTo(w*0.35, h*0.2); ctx.lineTo(w*0.6, h*0.6); ctx.fill()
+    ctx.fillStyle = '#6B5B45'
+    ctx.beginPath(); ctx.moveTo(w*0.4, h*0.6); ctx.lineTo(w*0.65, h*0.15); ctx.lineTo(w*0.9, h*0.6); ctx.fill()
+    // 雪顶
+    ctx.fillStyle = '#FFF'
+    ctx.beginPath(); ctx.moveTo(w*0.28, h*0.28); ctx.lineTo(w*0.35, h*0.2); ctx.lineTo(w*0.42, h*0.28); ctx.fill()
+    ctx.beginPath(); ctx.moveTo(w*0.58, h*0.23); ctx.lineTo(w*0.65, h*0.15); ctx.lineTo(w*0.72, h*0.23); ctx.fill()
+    // 草地
+    ctx.fillStyle = '#7CCD7C'; ctx.fillRect(0, h*0.6, w, h*0.4)
+    // 标注
+    ctx.fillStyle = '#6841ea'; ctx.font = `bold ${w*0.1}px sans-serif`; ctx.textAlign = 'center'
+    ctx.fillText('山', w/2, h*0.9)
+  },
+
+  river(ctx, w, h) {
+    // 岸
+    ctx.fillStyle = '#8FBC8F'; ctx.fillRect(0, 0, w*0.25, h)
+    ctx.fillRect(w*0.75, 0, w*0.25, h)
+    // 河水
+    const water = ctx.createLinearGradient(0, 0, 0, h)
+    water.addColorStop(0, '#4682B4'); water.addColorStop(1, '#1E90FF')
+    ctx.fillStyle = water; ctx.fillRect(w*0.25, 0, w*0.5, h)
+    // 水波
+    ctx.strokeStyle = '#87CEFA'; ctx.lineWidth = 2
+    for (let i = 0; i < 6; i++) {
+      ctx.beginPath()
+      ctx.moveTo(w*0.25, h*0.1 + i*h*0.15)
+      ctx.bezierCurveTo(w*0.4, h*0.07 + i*h*0.15, w*0.6, h*0.13 + i*h*0.15, w*0.75, h*0.1 + i*h*0.15)
+      ctx.stroke()
+    }
+    // 标注
+    ctx.fillStyle = '#6841ea'; ctx.font = `bold ${w*0.1}px sans-serif`; ctx.textAlign = 'center'
+    ctx.fillText('河', w/2, h*0.9)
+  },
+
+  bus(ctx, w, h) {
+    const bx = w*0.15, by = h*0.2, bw = w*0.7, bh = h*0.45
+    // 车身
+    ctx.fillStyle = '#FF8C00'; ctx.fillRect(bx, by, bw, bh)
+    ctx.strokeStyle = '#CC7000'; ctx.lineWidth = 2; ctx.strokeRect(bx, by, bw, bh)
+    // 窗户
+    ctx.fillStyle = '#87CEEB'
+    const winW = bw*0.18, winH = bh*0.4, winY = by + bh*0.15
+    for (let i = 0; i < 4; i++) {
+      ctx.fillRect(bx + bw*0.06 + i*(winW + bw*0.06), winY, winW, winH)
+    }
+    // 轮子
+    ctx.fillStyle = '#333'
+    ctx.beginPath(); ctx.arc(bx + bw*0.25, by + bh + h*0.04, h*0.06, 0, Math.PI*2); ctx.fill()
+    ctx.beginPath(); ctx.arc(bx + bw*0.75, by + bh + h*0.04, h*0.06, 0, Math.PI*2); ctx.fill()
+    // 标注
+    ctx.fillStyle = '#6841ea'; ctx.font = `bold ${w*0.1}px sans-serif`; ctx.textAlign = 'center'
+    ctx.fillText('大巴', w/2, h*0.9)
+  },
+
+  zebraCrossing(ctx, w, h) {
+    // 路面
+    ctx.fillStyle = '#666'; ctx.fillRect(0, 0, w, h)
+    // 斑马线
+    ctx.fillStyle = '#FFF'
+    const stripeH = h * 0.08, gap = h * 0.06, startY = h * 0.1
+    for (let i = 0; i < 7; i++) {
+      ctx.fillRect(w*0.15, startY + i*(stripeH + gap), w*0.7, stripeH)
+    }
+    // 行人
+    ctx.fillStyle = '#FF6347'; ctx.strokeStyle = '#FF6347'; ctx.lineWidth = 3
+    const px = w*0.5, py = h*0.5
+    ctx.beginPath(); ctx.arc(px, py - h*0.12, h*0.04, 0, Math.PI*2); ctx.fill()
+    ctx.beginPath(); ctx.moveTo(px, py - h*0.08); ctx.lineTo(px, py + h*0.05); ctx.stroke()
+    ctx.beginPath(); ctx.moveTo(px - w*0.06, py - h*0.02); ctx.lineTo(px + w*0.06, py - h*0.02); ctx.stroke()
+    ctx.beginPath(); ctx.moveTo(px, py + h*0.05); ctx.lineTo(px - w*0.04, py + h*0.14); ctx.stroke()
+    ctx.beginPath(); ctx.moveTo(px, py + h*0.05); ctx.lineTo(px + w*0.04, py + h*0.14); ctx.stroke()
+    // 标注
+    ctx.fillStyle = '#6841ea'; ctx.font = `bold ${w*0.08}px sans-serif`; ctx.textAlign = 'center'
+    ctx.fillText('斑马线', w/2, h*0.95)
+  },
+
+  // ---- 干扰图案（不是答案） ----
+  cat(ctx, w, h) {
+    ctx.fillStyle = '#FFB6C1'
+    ctx.beginPath(); ctx.arc(w/2, h*0.45, w*0.25, 0, Math.PI*2); ctx.fill()
+    // 耳朵
+    ctx.beginPath(); ctx.moveTo(w*0.3, h*0.25); ctx.lineTo(w*0.38, h*0.12); ctx.lineTo(w*0.46, h*0.25); ctx.fill()
+    ctx.beginPath(); ctx.moveTo(w*0.54, h*0.25); ctx.lineTo(w*0.62, h*0.12); ctx.lineTo(w*0.7, h*0.25); ctx.fill()
+    // 眼睛
+    ctx.fillStyle = '#333'
+    ctx.beginPath(); ctx.arc(w*0.42, h*0.4, w*0.03, 0, Math.PI*2); ctx.fill()
+    ctx.beginPath(); ctx.arc(w*0.58, h*0.4, w*0.03, 0, Math.PI*2); ctx.fill()
+    // 鼻子
+    ctx.fillStyle = '#FF69B4'
+    ctx.beginPath(); ctx.arc(w*0.5, h*0.47, w*0.02, 0, Math.PI*2); ctx.fill()
+    // 胡须
+    ctx.strokeStyle = '#999'; ctx.lineWidth = 1
+    ctx.beginPath(); ctx.moveTo(w*0.3, h*0.47); ctx.lineTo(w*0.42, h*0.48); ctx.stroke()
+    ctx.beginPath(); ctx.moveTo(w*0.58, h*0.48); ctx.lineTo(w*0.7, h*0.47); ctx.stroke()
+  },
+
+  house(ctx, w, h) {
+    // 墙壁
+    ctx.fillStyle = '#F5DEB3'; ctx.fillRect(w*0.2, h*0.4, w*0.6, h*0.45)
+    // 屋顶
+    ctx.fillStyle = '#CD5C5C'
+    ctx.beginPath(); ctx.moveTo(w*0.1, h*0.4); ctx.lineTo(w*0.5, h*0.1); ctx.lineTo(w*0.9, h*0.4); ctx.fill()
+    // 门
+    ctx.fillStyle = '#8B4513'; ctx.fillRect(w*0.4, h*0.6, w*0.2, h*0.25)
+    // 窗户
+    ctx.fillStyle = '#87CEEB'; ctx.fillRect(w*0.25, h*0.5, w*0.12, w*0.12); ctx.fillRect(w*0.63, h*0.5, w*0.12, w*0.12)
+  },
+
+  tree(ctx, w, h) {
+    // 树干
+    ctx.fillStyle = '#8B4513'; ctx.fillRect(w*0.42, h*0.5, w*0.16, h*0.35)
+    // 树冠
+    ctx.fillStyle = '#228B22'
+    ctx.beginPath(); ctx.arc(w*0.5, h*0.35, w*0.28, 0, Math.PI*2); ctx.fill()
+    ctx.beginPath(); ctx.arc(w*0.3, h*0.45, w*0.15, 0, Math.PI*2); ctx.fill()
+    ctx.beginPath(); ctx.arc(w*0.7, h*0.45, w*0.15, 0, Math.PI*2); ctx.fill()
+  },
+
+  car(ctx, w, h) {
+    // 车身
+    ctx.fillStyle = '#4169E1'
+    ctx.beginPath(); ctx.moveTo(w*0.1, h*0.55); ctx.lineTo(w*0.25, h*0.55); ctx.lineTo(w*0.3, h*0.35); ctx.lineTo(w*0.7, h*0.35); ctx.lineTo(w*0.75, h*0.55); ctx.lineTo(w*0.9, h*0.55); ctx.lineTo(w*0.9, h*0.65); ctx.lineTo(w*0.1, h*0.65); ctx.closePath(); ctx.fill()
+    // 窗户
+    ctx.fillStyle = '#87CEEB'
+    ctx.beginPath(); ctx.moveTo(w*0.33, h*0.37); ctx.lineTo(w*0.5, h*0.37); ctx.lineTo(w*0.5, h*0.53); ctx.lineTo(w*0.3, h*0.53); ctx.closePath(); ctx.fill()
+    ctx.beginPath(); ctx.moveTo(w*0.52, h*0.37); ctx.lineTo(w*0.67, h*0.37); ctx.lineTo(w*0.7, h*0.53); ctx.lineTo(w*0.52, h*0.53); ctx.closePath(); ctx.fill()
+    // 轮子
+    ctx.fillStyle = '#333'
+    ctx.beginPath(); ctx.arc(w*0.3, h*0.65, h*0.06, 0, Math.PI*2); ctx.fill()
+    ctx.beginPath(); ctx.arc(w*0.7, h*0.65, h*0.06, 0, Math.PI*2); ctx.fill()
+  },
+
+  flower(ctx, w, h) {
+    const cx = w/2, cy = h*0.4
+    // 花瓣
+    const colors = ['#FF6B6B','#FFD93D','#6BCB77','#4D96FF','#FF6B6B','#FFD93D']
+    for (let i = 0; i < 6; i++) {
+      ctx.fillStyle = colors[i]
+      const a = (i/6)*Math.PI*2 - Math.PI/2
+      ctx.beginPath(); ctx.arc(cx + Math.cos(a)*w*0.12, cy + Math.sin(a)*w*0.12, w*0.08, 0, Math.PI*2); ctx.fill()
+    }
+    // 花心
+    ctx.fillStyle = '#FFD700'; ctx.beginPath(); ctx.arc(cx, cy, w*0.06, 0, Math.PI*2); ctx.fill()
+    // 茎
+    ctx.strokeStyle = '#228B22'; ctx.lineWidth = 3
+    ctx.beginPath(); ctx.moveTo(cx, cy + w*0.1); ctx.lineTo(cx, h*0.8); ctx.stroke()
+    // 叶子
+    ctx.fillStyle = '#228B22'
+    ctx.beginPath(); ctx.ellipse(cx + w*0.08, h*0.65, w*0.06, w*0.03, 0.5, 0, Math.PI*2); ctx.fill()
+  },
+
+  book(ctx, w, h) {
+    // 封面
+    ctx.fillStyle = '#8B0000'; ctx.fillRect(w*0.2, h*0.15, w*0.6, h*0.7)
+    ctx.strokeStyle = '#5C0000'; ctx.lineWidth = 2; ctx.strokeRect(w*0.2, h*0.15, w*0.6, h*0.7)
+    // 书脊
+    ctx.fillStyle = '#660000'; ctx.fillRect(w*0.2, h*0.15, w*0.06, h*0.7)
+    // 标题
+    ctx.fillStyle = '#FFD700'; ctx.font = `bold ${w*0.08}px serif`; ctx.textAlign = 'center'
+    ctx.fillText('BOOK', w*0.55, h*0.45)
+    // 页面线
+    ctx.strokeStyle = '#FFF8DC'; ctx.lineWidth = 0.5
+    for (let i = 0; i < 4; i++) {
+      ctx.beginPath(); ctx.moveTo(w*0.35, h*0.52 + i*h*0.06); ctx.lineTo(w*0.72, h*0.52 + i*h*0.06); ctx.stroke()
+    }
+  },
+
+  cloud(ctx, w, h) {
+    ctx.fillStyle = '#E8E8E8'
+    ctx.beginPath(); ctx.arc(w*0.35, h*0.4, w*0.15, 0, Math.PI*2); ctx.fill()
+    ctx.beginPath(); ctx.arc(w*0.5, h*0.3, w*0.18, 0, Math.PI*2); ctx.fill()
+    ctx.beginPath(); ctx.arc(w*0.65, h*0.4, w*0.15, 0, Math.PI*2); ctx.fill()
+    ctx.beginPath(); ctx.arc(w*0.5, h*0.45, w*0.2, 0, Math.PI*2); ctx.fill()
+    // 背景蓝天
+    ctx.fillStyle = '#87CEEB'; ctx.globalCompositeOperation = 'destination-over'
+    ctx.fillRect(0, 0, w, h)
+    ctx.globalCompositeOperation = 'source-over'
+  }
+}
+
+// 干扰图案列表（不含正确答案的图案）
+const DISTRACTORS = ['cat', 'house', 'tree', 'car', 'flower', 'book', 'cloud']
+
+// 生成 Canvas 图片 DataURL
+function generateCaptchaImage(drawFn, size = 200) {
+  const canvas = document.createElement('canvas')
+  canvas.width = size; canvas.height = size
+  const ctx = canvas.getContext('2d')
+  // 浅色背景
+  ctx.fillStyle = '#FAFAFA'; ctx.fillRect(0, 0, size, size)
+  // 添加轻微噪点
+  for (let i = 0; i < 200; i++) {
+    ctx.fillStyle = `rgba(${Math.random()*200|0},${Math.random()*200|0},${Math.random()*200|0},0.08)`
+    ctx.fillRect(Math.random()*size, Math.random()*size, Math.random()*4+1, Math.random()*4+1)
+  }
+  drawFn(ctx, size, size)
+  return canvas.toDataURL('image/png')
+}
+
+// 3x3 验证码主题：key 对应 DRAW 中的绘制函数
+const themes3x3 = [
+  { prompt: '请选出包含【自行车】的图片', desc: '请选出2张包含自行车的图片', count: 2, target: 'bicycle' },
+  { prompt: '请选出包含【红绿灯】的图片', desc: '请选出2张包含红绿灯的图片', count: 2, target: 'trafficLight' },
+  { prompt: '请选出包含【桥梁】的图片', desc: '请选出2张包含桥梁的图片', count: 2, target: 'bridge' },
+  { prompt: '请选出包含【山】的图片', desc: '请选出2张包含山的图片', count: 2, target: 'mountain' },
+  { prompt: '请选出包含【河流】的图片', desc: '请选出2张包含河流的图片', count: 2, target: 'river' },
+]
+
+// 4x4 验证码主题
+const themes4x4 = [
+  { prompt: '请选出包含【红绿灯】的图片', desc: '请选出3张包含红绿灯的图片', count: 3, target: 'trafficLight' },
+  { prompt: '请选出包含【大巴车】的图片', desc: '请选出3张包含大巴车的图片', count: 3, target: 'bus' },
+  { prompt: '请选出包含【斑马线】的图片', desc: '请选出3张包含斑马线的图片', count: 3, target: 'zebraCrossing' },
+]
+
+function generateCaptchaSet(totalCount, targetCount, targetDrawKey) {
+  // 随机选择正确位置
+  correctIndices = []
+  while (correctIndices.length < targetCount) {
+    const idx = Math.floor(Math.random() * totalCount)
+    if (!correctIndices.includes(idx)) correctIndices.push(idx)
+  }
+  // 为干扰图片选择不同的图案
+  const availDistractors = DISTRACTORS.filter(d => d !== targetDrawKey)
   const images = []
-  const seedBase = Math.floor(Math.random() * 10000)
-  for (let i = 0; i < count; i++) {
-    images.push(`https://picsum.photos/seed/${seedBase + i}/200/200`)
+  for (let i = 0; i < totalCount; i++) {
+    if (correctIndices.includes(i)) {
+      images.push(generateCaptchaImage(DRAW[targetDrawKey]))
+    } else {
+      const dKey = availDistractors[Math.floor(Math.random() * availDistractors.length)]
+      images.push(generateCaptchaImage(DRAW[dKey]))
+    }
   }
   return images
 }
-
-// 3x3 验证码主题列表
-const themes3x3 = [
-  { prompt: '请选出包含【交通信号灯】的图片', desc: '请选出2张包含交通信号灯的图片', count: 2 },
-  { prompt: '请选出包含【自行车】的图片', desc: '请选出2张包含自行车的图片', count: 2 },
-  { prompt: '请选出包含【桥梁】的图片', desc: '请选出2张包含桥梁的图片', count: 2 },
-  { prompt: '请选出包含【山】的图片', desc: '请选出2张包含山的图片', count: 2 },
-  { prompt: '请选出包含【河流】的图片', desc: '请选出2张包含河流的图片', count: 2 },
-]
-
-// 4x4 验证码主题列表
-const themes4x4 = [
-  { prompt: '请选出包含【红绿灯】的图片', desc: '请选出3张包含红绿灯的图片', count: 3 },
-  { prompt: '请选出包含【大巴车】的图片', desc: '请选出3张包含大巴车的图片', count: 3 },
-  { prompt: '请选出包含【斑马线】的图片', desc: '请选出3张包含斑马线的图片', count: 3 },
-]
 
 function showCaptcha() {
   selectedIndices = []
@@ -176,7 +458,6 @@ function showCaptcha() {
 }
 
 function show3x3Captcha() {
-  // 隐藏其他验证码
   document.getElementById('captcha4x4').style.display = 'none'
   const div = document.getElementById('captcha-div')
   div.style.display = ''
@@ -185,28 +466,21 @@ function show3x3Captcha() {
   document.getElementById('captchaPrompt3x3').textContent = theme.prompt
   document.getElementById('captchaDesc3x3').textContent = theme.desc
 
-  // 随机选择正确答案
-  correctIndices = []
-  while (correctIndices.length < theme.count) {
-    const idx = Math.floor(Math.random() * 9)
-    if (!correctIndices.includes(idx)) correctIndices.push(idx)
-  }
+  const images = generateCaptchaSet(9, theme.count, theme.target)
 
   const grid = document.getElementById('captchaGrid3x3')
-  const images = generateCaptchaImages(9)
   grid.innerHTML = images.map((src, i) => `
     <div class="img-container" data-index="${i}" onclick="toggleSelect(this, ${i})">
-      <img src="${src}" alt="图片${i+1}" loading="lazy">
+      <img src="${src}" alt="图片${i+1}">
     </div>
   `).join('')
 
-  // 验证按钮
   const btn = document.getElementById('verifyBtn3x3')
   btn.className = 'btn btn-primary'
   btn.textContent = '验证'
   btn.onclick = () => verify3x3()
 
-  log('info', `3x3验证码: 主题="${theme.prompt}", 正确答案=[${correctIndices.map(i => i+1).join(',')}]`)
+  log('info', `3x3验证码: 主题="${theme.prompt}", 正确答案位置=[${correctIndices.map(i => i+1).join(',')}]`)
 }
 
 function show4x4Captcha() {
@@ -218,17 +492,12 @@ function show4x4Captcha() {
   document.getElementById('captchaPrompt4x4').textContent = theme.prompt
   document.getElementById('captchaDesc4x4').textContent = theme.desc
 
-  correctIndices = []
-  while (correctIndices.length < theme.count) {
-    const idx = Math.floor(Math.random() * 16)
-    if (!correctIndices.includes(idx)) correctIndices.push(idx)
-  }
+  const images = generateCaptchaSet(16, theme.count, theme.target)
 
   const grid = document.getElementById('captchaGrid4x4')
-  const images = generateCaptchaImages(16)
   grid.innerHTML = images.map((src, i) => `
     <div class="img-container" data-index="${i}" onclick="toggleSelect(this, ${i})">
-      <img src="${src}" alt="图片${i+1}" loading="lazy">
+      <img src="${src}" alt="图片${i+1}">
     </div>
   `).join('')
 
@@ -237,7 +506,7 @@ function show4x4Captcha() {
   btn.textContent = '验证'
   btn.onclick = () => verify4x4()
 
-  log('info', `4x4验证码: 主题="${theme.prompt}", 正确答案=[${correctIndices.map(i => i+1).join(',')}]`)
+  log('info', `4x4验证码: 主题="${theme.prompt}", 正确答案位置=[${correctIndices.map(i => i+1).join(',')}]`)
 }
 
 function toggleSelect(el, index) {
@@ -261,10 +530,8 @@ function verify3x3() {
     showSuccess()
   } else {
     log('error', `验证失败！选中=[${sorted.map(i => i+1).join(',')}], 正确=[${sortedCorrect.map(i => i+1).join(',')}]`)
-    // 添加 success 类让 _checkCaptchaGone 检测到（模拟验证失败后仍存在的情况）
     const btn = document.getElementById('verifyBtn3x3')
     btn.textContent = '验证失败，重试'
-    // 重置选择
     selectedIndices = []
     document.querySelectorAll('#captcha-div .img-container').forEach(el => el.classList.remove('selected'))
   }
@@ -288,7 +555,6 @@ function verify4x4() {
 }
 
 function showSuccess() {
-  // 模拟验证通过：隐藏验证码
   document.getElementById('captchaOverlay').classList.remove('show')
   const banner = document.getElementById('successBanner')
   banner.classList.add('show')
@@ -303,6 +569,7 @@ document.getElementById('captchaOverlay').addEventListener('click', (e) => {
 })
 
 log('info', '测试页已加载。点击"弹出验证码"开始测试。')
+log('info', '图片使用 Canvas 绘制，正确图片包含目标物体，干扰图片为其他物体。')
 log('info', '使用 AI Browser 的验证码识别功能（侧边栏工具栏验证码按钮）来自动识别。')
 </script>
 </body>
