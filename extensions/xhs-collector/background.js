@@ -1439,6 +1439,20 @@ async function startCollection(keywords, options) {
         // 等待搜索结果加载（SPA 导航 + DOM 渲染）
         await new Promise(function (r) { setTimeout(r, 3000); });
 
+        // 关闭AI推荐弹窗（搜索后可能出现，遮挡搜索结果）
+        try {
+          await chrome.scripting.executeScript({
+            target: { tabId: state.xhsTabId },
+            func: function () {
+              var closeBtn = document.querySelector('button.xhs-ai-chat-header__close');
+              if (closeBtn) {
+                closeBtn.click();
+                console.log('[行为] AI推荐弹窗已关闭');
+              }
+            },
+          });
+        } catch (e) {}
+
         // 重新检测 content script（搜索可能触发导航导致 content script 重新加载）
         var csReady = await waitForContentScript(state.xhsTabId);
         if (!csReady) {

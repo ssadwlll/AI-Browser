@@ -939,9 +939,9 @@
           bgLog('深度交互动作: ' + action);
 
           if (action === 'like') {
-            await interactWithElement('div.engage-bar-container svg.like-icon');
+            await interactWithElement('svg.like-icon');
           } else if (action === 'collect') {
-            await interactWithElement('div.engage-bar-container svg.collect-icon');
+            await interactWithElement('svg.collect-icon');
           } else if (action === 'follow') {
             await interactWithElement('div.author-container button.follow-button');
           } else if (action === 'deep_read') {
@@ -1063,11 +1063,11 @@
 
       try {
         if (action === 'like') {
-          if (await interactWithElement('div.engage-bar-container svg.like-icon')) {
+          if (await interactWithElement('svg.like-icon')) {
             performedActions.push('like');
           }
         } else if (action === 'collect') {
-          if (await interactWithElement('div.engage-bar-container svg.collect-icon')) {
+          if (await interactWithElement('svg.collect-icon')) {
             performedActions.push('collect');
           }
         } else if (action === 'follow') {
