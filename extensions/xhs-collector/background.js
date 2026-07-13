@@ -1544,18 +1544,20 @@ async function startCollection(keywords, options) {
         await scrollToTopViaScripting(state.xhsTabId);
         await new Promise(function (r) { setTimeout(r, 1000); });
 
-        // 4. 采集（content.js 执行 API 搜索 + 详情采集）
-        // 即使 state.collecting 在 await 期间被设为 false，content.js 也会检测到并返回 stopped=true
-        var response = await sendToContent({
-          type: 'COLLECT',
-          keyword: keyword,
-          pages: state.totalPages,
-          feedDelayMin: state.feedDelayMin,
-          feedDelayMax: state.feedDelayMax,
-          deepInteractionInterval: state.deepInteractionInterval,
-        });
+        // 4. 采集（Background 驱动，不依赖 content.js 事件循环）
+        // 整个采集循环在 background.js 中运行，窗口最小化时也能正常工作
+        var response;
+        try {
+          var collectData = await collectKeywordViaBg(
+            state.xhsTabId, keyword, state.totalPages,
+            state.feedDelayMin, state.feedDelayMax, state.deepInteractionInterval
+          );
+          response = { ok: true, data: collectData };
+        } catch (e) {
+          response = { ok: false, error: e.message };
+        }
 
-        log('[采集] COLLECT 响应已收到: ' + (response ? (response.ok ? 'ok' : response.error) : 'null'));
+        log('[采集-BG] 响应: ' + (response ? (response.ok ? 'ok' : response.error) : 'null'));
 
         // 停止后立即退出，不处理结果
         if (!state.collecting) {
@@ -2073,6 +2075,485 @@ function stopTabHeartbeat() {
     clearInterval(tabHeartbeatTimer);
     tabHeartbeatTimer = null;
     log('[保活] 标签页心跳已停止');
+  }
+}
+
+// ======================= Background 驱动的 API 调用 =======================
+// 窗口最小化时 Chrome 冻结 content script 的 JS 执行（setTimeout/Promise 不返回）
+// 解决方案：将采集循环移到 background.js，通过 executeScript 在 MAIN world 调用 API
+// executeScript 由扩展发起，Chrome 会临时解冻标签页执行，不受窗口最小化影响
+
+var _sigCountBg = { search: 1, feed: 1 };
+
+function _randomHexBg(len) {
+  var chars = '0123456789abcdef';
+  var s = '';
+  for (var i = 0; i < len; i++) s += chars[Math.floor(Math.random() * 16)];
+  return s;
+}
+
+function _randomIdBg(len) {
+  len = len || 21;
+  var chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
+  var result = '';
+  for (var i = 0; i < len; i++) result += chars[Math.floor(Math.random() * chars.length)];
+  return result;
+}
+
+function _genSessionIdBg() {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
+    var r = Math.random() * 16 | 0;
+    return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
+  });
+}
+
+/**
+ * 通过 executeScript 在 MAIN world 调用小红书 API
+ * 不依赖 content.js 的事件循环，窗口最小化时也能正常工作
+ */
+async function fetchXhsApiViaBg(tabId, apiPath, body, type) {
+  var baseUrl = type === 'search' ? 'https://so.xiaohongshu.com' : 'https://edith.xiaohongshu.com';
+  var sigCount = _sigCountBg[type] || 1;
+
+  var results = await chrome.scripting.executeScript({
+    target: { tabId: tabId },
+    world: 'MAIN',
+    func: async function (baseUrl, apiPath, body, type, sigCount) {
+      try {
+        if (typeof window.XHS_SIGN !== 'object' || typeof window.mnsv2 !== 'function') {
+          return { __error: 'XHS_SIGN 或 mnsv2 不可用' };
+        }
+
+        // 1. 构建签名输入
+        var signInput = window.XHS_SIGN.buildSignInput(apiPath, body);
+
+        // 2. 直接调用 mnsv2（不需要通过 content.js → background 消息传递）
+        var v = window.mnsv2(signInput.c, signInput.u, signInput.p);
+        if (!v) return { __error: 'mnsv2 返回空值' };
+
+        // 3. 构建签名 payload
+        var signResult = signInput.buildPayload(v);
+
+        // 4. 生成 x-s-common
+        var a1 = window.XHS_SIGN.getCookie('a1');
+        var xsc = window.XHS_SIGN.generateXsCommon({
+          cookieA1: a1,
+          version: '4.3.7',
+          sigCount: sigCount,
+        });
+
+        // 5. 随机 hex
+        function randomHex(len) {
+          var chars = '0123456789abcdef';
+          var s = '';
+          for (var i = 0; i < len; i++) s += chars[Math.floor(Math.random() * 16)];
+          return s;
+        }
+
+        // 6. 构建 headers
+        var headers = {
+          'accept': 'application/json, text/plain, */*',
+          'content-type': 'application/json;charset=UTF-8',
+          'priority': 'u=1, i',
+          'x-b3-traceid': randomHex(8),
+          'x-xray-traceid': randomHex(16),
+          'x-s': signResult['X-s'],
+          'x-t': signResult['X-t'],
+          'x-s-common': xsc,
+        };
+
+        // 7. 调用 fetch
+        var resp = await fetch(baseUrl + apiPath, {
+          method: 'POST',
+          headers: headers,
+          body: JSON.stringify(body),
+          credentials: 'include',
+          referrerPolicy: 'strict-origin-when-cross-origin',
+        });
+
+        return await resp.json();
+      } catch (e) {
+        return { __error: e.message };
+      }
+    },
+    args: [baseUrl, apiPath, body, type, sigCount]
+  });
+
+  // 更新 sigCount
+  _sigCountBg[type] = (_sigCountBg[type] || 1) + 1;
+  if (_sigCountBg[type] > 20 + Math.floor(Math.random() * 10)) {
+    _sigCountBg[type] = Math.floor(Math.random() * 3) + 1;
+  }
+
+  if (!results || !results[0]) {
+    throw new Error('executeScript 无结果');
+  }
+  var r = results[0].result;
+  if (!r) throw new Error('executeScript 返回空');
+  if (r.__error) throw new Error(r.__error);
+  return r;
+}
+
+/**
+ * 从 feed API 响应中提取详情（从 content.js 复制）
+ */
+function extractDetailBg(resp, note) {
+  var nc = (resp.data && resp.data.items && resp.data.items[0] && resp.data.items[0].note_card) || {};
+  return {
+    noteId: note.noteId,
+    keyword: note.keyword,
+    xsecToken: note.xsecToken,
+    title: nc.title || '',
+    desc: nc.desc || '',
+    type: nc.type || '',
+    tagList: nc.tag_list || [],
+    user: {
+      userId: (nc.user && nc.user.user_id) || '',
+      nickname: (nc.user && nc.user.nickname) || '',
+      avatar: (nc.user && nc.user.avatar) || '',
+    },
+    interactInfo: {
+      likedCount: (nc.interact_info && nc.interact_info.liked_count) || '0',
+      collectedCount: (nc.interact_info && nc.interact_info.collected_count) || '0',
+      commentCount: (nc.interact_info && nc.interact_info.comment_count) || '0',
+      shareCount: (nc.interact_info && nc.interact_info.share_count) || '0',
+    },
+    imageList: (nc.image_list || []).map(function (img) {
+      var imgUrl = img.url_default || img.url_pre || '';
+      if (!imgUrl && img.info_list && img.info_list.length > 0) {
+        imgUrl = img.info_list[0].url || '';
+      }
+      return { url: imgUrl, width: img.width || 0, height: img.height || 0 };
+    }),
+    time: nc.time || '',
+    lastUpdateTime: nc.last_update_time || '',
+    shareInfo: nc.share_info || {},
+  };
+}
+
+function _randomDelayBg(min, max) {
+  var mean = (min + max) / 2;
+  var std = 1500;
+  var u1 = Math.random(), u2 = Math.random();
+  var z = Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
+  var v = mean + z * std;
+  return Math.max(min, Math.min(max, v));
+}
+
+function _sleepBg(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+
+/**
+ * Background 驱动的单关键词采集（搜索 + 详情）
+ * 整个循环在 background.js 中运行，不依赖 content.js 事件循环
+ * 窗口最小化时也能正常工作
+ */
+async function collectKeywordViaBg(tabId, keyword, pages, feedDelayMin, feedDelayMax, deepInteractionInterval) {
+  deepInteractionInterval = deepInteractionInterval !== undefined ? deepInteractionInterval : 10;
+  var notes = [];
+  var details = [];
+  var failures = [];
+  var searchErrors = [];
+
+  // ======================= Step 1: API 搜索 =======================
+  log('[采集-BG] 搜索: ' + keyword);
+  for (var page = 1; page <= pages; page++) {
+    if (!state.collecting) return { notes: notes, details: details, failures: failures, stopped: true };
+
+    var searchBody = {
+      keyword: keyword,
+      page: page,
+      page_size: 20,
+      search_id: _randomIdBg(21),
+      sort: 'general',
+      note_type: 0,
+      ext_flags: [],
+      geo: '',
+      image_formats: ['jpg', 'webp', 'avif'],
+      message_id: 'sending',
+      session_id: _genSessionIdBg(),
+    };
+
+    var resp;
+    try {
+      resp = await fetchXhsApiViaBg(tabId, '/api/sns/web/v2/search/notes', searchBody, 'search');
+    } catch (e) {
+      log('[采集-BG] 搜索异常 page=' + page + ': ' + e.message);
+      searchErrors.push({ page: page, code: -998, msg: e.message });
+      await _sleepBg(_randomDelayBg(2000, 4000));
+      continue;
+    }
+
+    log('[采集-BG] 搜索 page=' + page + ' code=' + resp.code);
+
+    if (resp.code !== 0) {
+      searchErrors.push({ page: page, code: resp.code, msg: resp.msg || '' });
+      if (resp.code === -100) return { notes: notes, details: details, failures: failures, stopped: true, reason: 'login_expired' };
+      if (resp.code === 300011) return { notes: notes, details: details, failures: failures, stopped: true, reason: 'account_blocked' };
+      if (resp.code === 300013 || resp.code === 300015 || resp.code === 300012) return { notes: notes, details: details, failures: failures, stopped: true, reason: 'rate_limited', lastError: resp.code };
+      await _sleepBg(_randomDelayBg(2000, 4000));
+      continue;
+    }
+
+    var items = (resp.data && resp.data.items) || [];
+    for (var i = 0; i < items.length; i++) {
+      var item = items[i];
+      if (item.model_type !== 'note') continue;
+      var nc = item.note_card || {};
+      var noteId = item.id || nc.note_id;
+      var xsecToken = item.xsec_token || nc.xsec_token || '';
+      if (noteId && xsecToken && noteId.length < 30) {
+        notes.push({
+          noteId: noteId, xsecToken: xsecToken, keyword: keyword,
+          title: nc.display_title || '', type: nc.type || '',
+        });
+      }
+    }
+
+    log('[采集-BG] 搜索 page=' + page + ' 累计 ' + notes.length + ' 条笔记');
+    await _sleepBg(_randomDelayBg(2000, 4000));
+  }
+
+  if (notes.length === 0 && searchErrors.length > 0) {
+    var lastErr = searchErrors[searchErrors.length - 1];
+    return { notes: notes, details: details, failures: failures, stopped: true, reason: 'search_all_failed', lastErrorCode: lastErr.code, lastErrorMsg: lastErr.msg };
+  }
+
+  // ======================= Step 2: 详情采集 =======================
+  log('[采集-BG] 开始详情采集: ' + notes.length + ' 条');
+  var success = 0, fail = 0, consecutiveFail = 0;
+
+  for (var j = 0; j < notes.length; j++) {
+    if (!state.collecting) return { notes: notes, details: details, failures: failures, stopped: true };
+
+    var note = notes[j];
+
+    var feedBody = {
+      source_note_id: note.noteId,
+      image_formats: ['jpg', 'webp', 'avif'],
+      extra: { need_body_topic: '1' },
+      xsec_source: 'pc_search',
+      xsec_token: note.xsecToken,
+    };
+
+    var feedResp;
+    try {
+      feedResp = await fetchXhsApiViaBg(tabId, '/api/sns/web/v1/feed', feedBody, 'feed');
+    } catch (e) {
+      fail++;
+      failures.push({ noteId: note.noteId, code: -998, msg: e.message });
+      consecutiveFail++;
+      log('[采集-BG] 详情异常 ' + (j + 1) + '/' + notes.length + ': ' + e.message);
+      if (consecutiveFail >= 3) {
+        log('[采集-BG] 连续失败 ' + consecutiveFail + ' 次，暂停 10s');
+        await _sleepBg(10000);
+        consecutiveFail = 0;
+      }
+      await _sleepBg(_randomDelayBg(feedDelayMin, feedDelayMax));
+      continue;
+    }
+
+    if (feedResp.code === 0) {
+      details.push(extractDetailBg(feedResp, note));
+      success++;
+      consecutiveFail = 0;
+    } else if (feedResp.code === -100) {
+      return { notes: notes, details: details, failures: failures, stopped: true, reason: 'login_expired' };
+    } else if (feedResp.code === 300011) {
+      return { notes: notes, details: details, failures: failures, stopped: true, reason: 'account_blocked' };
+    } else if (feedResp.code === 300013) {
+      log('[采集-BG] 限流 300013，等待 15s');
+      await _sleepBg(15000);
+      try {
+        var retryResp = await fetchXhsApiViaBg(tabId, '/api/sns/web/v1/feed', feedBody, 'feed');
+        if (retryResp.code === 0) {
+          details.push(extractDetailBg(retryResp, note));
+          success++;
+          consecutiveFail = 0;
+        } else {
+          fail++;
+          failures.push({ noteId: note.noteId, code: retryResp.code, msg: '限流重试失败' });
+          consecutiveFail++;
+        }
+      } catch (e2) {
+        fail++;
+        failures.push({ noteId: note.noteId, code: -998, msg: '限流重试异常: ' + e2.message });
+        consecutiveFail++;
+      }
+    } else if (feedResp.code === 300015) {
+      log('[采集-BG] 环境检测 300015，等待 20s');
+      await _sleepBg(20000);
+      try {
+        var retry2 = await fetchXhsApiViaBg(tabId, '/api/sns/web/v1/feed', feedBody, 'feed');
+        if (retry2.code === 0) {
+          details.push(extractDetailBg(retry2, note));
+          success++;
+          consecutiveFail = 0;
+        } else {
+          fail++;
+          failures.push({ noteId: note.noteId, code: retry2.code, msg: '300015重试失败' });
+          consecutiveFail++;
+          if (retry2.code === 300015) {
+            return { notes: notes, details: details, failures: failures, stopped: true, reason: 'env_detection' };
+          }
+        }
+      } catch (e3) {
+        fail++;
+        failures.push({ noteId: note.noteId, code: -998, msg: '300015重试异常: ' + e3.message });
+        consecutiveFail++;
+      }
+    } else if (feedResp.code === 300031 || feedResp.code === -510000) {
+      fail++;
+      failures.push({ noteId: note.noteId, code: feedResp.code, msg: feedResp.code === -510000 ? '笔记不存在' : '笔记已下架' });
+    } else {
+      fail++;
+      failures.push({ noteId: note.noteId, code: feedResp.code, msg: feedResp.msg || '未知错误' });
+      consecutiveFail++;
+    }
+
+    if (consecutiveFail >= 3) {
+      log('[采集-BG] 连续失败 ' + consecutiveFail + ' 次，暂停 10s');
+      await _sleepBg(10000);
+      consecutiveFail = 0;
+    }
+
+    log('[采集-BG] 进度: ' + (j + 1) + '/' + notes.length + ' success=' + success + ' fail=' + fail);
+
+    // 增量保存：每 10 条详情保存一次
+    if (details.length > 0 && details.length % 10 === 0) {
+      try {
+        await saveKeywordResult({
+          keyword: keyword, notes: notes, details: details,
+          failures: failures, stopped: false,
+        });
+        log('[采集-BG] 增量保存: ' + details.length + ' 条详情');
+      } catch (e) {}
+    }
+
+    // 深度交互
+    if (deepInteractionInterval > 0 && (j + 1) % deepInteractionInterval === 0) {
+      var candidates = notes.slice(Math.max(0, j - deepInteractionInterval + 1), j + 1);
+      var pickedNote = candidates[Math.floor(Math.random() * candidates.length)];
+      log('[采集-BG] 深度交互: ' + pickedNote.noteId);
+      try {
+        await doDeepInteractionViaBg(tabId, pickedNote);
+      } catch (e) {
+        log('[采集-BG] 深度交互异常（不影响采集）: ' + e.message);
+      }
+      await _sleepBg(1000 + Math.random() * 1000);
+    }
+
+    // 详情间延迟（在 background 中 sleep，不受窗口最小化影响）
+    await _sleepBg(_randomDelayBg(feedDelayMin, feedDelayMax));
+  }
+
+  log('[采集-BG] 完成: ' + notes.length + ' 笔记, ' + details.length + ' 详情, ' + fail + ' 失败');
+  return { notes: notes, details: details, failures: failures, stopped: false };
+}
+
+/**
+ * 通过 executeScript 执行深度交互的 DOM 部分（找链接+右键）
+ * 然后在 background 中打开新 tab 进行深度交互
+ */
+async function doDeepInteractionViaBg(tabId, note) {
+  // 1. 通过 executeScript 找到笔记链接并右键模拟（模拟人类行为）
+  try {
+    await chrome.scripting.executeScript({
+      target: { tabId: tabId },
+      func: function (noteId) {
+        var links = document.querySelectorAll('a[href*="/explore/"]');
+        var targetLink = null;
+        for (var i = 0; i < links.length; i++) {
+          if (links[i].href.indexOf(noteId) !== -1) { targetLink = links[i]; break; }
+        }
+        if (!targetLink && links.length > 0) {
+          targetLink = links[Math.floor(Math.random() * Math.min(links.length, 5))];
+        }
+        if (targetLink) {
+          targetLink.scrollIntoView({ behavior: 'instant', block: 'center' });
+          var rect = targetLink.getBoundingClientRect();
+          var cx = rect.left + rect.width / 2;
+          var cy = rect.top + rect.height / 2;
+          targetLink.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window, clientX: cx, clientY: cy, button: 2 }));
+          targetLink.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, view: window, clientX: cx, clientY: cy, button: 2 }));
+          targetLink.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, view: window, clientX: cx, clientY: cy }));
+        }
+      },
+      args: [note.noteId]
+    });
+  } catch (e) {}
+
+  // 2. 打开新 tab 进行深度交互（复用现有逻辑）
+  var noteUrl = 'https://www.xiaohongshu.com/explore/' + note.noteId +
+    '?xsec_token=' + note.xsecToken + '&xsec_source=pc_search&source=web_explore_feed';
+
+  log('[深度交互-BG] 打开: ' + note.noteId);
+  var tab = null;
+  try {
+    tab = await chrome.tabs.create({ url: noteUrl, active: false });
+
+    // 等待 content script 就绪
+    var ready = false;
+    for (var attempt = 0; attempt < 60; attempt++) {
+      await _sleepBg(500);
+      if (attempt === 20) {
+        try { await injectContentScripts(tab.id); } catch (e) {}
+      }
+      try {
+        var pingResp = await new Promise(function (resolve, reject) {
+          chrome.tabs.sendMessage(tab.id, { type: 'PING' }, function (response) {
+            if (chrome.runtime.lastError) reject(new Error(chrome.runtime.lastError.message));
+            else resolve(response);
+          });
+        });
+        if (pingResp && pingResp.ok && pingResp.readyState === 'complete') { ready = true; break; }
+      } catch (e) {}
+    }
+
+    if (!ready) {
+      log('[深度交互-BG] content script 未就绪，跳过');
+      try { await chrome.tabs.remove(tab.id); } catch (e) {}
+      return { ok: false };
+    }
+
+    // 发送深度交互指令
+    log('[深度交互-BG] 发送交互指令到 tab ' + tab.id);
+    var interactionResult = await new Promise(function (resolve) {
+      var settled = false;
+      var timeout = setTimeout(function () {
+        if (!settled) { settled = true; resolve({ ok: false, error: '交互超时(120s)' }); }
+      }, 120000);
+
+      var interactionStart = Date.now();
+      var onTabUpdated = function (tid, info) {
+        if (tid === tab.id && info.status === 'loading' && !settled) {
+          var elapsed = Date.now() - interactionStart;
+          if (elapsed < 3000) return;
+          settled = true;
+          clearTimeout(timeout);
+          chrome.tabs.onUpdated.removeListener(onTabUpdated);
+          resolve({ ok: false, error: '页面导航导致交互中断' });
+        }
+      };
+      chrome.tabs.onUpdated.addListener(onTabUpdated);
+
+      chrome.tabs.sendMessage(tab.id, { type: 'DEEP_INTERACTION_ON_PAGE' }, function (response) {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeout);
+        chrome.tabs.onUpdated.removeListener(onTabUpdated);
+        if (chrome.runtime.lastError) resolve({ ok: false, error: chrome.runtime.lastError.message });
+        else resolve(response);
+      });
+    });
+
+    log('[深度交互-BG] 结果: ' + (interactionResult && interactionResult.ok ? '成功' : (interactionResult && interactionResult.error || '失败')));
+
+    // 关闭 tab
+    log('[深度交互-BG] 关闭 tab: ' + tab.id);
+    try { await chrome.tabs.remove(tab.id); } catch (e) {}
+  } catch (e) {
+    log('[深度交互-BG] 异常: ' + e.message);
+    if (tab) { try { await chrome.tabs.remove(tab.id); } catch (e2) {} }
   }
 }
 
