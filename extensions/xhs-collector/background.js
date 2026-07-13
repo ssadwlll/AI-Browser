@@ -2474,6 +2474,7 @@ async function collectKeywordViaBg(tabId, keyword, pages, feedDelayMin, feedDela
       log('[采集-BG] 深度交互: ' + pickedNote.noteId);
       try {
         await doDeepInteractionViaBg(tabId, pickedNote);
+        log('[采集-BG] 深度交互完成, state.collecting=' + state.collecting);
       } catch (e) {
         log('[采集-BG] 深度交互异常（不影响采集）: ' + e.message);
       }
@@ -2501,34 +2502,7 @@ async function collectKeywordViaBg(tabId, keyword, pages, feedDelayMin, feedDela
  * 然后在 background 中打开新 tab 进行深度交互
  */
 async function doDeepInteractionViaBg(tabId, note) {
-  // 1. 通过 executeScript 找到笔记链接并右键模拟（模拟人类行为）
-  try {
-    await chrome.scripting.executeScript({
-      target: { tabId: tabId },
-      func: function (noteId) {
-        var links = document.querySelectorAll('a[href*="/explore/"]');
-        var targetLink = null;
-        for (var i = 0; i < links.length; i++) {
-          if (links[i].href.indexOf(noteId) !== -1) { targetLink = links[i]; break; }
-        }
-        if (!targetLink && links.length > 0) {
-          targetLink = links[Math.floor(Math.random() * Math.min(links.length, 5))];
-        }
-        if (targetLink) {
-          targetLink.scrollIntoView({ behavior: 'instant', block: 'center' });
-          var rect = targetLink.getBoundingClientRect();
-          var cx = rect.left + rect.width / 2;
-          var cy = rect.top + rect.height / 2;
-          targetLink.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window, clientX: cx, clientY: cy, button: 2 }));
-          targetLink.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, view: window, clientX: cx, clientY: cy, button: 2 }));
-          targetLink.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, view: window, clientX: cx, clientY: cy }));
-        }
-      },
-      args: [note.noteId]
-    });
-  } catch (e) {}
-
-  // 2. 打开新 tab 进行深度交互（复用现有逻辑）
+  // 直接打开新 tab 进行深度交互（不需要右键模拟，避免主标签页被导航）
   var noteUrl = 'https://www.xiaohongshu.com/explore/' + note.noteId +
     '?xsec_token=' + note.xsecToken + '&xsec_source=pc_search&source=web_explore_feed';
 
