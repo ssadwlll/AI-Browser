@@ -2115,26 +2115,57 @@ async function fetchXhsApiViaBg(tabId, apiPath, body, type) {
   var baseUrl = type === 'search' ? 'https://so.xiaohongshu.com' : 'https://edith.xiaohongshu.com';
   var sigCount = _sigCountBg[type] || 1;
 
-  var results = await chrome.scripting.executeScript({
+  // Step 1: ISOLATED world - 构建签名输入（window.XHS_SIGN 在 ISOLATED world）
+  var step1 = await chrome.scripting.executeScript({
+    target: { tabId: tabId },
+    func: function (apiPath, body) {
+      try {
+        if (typeof window.XHS_SIGN !== 'object') return { __error: 'XHS_SIGN 不可用 (type=' + typeof window.XHS_SIGN + ')' };
+        var signInput = window.XHS_SIGN.buildSignInput(apiPath, body);
+        return { c: signInput.c, u: signInput.u, p: signInput.p };
+      } catch (e) {
+        return { __error: 'buildSignInput 异常: ' + e.message };
+      }
+    },
+    args: [apiPath, body]
+  });
+
+  if (!step1 || !step1[0]) throw new Error('Step1 executeScript 无结果');
+  var signData = step1[0].result;
+  if (!signData) throw new Error('Step1 返回空');
+  if (signData.__error) throw new Error(signData.__error);
+
+  // Step 2: MAIN world - 调用 mnsv2（window.mnsv2 在 MAIN world）
+  var step2 = await chrome.scripting.executeScript({
     target: { tabId: tabId },
     world: 'MAIN',
-    func: async function (baseUrl, apiPath, body, type, sigCount) {
+    func: function (c, u, p) {
       try {
-        if (typeof window.XHS_SIGN !== 'object' || typeof window.mnsv2 !== 'function') {
-          return { __error: 'XHS_SIGN 或 mnsv2 不可用' };
-        }
-
-        // 1. 构建签名输入
-        var signInput = window.XHS_SIGN.buildSignInput(apiPath, body);
-
-        // 2. 直接调用 mnsv2（不需要通过 content.js → background 消息传递）
-        var v = window.mnsv2(signInput.c, signInput.u, signInput.p);
+        if (typeof window.mnsv2 !== 'function') return { __error: 'mnsv2 不可用 (type=' + typeof window.mnsv2 + ')' };
+        var v = window.mnsv2(c, u, p);
         if (!v) return { __error: 'mnsv2 返回空值' };
+        return { v: v };
+      } catch (e) {
+        return { __error: 'mnsv2 执行异常: ' + e.message };
+      }
+    },
+    args: [signData.c, signData.u, signData.p]
+  });
 
-        // 3. 构建签名 payload
+  if (!step2 || !step2[0]) throw new Error('Step2 executeScript 无结果');
+  var mnsv2Result = step2[0].result;
+  if (!mnsv2Result) throw new Error('Step2 返回空');
+  if (mnsv2Result.__error) throw new Error(mnsv2Result.__error);
+
+  // Step 3: ISOLATED world - 构建 payload + 生成 x-s-common + fetch
+  var step3 = await chrome.scripting.executeScript({
+    target: { tabId: tabId },
+    func: async function (apiPath, body, v, baseUrl, sigCount) {
+      try {
+        // 重新构建 signInput（buildPayload 是 signInput 的方法，需要在同一上下文）
+        var signInput = window.XHS_SIGN.buildSignInput(apiPath, body);
         var signResult = signInput.buildPayload(v);
 
-        // 4. 生成 x-s-common
         var a1 = window.XHS_SIGN.getCookie('a1');
         var xsc = window.XHS_SIGN.generateXsCommon({
           cookieA1: a1,
@@ -2142,7 +2173,6 @@ async function fetchXhsApiViaBg(tabId, apiPath, body, type) {
           sigCount: sigCount,
         });
 
-        // 5. 随机 hex
         function randomHex(len) {
           var chars = '0123456789abcdef';
           var s = '';
@@ -2150,7 +2180,6 @@ async function fetchXhsApiViaBg(tabId, apiPath, body, type) {
           return s;
         }
 
-        // 6. 构建 headers
         var headers = {
           'accept': 'application/json, text/plain, */*',
           'content-type': 'application/json;charset=UTF-8',
@@ -2162,7 +2191,6 @@ async function fetchXhsApiViaBg(tabId, apiPath, body, type) {
           'x-s-common': xsc,
         };
 
-        // 7. 调用 fetch
         var resp = await fetch(baseUrl + apiPath, {
           method: 'POST',
           headers: headers,
@@ -2176,7 +2204,7 @@ async function fetchXhsApiViaBg(tabId, apiPath, body, type) {
         return { __error: e.message };
       }
     },
-    args: [baseUrl, apiPath, body, type, sigCount]
+    args: [apiPath, body, mnsv2Result.v, baseUrl, sigCount]
   });
 
   // 更新 sigCount
@@ -2185,11 +2213,9 @@ async function fetchXhsApiViaBg(tabId, apiPath, body, type) {
     _sigCountBg[type] = Math.floor(Math.random() * 3) + 1;
   }
 
-  if (!results || !results[0]) {
-    throw new Error('executeScript 无结果');
-  }
-  var r = results[0].result;
-  if (!r) throw new Error('executeScript 返回空');
+  if (!step3 || !step3[0]) throw new Error('Step3 executeScript 无结果');
+  var r = step3[0].result;
+  if (!r) throw new Error('Step3 返回空');
   if (r.__error) throw new Error(r.__error);
   return r;
 }
