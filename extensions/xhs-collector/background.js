@@ -2285,6 +2285,10 @@ async function collectKeywordViaBg(tabId, keyword, pages, feedDelayMin, feedDela
   for (var page = 1; page <= pages; page++) {
     if (!state.collecting) return { notes: notes, details: details, failures: failures, stopped: true };
 
+    // 更新 UI 进度
+    state.progress = { phase: 'search', keyword: keyword, page: page, totalPages: pages };
+    saveState();
+
     var searchBody = {
       keyword: keyword,
       page: page,
@@ -2444,6 +2448,14 @@ async function collectKeywordViaBg(tabId, keyword, pages, feedDelayMin, feedDela
 
     log('[采集-BG] 进度: ' + (j + 1) + '/' + notes.length + ' success=' + success + ' fail=' + fail);
 
+    // 更新 UI 进度
+    state.progress = {
+      phase: 'detail', keyword: keyword,
+      current: j + 1, total: notes.length,
+      success: success, fail: fail,
+    };
+    saveState();
+
     // 增量保存：每 10 条详情保存一次
     if (details.length > 0 && details.length % 10 === 0) {
       try {
@@ -2473,6 +2485,14 @@ async function collectKeywordViaBg(tabId, keyword, pages, feedDelayMin, feedDela
   }
 
   log('[采集-BG] 完成: ' + notes.length + ' 笔记, ' + details.length + ' 详情, ' + fail + ' 失败');
+
+  // 更新 UI 进度
+  state.progress = {
+    phase: 'complete', keyword: keyword,
+    notes: notes.length, details: details.length, fails: fail,
+  };
+  saveState();
+
   return { notes: notes, details: details, failures: failures, stopped: false };
 }
 
