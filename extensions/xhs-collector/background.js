@@ -1410,6 +1410,9 @@ async function startCollection(keywords, options) {
   // 创建 offscreen 离屏文档保活（防止窗口最小化时 SW 被终止）
   await ensureOffscreenDocument();
 
+  // 启动标签页心跳（防止窗口最小化时标签页被冻结）
+  startTabHeartbeat();
+
   saveState();
 
   // 确保标签页就绪
@@ -1693,6 +1696,7 @@ async function startCollection(keywords, options) {
   state.currentKeyword = '';
   stopAlarmKeepalive();
   closeOffscreenDocument();
+  stopTabHeartbeat();
   saveState();
 
   log('采集完成，共 ' + allResults.length + ' 个关键词');
@@ -1711,6 +1715,8 @@ function stopCollection(reason) {
   stopAlarmKeepalive();
   // 关闭 offscreen 离屏文档
   closeOffscreenDocument();
+  // 停止标签页心跳
+  stopTabHeartbeat();
 
   saveState();
 
@@ -2027,6 +2033,46 @@ async function closeOffscreenDocument() {
     }
   } catch (e) {
     // 忽略关闭错误
+  }
+}
+
+// ======================= 标签页心跳（防冻结） =======================
+// 窗口最小化时 Chrome 会冻结标签页的 JS 执行（setTimeout/Promise 回调不执行）
+// 导致 content.js 的采集循环卡住（await sleep 不返回）
+// 解决方案：定期用 executeScript 向标签页注入空函数，触发 Chrome 临时解冻标签页
+// 解冻后 content.js 的定时器能执行，采集循环继续
+
+var tabHeartbeatTimer = null;
+
+function startTabHeartbeat() {
+  if (tabHeartbeatTimer) clearInterval(tabHeartbeatTimer);
+  tabHeartbeatTimer = setInterval(function () {
+    if (state.collecting && state.xhsTabId) {
+      // 向标签页注入空函数，触发 Chrome 解冻标签页
+      chrome.scripting.executeScript({
+        target: { tabId: state.xhsTabId },
+        func: function () {
+          // 空函数，只是为了让 Chrome 解冻标签页
+          // 返回时间戳用于调试
+          return Date.now();
+        }
+      }).then(function (results) {
+        if (results && results[0]) {
+          // 心跳成功，标签页已解冻
+        }
+      }).catch(function (e) {
+        // 标签页可能已关闭或导航中，忽略错误
+      });
+    }
+  }, 15000);  // 每 15 秒心跳一次（比 Chrome 冻结检测更快）
+  log('[保活] 标签页心跳已启动');
+}
+
+function stopTabHeartbeat() {
+  if (tabHeartbeatTimer) {
+    clearInterval(tabHeartbeatTimer);
+    tabHeartbeatTimer = null;
+    log('[保活] 标签页心跳已停止');
   }
 }
 
@@ -2745,6 +2791,8 @@ _initPromise = loadState().then(function () {
         log('[重启] Service Worker 重启，采集继续（不中断 content script）');
         // SW 重启后重新创建 offscreen 文档（防止窗口最小化时 SW 再次被终止）
         ensureOffscreenDocument();
+        // 重启标签页心跳（SW 重启后 setInterval 被清除，需要重新启动）
+        startTabHeartbeat();
       }
 
       // 通知 content script：SW 已重启，重连端口
