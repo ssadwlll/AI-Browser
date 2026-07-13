@@ -1311,7 +1311,8 @@ function sendToContent(message) {
       // 此时 lastError 会被设置，但 COLLECT_DONE 备用消息可能仍在路上
       // 不立即移除 doneHandler，等待 5 秒让 COLLECT_DONE 有机会到达
       if (chrome.runtime.lastError && doneHandler && message.type === 'COLLECT') {
-        log('[采集] 消息通道可能已关闭: ' + chrome.runtime.lastError.message + '，等待 COLLECT_DONE...');
+        var lastErrMsg = chrome.runtime.lastError.message;  // 必须缓存：lastError 在回调返回后会被 Chrome 清空
+        log('[采集] 消息通道可能已关闭: ' + lastErrMsg + '，等待 COLLECT_DONE...');
         setTimeout(function () {
           if (!settled) {
             settled = true;
@@ -1320,7 +1321,7 @@ function sendToContent(message) {
               chrome.runtime.onMessage.removeListener(doneHandler);
               doneHandler = null;
             }
-            reject(new Error(chrome.runtime.lastError.message));
+            reject(new Error(lastErrMsg));
           }
         }, 5000);
         return;
