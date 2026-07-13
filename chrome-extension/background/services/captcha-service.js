@@ -205,57 +205,40 @@ export class CaptchaService {
 }
 
 // ======================= 页面内执行函数（注入到目标页面） =======================
+// 以下函数通过 chrome.scripting.executeScript 注入到目标页面执行
+// 参考xhs-collector的人类行为模拟：贝塞尔曲线轨迹+加速度变化+微抖悬停+完整事件链
 
 /**
  * 检测验证码并提取信息
  */
 function _extractCaptchaInfo() {
-  // 小红书验证码容器
   const captchaDiv = document.querySelector('#captcha-div, .fe-captcha-app, .capptch-modal-content-inner')
   if (!captchaDiv) return { found: false }
 
-  // 提取指令文本（"放在桌子上的小物件"）
   const promptEl = captchaDiv.querySelector('.font-600.tc-3, .tc-3')
   const prompt = promptEl ? promptEl.textContent.trim() : ''
 
-  // 提取"请选择最符合描述的X张图片"中的数量
   const descEl = captchaDiv.querySelector('.lh-20.size-14, .tc-61')
   const descText = descEl ? descEl.textContent.trim() : ''
   let requiredCount = 2
   const countMatch = descText.match(/(\d+)张/)
   if (countMatch) requiredCount = parseInt(countMatch[1], 10)
 
-  // 提取图片元素
   const imgContainers = captchaDiv.querySelectorAll('.img-container')
   const images = Array.from(imgContainers).map((el, i) => {
     const img = el.querySelector('img')
     const rect = el.getBoundingClientRect()
-    return {
-      index: i,
-      src: img ? img.src : '',
-      rect: { left: rect.left, top: rect.top, width: rect.width, height: rect.height },
-    }
+    return { index: i, src: img ? img.src : '', rect: { left: rect.left, top: rect.top, width: rect.width, height: rect.height } }
   })
 
   if (images.length === 0) return { found: false }
 
-  // 计算验证码区域边界框（用于裁剪截图）
   const captchaRect = captchaDiv.getBoundingClientRect()
-  const boundingBox = {
-    left: captchaRect.left,
-    top: captchaRect.top,
-    width: captchaRect.width,
-    height: captchaRect.height,
-  }
-
   return {
-    found: true,
-    prompt,
-    descText,
-    requiredCount,
+    found: true, prompt, descText, requiredCount,
     imageCount: images.length,
     images: images.map(img => ({ index: img.index, src: img.src })),
-    boundingBox,
+    boundingBox: { left: captchaRect.left, top: captchaRect.top, width: captchaRect.width, height: captchaRect.height },
   }
 }
 
@@ -272,8 +255,7 @@ function _cropScreenshot(dataUrl, bbox) {
       const sy = Math.max(0, bbox.top * dpr)
       const sw = Math.min(img.width - sx, bbox.width * dpr)
       const sh = Math.min(img.height - sy, bbox.height * dpr)
-      canvas.width = sw
-      canvas.height = sh
+      canvas.width = sw; canvas.height = sh
       const ctx = canvas.getContext('2d')
       ctx.drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh)
       resolve(canvas.toDataURL('image/png'))
@@ -284,7 +266,8 @@ function _cropScreenshot(dataUrl, bbox) {
 }
 
 /**
- * 模拟人类点击选中的验证码图片
+ * 模拟人类点击选中的验证码图片（深度行为模拟）
+ * 参考 xhs-collector 的 humanClick + moveMouseToElement + naturalHover
  */
 function _clickCaptchaImages(indices) {
   const captchaDiv = document.querySelector('#captcha-div, .fe-captcha-app, .capptch-modal-content-inner')
@@ -293,80 +276,271 @@ function _clickCaptchaImages(indices) {
   const imgContainers = captchaDiv.querySelectorAll('.img-container')
   if (imgContainers.length === 0) return { ok: false, error: '图片容器未找到' }
 
+  // ======================= 人类行为模拟工具函数 =======================
+
   function sleep(ms) { return new Promise(r => setTimeout(r, ms)) }
+
+  /** 分发单个 mousemove 事件 */
+  function dispatchMouseMove(x, y) {
+    document.dispatchEvent(new MouseEvent('mousemove', {
+      bubbles: true, cancelable: true, view: window,
+      clientX: Math.round(x), clientY: Math.round(y),
+      screenX: Math.round(x), screenY: Math.round(y + window.screenTop),
+    }))
+  }
+
+  /** 批量分发鼠标轨迹点（避免每个点单独 sleep，防止页面 setTimeout 阻塞） */
+  async function dispatchMousePathBatch(points, batchSize) {
+    batchSize = batchSize || 4
+    for (var i = 0; i < points.length; i += batchSize) {
+      var end = Math.min(i + batchSize, points.length)
+      for (var j = i; j < end; j++) {
+        dispatchMouseMove(points[j].x, points[j].y)
+      }
+      if (i + batchSize < points.length) {
+        await sleep(10 + Math.random() * 15)
+      }
+    }
+  }
+
+  /**
+   * 模拟鼠标从随机起点平滑移动到目标位置
+   * 使用3种加速度模式（先快后慢/先慢后快/自然），模拟人类手指滑动物理特性
+   */
+  async function moveMouseTo(targetX, targetY, steps) {
+    var startX = Math.max(0, targetX - 150 - Math.floor(Math.random() * 200))
+    var startY = Math.max(0, targetY - 100 - Math.floor(Math.random() * 150))
+    steps = steps || (8 + Math.floor(Math.random() * 8))
+
+    var accelMode = Math.floor(Math.random() * 3)
+    var points = []
+    for (var i = 0; i <= steps; i++) {
+      var t = i / steps
+      var eased
+      if (accelMode === 0) {
+        eased = 1 - Math.pow(1 - t, 3)        // 先快后慢（decelerate）
+      } else if (accelMode === 1) {
+        eased = Math.pow(t, 3)                  // 先慢后快（accelerate）
+      } else {
+        eased = t < 0.5 ? 4*t*t*t : 1 - Math.pow(-2*t + 2, 3) / 2  // 慢-快-慢（自然）
+      }
+      points.push({
+        x: Math.round(startX + (targetX - startX) * eased + (Math.random() * 8 - 4)),
+        y: Math.round(startY + (targetY - startY) * eased + (Math.random() * 8 - 4)),
+      })
+    }
+    await dispatchMousePathBatch(points, 4)
+  }
+
+  /**
+   * 自然悬停：移到元素位置 → mouseenter → 微抖动（3-8px偏移）
+   * 模拟用户在元素上停留考虑时的手部自然抖动
+   */
+  async function naturalHover(el, duration) {
+    var rect = el.getBoundingClientRect()
+    var cx = rect.left + rect.width / 2
+    var cy = rect.top + rect.height / 2
+
+    await moveMouseTo(cx, cy)
+
+    // mouseenter + mouseover
+    var mouseOpts = { bubbles: true, cancelable: true, view: window, clientX: Math.round(cx), clientY: Math.round(cy) }
+    try {
+      el.dispatchEvent(new MouseEvent('mouseenter', mouseOpts))
+      el.dispatchEvent(new MouseEvent('mouseover', mouseOpts))
+    } catch (e) {}
+
+    // 微抖动（10-20个点，3-8px随机偏移）
+    var pointCount = 10 + Math.floor(Math.random() * 10)
+    var points = []
+    for (var i = 0; i < pointCount; i++) {
+      points.push({
+        x: Math.round(cx + (Math.random() * 8 - 4)),
+        y: Math.round(cy + (Math.random() * 8 - 4)),
+      })
+    }
+    await dispatchMousePathBatch(points, 5)
+
+    // 填充剩余悬停时间
+    var hoverTime = duration || (600 + Math.random() * 1400)
+    var padCount = 2 + Math.floor(Math.random() * 2)
+    var padDelay = Math.floor(hoverTime / padCount)
+    for (var p = 0; p < padCount; p++) {
+      dispatchMouseMove(
+        Math.round(cx + (Math.random() * 8 - 4)),
+        Math.round(cy + (Math.random() * 8 - 4))
+      )
+      await sleep(padDelay)
+    }
+  }
+
+  /**
+   * 模拟人类点击元素：鼠标移动靠近 → mouseenter → mousedown → mouseup → click
+   * 参考 xhs-collector 的 humanClick
+   */
+  async function humanClick(el) {
+    var rect1 = el.getBoundingClientRect()
+    if (rect1.bottom < 0 || rect1.top > window.innerHeight || rect1.right < 0 || rect1.left > window.innerWidth) {
+      try { el.scrollIntoView({ behavior: 'instant', block: 'nearest' }) } catch (e) { el.scrollIntoView() }
+      await sleep(300 + Math.random() * 200)
+    } else {
+      await sleep(200 + Math.random() * 200)
+    }
+
+    await moveMouseToElement(el)
+
+    var rect2 = el.getBoundingClientRect()
+    var cx = Math.round(rect2.left + rect2.width / 2)
+    var cy = Math.round(rect2.top + rect2.height / 2)
+    var mouseOpts = { bubbles: true, cancelable: true, view: window, clientX: cx, clientY: cy }
+
+    try {
+      el.dispatchEvent(new MouseEvent('mouseenter', mouseOpts))
+      el.dispatchEvent(new MouseEvent('mouseover', mouseOpts))
+    } catch (e) {}
+    await sleep(100 + Math.random() * 100)
+
+    try { el.dispatchEvent(new MouseEvent('mousedown', mouseOpts)) } catch (e) {}
+    await sleep(50 + Math.random() * 50)
+    try { el.dispatchEvent(new MouseEvent('mouseup', mouseOpts)) } catch (e) {}
+    await sleep(20 + Math.random() * 30)
+    if (typeof el.click === 'function') { el.click() }
+    else { try { el.dispatchEvent(new MouseEvent('click', mouseOpts)) } catch (e) {} }
+  }
+
+  /** moveMouseToElement - 移动鼠标到元素中心 */
+  async function moveMouseToElement(el, steps) {
+    var rect = el.getBoundingClientRect()
+    var targetX = Math.round(rect.left + rect.width / 2)
+    var targetY = Math.round(rect.top + rect.height / 2)
+    await moveMouseTo(targetX, targetY, steps)
+  }
+
+  // ======================= 执行点击流程 =======================
 
   return (async function () {
     const clicked = []
+
+    // 先在验证码区域做一次大幅鼠标移动（模拟用户查看验证码）
+    var captchaRect = captchaDiv.getBoundingClientRect()
+    await moveMouseTo(
+      captchaRect.left + captchaRect.width * (0.2 + Math.random() * 0.6),
+      captchaRect.top + captchaRect.height * (0.2 + Math.random() * 0.6),
+      12 + Math.floor(Math.random() * 6)
+    )
+    await sleep(300 + Math.random() * 400)
+
+    // 逐个点击选中的图片
     for (let i = 0; i < indices.length; i++) {
       const idx = indices[i]
       const el = imgContainers[idx]
       if (!el) continue
 
-      const rect = el.getBoundingClientRect()
-      const cx = rect.left + rect.width * (0.3 + Math.random() * 0.4)
-      const cy = rect.top + rect.height * (0.3 + Math.random() * 0.4)
+      // 悬停考虑（模拟用户在看图片判断）
+      await naturalHover(el, 500 + Math.random() * 800)
 
-      // 模拟鼠标移动到目标
-      document.dispatchEvent(new MouseEvent('mousemove', {
-        clientX: cx, clientY: cy, bubbles: true, cancelable: true, view: window,
-      }))
-      await sleep(100 + Math.random() * 150)
-
-      // 模拟完整点击事件链
-      el.dispatchEvent(new MouseEvent('mousedown', {
-        clientX: cx, clientY: cy, bubbles: true, cancelable: true, view: window,
-      }))
-      await sleep(40 + Math.random() * 60)
-      el.dispatchEvent(new MouseEvent('mouseup', {
-        clientX: cx, clientY: cy, bubbles: true, cancelable: true, view: window,
-      }))
-      await sleep(20 + Math.random() * 30)
-      el.dispatchEvent(new MouseEvent('click', {
-        clientX: cx, clientY: cy, bubbles: true, cancelable: true, view: window,
-      }))
-
+      // 点击
+      await humanClick(el)
       clicked.push(idx)
-      await sleep(300 + Math.random() * 200)
+
+      // 点击后短暂观察
+      await sleep(400 + Math.random() * 300)
+
+      // 移开鼠标（模拟用户看其他图片）
+      if (i < indices.length - 1) {
+        var nextEl = imgContainers[indices[i + 1]]
+        if (nextEl) {
+          var nextRect = nextEl.getBoundingClientRect()
+          await moveMouseTo(
+            nextRect.left + nextRect.width * (0.3 + Math.random() * 0.4),
+            nextRect.top + nextRect.height * (0.3 + Math.random() * 0.4),
+            6 + Math.floor(Math.random() * 6)
+          )
+          await sleep(200 + Math.random() * 200)
+        }
+      }
     }
+
     return { ok: true, clicked }
   })()
 }
 
 /**
- * 点击验证按钮
+ * 点击验证按钮（深度行为模拟）
  */
 function _clickVerifyButton() {
   const captchaDiv = document.querySelector('#captcha-div, .fe-captcha-app, .capptch-modal-content-inner')
   if (!captchaDiv) return { ok: false, error: '验证码容器未找到' }
 
-  // 查找验证按钮（可能处于 disabled 状态）
   const btn = captchaDiv.querySelector('.btn:not(.btn-disabled), .btn.btn-disabled')
   if (!btn) return { ok: false, error: '验证按钮未找到' }
 
-  const rect = btn.getBoundingClientRect()
-  const cx = rect.left + rect.width / 2
-  const cy = rect.top + rect.height / 2
+  function sleep(ms) { return new Promise(r => setTimeout(r, ms)) }
 
-  document.dispatchEvent(new MouseEvent('mousemove', {
-    clientX: cx, clientY: cy, bubbles: true, cancelable: true, view: window,
-  }))
+  function dispatchMouseMove(x, y) {
+    document.dispatchEvent(new MouseEvent('mousemove', {
+      bubbles: true, cancelable: true, view: window,
+      clientX: Math.round(x), clientY: Math.round(y),
+    }))
+  }
 
-  btn.dispatchEvent(new MouseEvent('mousedown', {
-    clientX: cx, clientY: cy, bubbles: true, cancelable: true, view: window,
-  }))
+  async function dispatchMousePathBatch(points, batchSize) {
+    batchSize = batchSize || 4
+    for (var i = 0; i < points.length; i += batchSize) {
+      var end = Math.min(i + batchSize, points.length)
+      for (var j = i; j < end; j++) dispatchMouseMove(points[j].x, points[j].y)
+      if (i + batchSize < points.length) await sleep(10 + Math.random() * 15)
+    }
+  }
 
-  btn.dispatchEvent(new MouseEvent('mouseup', {
-    clientX: cx, clientY: cy, bubbles: true, cancelable: true, view: window,
-  }))
+  return (async function () {
+    var rect = btn.getBoundingClientRect()
+    var targetX = rect.left + rect.width / 2
+    var targetY = rect.top + rect.height / 2
 
-  btn.dispatchEvent(new MouseEvent('click', {
-    clientX: cx, clientY: cy, bubbles: true, cancelable: true, view: window,
-  }))
+    // 贝塞尔轨迹移动到验证按钮
+    var startX = Math.max(0, targetX - 150 - Math.floor(Math.random() * 200))
+    var startY = Math.max(0, targetY - 100 - Math.floor(Math.random() * 150))
+    var steps = 8 + Math.floor(Math.random() * 8)
+    var accelMode = Math.floor(Math.random() * 3)
+    var points = []
+    for (var i = 0; i <= steps; i++) {
+      var t = i / steps
+      var eased
+      if (accelMode === 0) eased = 1 - Math.pow(1 - t, 3)
+      else if (accelMode === 1) eased = Math.pow(t, 3)
+      else eased = t < 0.5 ? 4*t*t*t : 1 - Math.pow(-2*t + 2, 3) / 2
+      points.push({
+        x: Math.round(startX + (targetX - startX) * eased + (Math.random() * 8 - 4)),
+        y: Math.round(startY + (targetY - startY) * eased + (Math.random() * 8 - 4)),
+      })
+    }
+    await dispatchMousePathBatch(points, 4)
 
-  // 也尝试直接 .click()
-  try { btn.click() } catch (e) {}
+    // 悬停微抖
+    var mouseOpts = { bubbles: true, cancelable: true, view: window, clientX: Math.round(targetX), clientY: Math.round(targetY) }
+    try {
+      btn.dispatchEvent(new MouseEvent('mouseenter', mouseOpts))
+      btn.dispatchEvent(new MouseEvent('mouseover', mouseOpts))
+    } catch (e) {}
+    await sleep(150 + Math.random() * 200)
 
-  return { ok: true }
+    // 微抖动
+    for (var j = 0; j < 8; j++) {
+      dispatchMouseMove(targetX + (Math.random() * 6 - 3), targetY + (Math.random() * 6 - 3))
+      await sleep(20 + Math.random() * 30)
+    }
+
+    // 完整点击事件链
+    try { btn.dispatchEvent(new MouseEvent('mousedown', mouseOpts)) } catch (e) {}
+    await sleep(50 + Math.random() * 50)
+    try { btn.dispatchEvent(new MouseEvent('mouseup', mouseOpts)) } catch (e) {}
+    await sleep(20 + Math.random() * 30)
+    if (typeof btn.click === 'function') btn.click()
+    else { try { btn.dispatchEvent(new MouseEvent('click', mouseOpts)) } catch (e) {} }
+
+    return { ok: true }
+  })()
 }
 
 /**
@@ -376,9 +550,7 @@ function _checkCaptchaGone() {
   const captchaDiv = document.querySelector('#captcha-div, .fe-captcha-app')
   if (!captchaDiv) return { gone: true }
   if (captchaDiv.style.display === 'none' || captchaDiv.style.visibility === 'hidden') return { gone: true }
-  // 检查是否还在 DOM 中
   if (!document.body.contains(captchaDiv)) return { gone: true }
-  // 检查是否显示了"验证成功"之类的提示
   const successEl = captchaDiv.querySelector('.success, [class*="success"]')
   if (successEl) return { gone: true }
   return { gone: false }
