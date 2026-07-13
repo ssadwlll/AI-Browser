@@ -1440,19 +1440,24 @@ async function startCollection(keywords, options) {
       if (!state.collecting) break;
 
       try {
-        // === 导航搜索页 → 滚动(executeScript) → 回顶部(executeScript) → 采集(BG) ===
-        // 搜索由 collectKeywordViaBg 通过 API 完成，这里只导航到搜索页（模拟人类搜索行为）
+        // === 导航首页 → 搜索框输入(executeScript) → 滚动(executeScript) → 回顶部(executeScript) → 采集(BG) ===
+        // 搜索由 collectKeywordViaBg 通过 API 完成，但先在页面上模拟搜索框输入+点击（有 UI 交互行为）
 
-        // 1. 导航到搜索页 URL（不通过 content.js 搜索框，避免事件循环冻结/超时）
-        var searchUrl = 'https://www.xiaohongshu.com/search_result?keyword=' + encodeURIComponent(keyword) + '&source=web_explore_feed';
-        log('[行为] 导航到搜索页: ' + keyword);
+        // 1. 导航到首页（确保搜索框存在）
+        log('[行为] 导航到首页');
         _pluginNavigation = true;
-        await pluginTabsUpdate(state.xhsTabId, { url: searchUrl });
+        await pluginTabsUpdate(state.xhsTabId, { url: 'https://www.xiaohongshu.com/explore' });
         await waitForTabComplete(state.xhsTabId);
         _pluginNavigation = false;
         await new Promise(function (r) { setTimeout(r, 2000); });
 
-        // 2. 关闭AI推荐弹窗（搜索后可能出现，遮挡搜索结果）
+        // 2. 搜索框输入关键词 + 点击搜索按钮（executeScript，不依赖 content.js 事件循环）
+        log('[行为] 搜索框输入: ' + keyword);
+        var searchResult = await searchOnPageViaScripting(state.xhsTabId, keyword);
+        log('[行为] 搜索结果: ' + searchResult);
+        await new Promise(function (r) { setTimeout(r, 3000); }); // 等待搜索结果加载
+
+        // 3. 关闭AI推荐弹窗（搜索后可能出现，遮挡搜索结果）
         try {
           await chrome.scripting.executeScript({
             target: { tabId: state.xhsTabId },
@@ -1466,7 +1471,7 @@ async function startCollection(keywords, options) {
           });
         } catch (e) {}
 
-        // 3. 确保 content script 就绪（导航后需重新检测）
+        // 4. 确保 content script 就绪
         var csReady = await waitForContentScript(state.xhsTabId);
         if (!csReady) {
           log('[行为] Content script 未就绪，重新注入...');
@@ -1474,17 +1479,17 @@ async function startCollection(keywords, options) {
           await new Promise(function (r) { setTimeout(r, 1500); });
         }
 
-        // 4. 滚动加载（模拟浏览搜索结果）
+        // 5. 滚动加载（模拟浏览搜索结果）
         log('[行为] 滚动加载笔记...');
         var scrollTimes = 5 + Math.floor(Math.random() * 4);
         await scrollViaScripting(state.xhsTabId, scrollTimes);
 
-        // 5. 回顶部
+        // 6. 回顶部
         log('[行为] 回到顶部...');
         await scrollToTopViaScripting(state.xhsTabId);
         await new Promise(function (r) { setTimeout(r, 1000); });
 
-        // 6. 采集（Background 驱动，不依赖 content.js 事件循环）
+        // 7. 采集（Background 驱动，不依赖 content.js 事件循环）
         // 整个采集循环在 background.js 中运行，窗口最小化时也能正常工作
         var response;
         try {
