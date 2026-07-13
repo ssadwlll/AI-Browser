@@ -1326,6 +1326,23 @@ function sendToContent(message) {
         return;
       }
 
+      // SEARCH/SCROLL 等消息遇到 bfcache 时，延迟 3 秒再 reject（给页面恢复时间）
+      if (chrome.runtime.lastError && message.type !== 'COLLECT') {
+        var errMsg = chrome.runtime.lastError.message;
+        setTimeout(function () {
+          if (!settled) {
+            settled = true;
+            clearTimeout(timer);
+            if (doneHandler) {
+              chrome.runtime.onMessage.removeListener(doneHandler);
+              doneHandler = null;
+            }
+            reject(new Error(errMsg));
+          }
+        }, 3000);
+        return;
+      }
+
       settled = true;
       clearTimeout(timer);
       if (doneHandler) {
@@ -1409,6 +1426,13 @@ async function startCollection(keywords, options) {
           log('[行为] 搜索结果: ' + (searchR && searchR.ok ? 'ok' : (searchR && searchR.error || 'fail')));
         } catch (e) {
           log('[行为] 页面搜索异常（可能触发导航）: ' + e.message);
+          // 搜索异常时也发 STOP，防止 content.js 的 collecting 标志残留
+          try { await sendToContent({ type: 'STOP' }); } catch (stopErr) {}
+          // bfcache 错误：页面被移入前进/后退缓存，需要等待页面恢复
+          if (e.message && e.message.indexOf('back/forward cache') !== -1) {
+            log('[行为] 检测到 bfcache，等待页面恢复...');
+            await new Promise(function (r) { setTimeout(r, 3000); });
+          }
         }
 
         // 等待搜索结果加载（SPA 导航 + DOM 渲染）
@@ -1507,6 +1531,8 @@ async function startCollection(keywords, options) {
           break; // 成功或不可恢复，跳出重试循环
         } else {
           log('采集失败: ' + (response ? response.error : '无响应'));
+          // 发送 STOP 重置 content.js 的 collecting 标志（防止下个关键词卡在"正在采集中"）
+          try { await sendToContent({ type: 'STOP' }); } catch (stopErr) {}
           break;
         }
       } catch (e) {
@@ -1535,6 +1561,8 @@ async function startCollection(keywords, options) {
           break; // 跳出重试循环，继续下一个关键词
         }
         log('采集异常: ' + e.message);
+        // 通用异常也发 STOP，防止 content.js 的 collecting 标志残留
+        try { await sendToContent({ type: 'STOP' }); } catch (stopErr) {}
         break;
       }
     }
