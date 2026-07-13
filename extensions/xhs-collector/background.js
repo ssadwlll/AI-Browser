@@ -1964,6 +1964,12 @@ chrome.runtime.onConnect.addListener(function (port) {
   if (port.name === 'keepalive') {
     log('[保活] content script 已连接保活端口');
     // 只要有活跃端口连接，SW 就不会休眠
+    // 响应 ping 消息，保持端口活跃（防止 Chrome 视端口为空闲而终止 SW）
+    port.onMessage.addListener(function (msg) {
+      if (msg && msg.type === 'PING') {
+        try { port.postMessage({ type: 'PONG', time: Date.now() }); } catch (e) {}
+      }
+    });
     port.onDisconnect.addListener(function () {
       log('[保活] content script 断开保活端口');
     });

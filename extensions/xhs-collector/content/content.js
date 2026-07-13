@@ -1843,9 +1843,11 @@
 
   // 保活端口：采集期间保持长连接到 background，防止 Service Worker 休眠
   // MV3 中 setTimeout 不能保持 SW 活跃，但活跃的 chrome.runtime.connect 端口可以
+  // 关键：端口必须有消息活动，否则 Chrome 仍会在 60 秒后终止 SW
   var keepAlivePort = null;
   var keepAliveStopped = false; // 标记是否为主动停止（避免 onDisconnect 触发重连）
   var keepAliveReconnectTimer = null; // pending 的重连定时器
+  var keepAlivePingTimer = null; // 周期性 ping 定时器
 
   function startKeepAlive() {
     if (keepAlivePort) return;
@@ -1855,6 +1857,7 @@
       keepAlivePort = chrome.runtime.connect({ name: 'keepalive' });
       keepAlivePort.onDisconnect.addListener(function () {
         keepAlivePort = null;
+        if (keepAlivePingTimer) { clearInterval(keepAlivePingTimer); keepAlivePingTimer = null; }
         // 主动停止不重连；SW 重启导致的断开则自动重连
         if (!keepAliveStopped && collecting) {
           keepAliveReconnectTimer = setTimeout(function () {
@@ -1865,6 +1868,19 @@
           }, 1000);
         }
       });
+
+      // 关键：每 20 秒发送 ping 消息，保持端口活跃
+      // 没有消息活动的端口会被 Chrome 视为空闲，60 秒后终止 SW
+      keepAlivePingTimer = setInterval(function () {
+        if (keepAlivePort && !keepAliveStopped && collecting) {
+          try {
+            keepAlivePort.postMessage({ type: 'PING', time: Date.now() });
+          } catch (e) {
+            // postMessage 失败说明端口已断开，清除定时器等待 onDisconnect 重连
+            if (keepAlivePingTimer) { clearInterval(keepAlivePingTimer); keepAlivePingTimer = null; }
+          }
+        }
+      }, 20000);
     } catch (e) {
       keepAlivePort = null;
       if (!keepAliveStopped && collecting) {
@@ -1884,6 +1900,7 @@
       clearTimeout(keepAliveReconnectTimer);
       keepAliveReconnectTimer = null;
     }
+    if (keepAlivePingTimer) { clearInterval(keepAlivePingTimer); keepAlivePingTimer = null; }
     if (keepAlivePort) {
       try { keepAlivePort.disconnect(); } catch (e) {}
       keepAlivePort = null;
