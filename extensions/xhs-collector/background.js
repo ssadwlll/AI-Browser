@@ -1439,16 +1439,66 @@ async function startCollection(keywords, options) {
         // 等待搜索结果加载（SPA 导航 + DOM 渲染）
         await new Promise(function (r) { setTimeout(r, 3000); });
 
-        // 关闭AI推荐弹窗（搜索后可能出现，遮挡搜索结果）
+        // 关闭AI推荐弹窗（搜索后可能出现，遮挡搜索结果）- 深度人类行为模拟
         try {
           await chrome.scripting.executeScript({
             target: { tabId: state.xhsTabId },
             func: function () {
-              var closeBtn = document.querySelector('button.xhs-ai-chat-header__close');
-              if (closeBtn) {
-                closeBtn.click();
+              function sleep(ms) { return new Promise(r => setTimeout(r, ms)) }
+              return (async function () {
+                var closeBtn = document.querySelector('button.xhs-ai-chat-header__close');
+                if (!closeBtn) return { ok: false, reason: 'not_found' };
+
+                var rect = closeBtn.getBoundingClientRect();
+                var targetX = rect.left + rect.width / 2;
+                var targetY = rect.top + rect.height / 2;
+
+                // 贝塞尔轨迹鼠标移动（3种加速度模式随机）
+                var startX = Math.max(0, targetX - 150 - Math.floor(Math.random() * 200));
+                var startY = Math.max(0, targetY - 100 - Math.floor(Math.random() * 150));
+                var steps = 8 + Math.floor(Math.random() * 8);
+                var accelMode = Math.floor(Math.random() * 3);
+                for (var i = 0; i <= steps; i++) {
+                  var t = i / steps;
+                  var eased;
+                  if (accelMode === 0) eased = 1 - Math.pow(1 - t, 3);
+                  else if (accelMode === 1) eased = Math.pow(t, 3);
+                  else eased = t < 0.5 ? 4*t*t*t : 1 - Math.pow(-2*t + 2, 3) / 2;
+                  document.dispatchEvent(new MouseEvent('mousemove', {
+                    bubbles: true, cancelable: true, view: window,
+                    clientX: Math.round(startX + (targetX - startX) * eased + (Math.random() * 8 - 4)),
+                    clientY: Math.round(startY + (targetY - startY) * eased + (Math.random() * 8 - 4)),
+                  }));
+                  if (i % 4 === 0) await sleep(10 + Math.random() * 15);
+                }
+
+                // 悬停微抖
+                var mouseOpts = { bubbles: true, cancelable: true, view: window, clientX: Math.round(targetX), clientY: Math.round(targetY) };
+                try {
+                  closeBtn.dispatchEvent(new MouseEvent('mouseenter', mouseOpts));
+                  closeBtn.dispatchEvent(new MouseEvent('mouseover', mouseOpts));
+                } catch (e) {}
+                await sleep(150 + Math.random() * 200);
+                for (var j = 0; j < 8; j++) {
+                  document.dispatchEvent(new MouseEvent('mousemove', {
+                    bubbles: true, cancelable: true, view: window,
+                    clientX: Math.round(targetX + (Math.random() * 6 - 3)),
+                    clientY: Math.round(targetY + (Math.random() * 6 - 3)),
+                  }));
+                  await sleep(20 + Math.random() * 30);
+                }
+
+                // 完整点击事件链
+                try { closeBtn.dispatchEvent(new MouseEvent('mousedown', mouseOpts)) } catch (e) {}
+                await sleep(50 + Math.random() * 50);
+                try { closeBtn.dispatchEvent(new MouseEvent('mouseup', mouseOpts)) } catch (e) {}
+                await sleep(20 + Math.random() * 30);
+                if (typeof closeBtn.click === 'function') closeBtn.click();
+                else { try { closeBtn.dispatchEvent(new MouseEvent('click', mouseOpts)) } catch (e) {} }
+
                 console.log('[行为] AI推荐弹窗已关闭');
-              }
+                return { ok: true };
+              })();
             },
           });
         } catch (e) {}
