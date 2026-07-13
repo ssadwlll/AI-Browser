@@ -1282,6 +1282,7 @@ function sendToContent(message) {
     // COLLECT 备用接收通道：content.js 通过 chrome.runtime.sendMessage 发送 COLLECT_DONE
     // 防止 sendResponse 因 SW 短暂终止导致消息通道断裂而静默失败
     var doneHandler = null;
+    var progressCompleteReceived = false;  // PROGRESS complete 信号（第三道保险）
     if (message.type === 'COLLECT') {
       doneHandler = function (msg, sender, sendResp) {
         if (msg && msg.type === 'COLLECT_DONE') {
@@ -1299,6 +1300,45 @@ function sendToContent(message) {
           }
           sendResp({ ok: true });
           return false;
+        }
+        // 第三道保险：收到 PROGRESS complete 说明采集已完成
+        // 但 COLLECT_DONE 和 sendResponse 都可能丢失（MV3 长时间操作后消息通道静默关闭）
+        // 此时启动 15 秒等待，若 COLLECT_DONE 仍未到达，主动向 content.js 查询结果
+        if (msg && msg.type === 'PROGRESS' && msg.phase === 'complete' && !progressCompleteReceived) {
+          progressCompleteReceived = true;
+          log('[采集] 收到 PROGRESS complete，等待 COLLECT_DONE...');
+          setTimeout(function () {
+            if (!settled) {
+              log('[采集] COLLECT_DONE 未到达，主动查询 content.js 结果...');
+              // 向 content.js 发送 GET_RESULT 消息查询采集结果
+              chrome.tabs.sendMessage(state.xhsTabId, { type: 'GET_RESULT' }, function (resp) {
+                if (chrome.runtime.lastError || !resp || !resp.ok) {
+                  // 查询也失败，最后手段：用 PROGRESS 数据构建空结果，避免卡死
+                  if (!settled) {
+                    settled = true;
+                    clearTimeout(timer);
+                    if (doneHandler) {
+                      chrome.runtime.onMessage.removeListener(doneHandler);
+                      doneHandler = null;
+                    }
+                    log('[采集] 查询也失败，使用 PROGRESS 数据恢复');
+                    resolve({ ok: true, data: { notes: [], details: [], failures: [], stopped: false, recovered: true } });
+                  }
+                  return;
+                }
+                if (!settled) {
+                  settled = true;
+                  clearTimeout(timer);
+                  if (doneHandler) {
+                    chrome.runtime.onMessage.removeListener(doneHandler);
+                    doneHandler = null;
+                  }
+                  log('[采集] 通过 GET_RESULT 恢复结果');
+                  resolve({ ok: true, data: resp.data });
+                }
+              });
+            }
+          }, 15000);
         }
       };
       chrome.runtime.onMessage.addListener(doneHandler);

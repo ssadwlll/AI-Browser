@@ -20,6 +20,7 @@
   // ======================= 状态管理 =======================
 
   var collecting = false;          // 是否正在采集
+  var lastCollectResult = null;    // 最后一次采集结果缓存（供 GET_RESULT 查询）
   var mnsv2Ready = false;          // window.mnsv2 是否就绪
   var rapParams = {                // 自动捕获的 x-rap-param
     search: '',
@@ -1757,6 +1758,8 @@
     if (message.type === 'COLLECT') {
       handleCollectRequest(message)
         .then(function (result) {
+          // 缓存结果（供 GET_RESULT 查询，防止 COLLECT_DONE 和 sendResponse 都丢失）
+          lastCollectResult = result;
           // 先发 COLLECT_DONE 备用消息（更可靠，不依赖消息通道）
           // MV3 长操作后 sendResponse 的消息通道可能已被 Chrome 静默关闭
           try {
@@ -1766,12 +1769,25 @@
           try { sendResponse({ ok: true, data: result }); } catch (e) {}
         })
         .catch(function (err) {
+          lastCollectResult = { error: err.message };
           try {
             chrome.runtime.sendMessage({ type: 'COLLECT_DONE', ok: false, error: err.message }).catch(function () {});
           } catch (e) {}
           try { sendResponse({ ok: false, error: err.message }); } catch (e) {}
         });
       return true; // 保持消息通道开放（异步响应）
+    }
+
+    // GET_RESULT: background.js 在 COLLECT_DONE/sendResponse 都丢失时主动查询结果
+    if (message.type === 'GET_RESULT') {
+      if (lastCollectResult && !lastCollectResult.error) {
+        sendResponse({ ok: true, data: lastCollectResult });
+      } else if (lastCollectResult && lastCollectResult.error) {
+        sendResponse({ ok: false, error: lastCollectResult.error });
+      } else {
+        sendResponse({ ok: false, error: '无缓存结果' });
+      }
+      return false;
     }
 
     if (message.type === 'STOP') {
