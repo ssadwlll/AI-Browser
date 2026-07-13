@@ -1440,93 +1440,33 @@ async function startCollection(keywords, options) {
       if (!state.collecting) break;
 
       try {
-        // === 搜索(content.js行为模拟) → 滚动(executeScript) → 回顶部(executeScript) → 采集 ===
-        // 搜索用 content.js 消息（有人类行为模拟），滚动/回顶部用 executeScript（可靠）
+        // === 导航搜索页 → 滚动(executeScript) → 回顶部(executeScript) → 采集(BG) ===
+        // 搜索由 collectKeywordViaBg 通过 API 完成，这里只导航到搜索页（模拟人类搜索行为）
 
-        // 1. 页面搜索框输入关键词（content.js 执行 searchOnPage，含鼠标移动+逐字输入）
-        log('[行为] 页面搜索: ' + keyword);
-        try {
-          var searchR = await sendToContent({ type: 'SEARCH', keyword: keyword });
-          log('[行为] 搜索结果: ' + (searchR && searchR.ok ? 'ok' : (searchR && searchR.error || 'fail')));
-        } catch (e) {
-          log('[行为] 页面搜索异常（可能触发导航）: ' + e.message);
-          // 搜索异常时也发 STOP，防止 content.js 的 collecting 标志残留
-          try { await sendToContent({ type: 'STOP' }); } catch (stopErr) {}
-          // bfcache 错误：页面被移入前进/后退缓存，需要等待页面恢复
-          if (e.message && e.message.indexOf('back/forward cache') !== -1) {
-            log('[行为] 检测到 bfcache，等待页面恢复...');
-            await new Promise(function (r) { setTimeout(r, 3000); });
-          }
-        }
+        // 1. 导航到搜索页 URL（不通过 content.js 搜索框，避免事件循环冻结/超时）
+        var searchUrl = 'https://www.xiaohongshu.com/search_result?keyword=' + encodeURIComponent(keyword) + '&source=web_explore_feed';
+        log('[行为] 导航到搜索页: ' + keyword);
+        _pluginNavigation = true;
+        await pluginTabsUpdate(state.xhsTabId, { url: searchUrl });
+        await waitForTabComplete(state.xhsTabId);
+        _pluginNavigation = false;
+        await new Promise(function (r) { setTimeout(r, 2000); });
 
-        // 等待搜索结果加载（SPA 导航 + DOM 渲染）
-        await new Promise(function (r) { setTimeout(r, 3000); });
-
-        // 关闭AI推荐弹窗（搜索后可能出现，遮挡搜索结果）- 深度人类行为模拟
+        // 2. 关闭AI推荐弹窗（搜索后可能出现，遮挡搜索结果）
         try {
           await chrome.scripting.executeScript({
             target: { tabId: state.xhsTabId },
             func: function () {
-              function sleep(ms) { return new Promise(r => setTimeout(r, ms)) }
-              return (async function () {
-                var closeBtn = document.querySelector('button.xhs-ai-chat-header__close');
-                if (!closeBtn) return { ok: false, reason: 'not_found' };
-
-                var rect = closeBtn.getBoundingClientRect();
-                var targetX = rect.left + rect.width / 2;
-                var targetY = rect.top + rect.height / 2;
-
-                // 贝塞尔轨迹鼠标移动（3种加速度模式随机）
-                var startX = Math.max(0, targetX - 150 - Math.floor(Math.random() * 200));
-                var startY = Math.max(0, targetY - 100 - Math.floor(Math.random() * 150));
-                var steps = 8 + Math.floor(Math.random() * 8);
-                var accelMode = Math.floor(Math.random() * 3);
-                for (var i = 0; i <= steps; i++) {
-                  var t = i / steps;
-                  var eased;
-                  if (accelMode === 0) eased = 1 - Math.pow(1 - t, 3);
-                  else if (accelMode === 1) eased = Math.pow(t, 3);
-                  else eased = t < 0.5 ? 4*t*t*t : 1 - Math.pow(-2*t + 2, 3) / 2;
-                  document.dispatchEvent(new MouseEvent('mousemove', {
-                    bubbles: true, cancelable: true, view: window,
-                    clientX: Math.round(startX + (targetX - startX) * eased + (Math.random() * 8 - 4)),
-                    clientY: Math.round(startY + (targetY - startY) * eased + (Math.random() * 8 - 4)),
-                  }));
-                  if (i % 4 === 0) await sleep(10 + Math.random() * 15);
-                }
-
-                // 悬停微抖
-                var mouseOpts = { bubbles: true, cancelable: true, view: window, clientX: Math.round(targetX), clientY: Math.round(targetY) };
-                try {
-                  closeBtn.dispatchEvent(new MouseEvent('mouseenter', mouseOpts));
-                  closeBtn.dispatchEvent(new MouseEvent('mouseover', mouseOpts));
-                } catch (e) {}
-                await sleep(150 + Math.random() * 200);
-                for (var j = 0; j < 8; j++) {
-                  document.dispatchEvent(new MouseEvent('mousemove', {
-                    bubbles: true, cancelable: true, view: window,
-                    clientX: Math.round(targetX + (Math.random() * 6 - 3)),
-                    clientY: Math.round(targetY + (Math.random() * 6 - 3)),
-                  }));
-                  await sleep(20 + Math.random() * 30);
-                }
-
-                // 完整点击事件链
-                try { closeBtn.dispatchEvent(new MouseEvent('mousedown', mouseOpts)) } catch (e) {}
-                await sleep(50 + Math.random() * 50);
-                try { closeBtn.dispatchEvent(new MouseEvent('mouseup', mouseOpts)) } catch (e) {}
-                await sleep(20 + Math.random() * 30);
-                if (typeof closeBtn.click === 'function') closeBtn.click();
-                else { try { closeBtn.dispatchEvent(new MouseEvent('click', mouseOpts)) } catch (e) {} }
-
+              var closeBtn = document.querySelector('button.xhs-ai-chat-header__close');
+              if (closeBtn) {
+                closeBtn.click();
                 console.log('[行为] AI推荐弹窗已关闭');
-                return { ok: true };
-              })();
+              }
             },
           });
         } catch (e) {}
 
-        // 重新检测 content script（搜索可能触发导航导致 content script 重新加载）
+        // 3. 确保 content script 就绪（导航后需重新检测）
         var csReady = await waitForContentScript(state.xhsTabId);
         if (!csReady) {
           log('[行为] Content script 未就绪，重新注入...');
@@ -1534,17 +1474,17 @@ async function startCollection(keywords, options) {
           await new Promise(function (r) { setTimeout(r, 1500); });
         }
 
-        // 2. 滚动加载（通过 executeScript，自动查找滚动容器）
+        // 4. 滚动加载（模拟浏览搜索结果）
         log('[行为] 滚动加载笔记...');
-        var scrollTimes = 5 + Math.floor(Math.random() * 4); // 5-8次随机滚动
+        var scrollTimes = 5 + Math.floor(Math.random() * 4);
         await scrollViaScripting(state.xhsTabId, scrollTimes);
 
-        // 3. 回顶部（通过 executeScript）
+        // 5. 回顶部
         log('[行为] 回到顶部...');
         await scrollToTopViaScripting(state.xhsTabId);
         await new Promise(function (r) { setTimeout(r, 1000); });
 
-        // 4. 采集（Background 驱动，不依赖 content.js 事件循环）
+        // 6. 采集（Background 驱动，不依赖 content.js 事件循环）
         // 整个采集循环在 background.js 中运行，窗口最小化时也能正常工作
         var response;
         try {
