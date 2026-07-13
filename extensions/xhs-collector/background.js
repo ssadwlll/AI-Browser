@@ -44,6 +44,9 @@ var state = {
 // 标记插件自身发起的导航（避免 onUpdated 误触发停止采集）
 var _pluginNavigation = false;
 
+// COLLECT 等待状态（全局，供 PROGRESS 处理器访问）
+var collectWaitState = null;  // { resolve, reject, settled, progressCompleteReceived, keyword }
+
 // ======================= 工具函数 =======================
 
 // 日志级别颜色映射
@@ -1282,12 +1285,21 @@ function sendToContent(message) {
     // COLLECT 备用接收通道：content.js 通过 chrome.runtime.sendMessage 发送 COLLECT_DONE
     // 防止 sendResponse 因 SW 短暂终止导致消息通道断裂而静默失败
     var doneHandler = null;
-    var progressCompleteReceived = false;  // PROGRESS complete 信号（第三道保险）
     if (message.type === 'COLLECT') {
+      // 设置全局等待状态（供全局 PROGRESS 处理器访问，不依赖 doneHandler 收到 PROGRESS）
+      collectWaitState = {
+        resolve: resolve,
+        reject: reject,
+        settled: false,
+        progressCompleteReceived: false,
+        keyword: message.keyword,
+      };
+
       doneHandler = function (msg, sender, sendResp) {
         if (msg && msg.type === 'COLLECT_DONE') {
-          if (!settled) {
-            settled = true;
+          if (!collectWaitState.settled) {
+            collectWaitState.settled = true;
+            collectWaitState = null;
             clearTimeout(timer);
             chrome.runtime.onMessage.removeListener(doneHandler);
             doneHandler = null;
@@ -1300,65 +1312,6 @@ function sendToContent(message) {
           }
           sendResp({ ok: true });
           return false;
-        }
-        // 第三道保险：收到 PROGRESS complete 说明采集已完成
-        // 但 COLLECT_DONE 和 sendResponse 都可能丢失（MV3 长时间操作后消息通道静默关闭）
-        // 此时启动 15 秒等待，若 COLLECT_DONE 仍未到达，主动向 content.js 查询结果
-        if (msg && msg.type === 'PROGRESS' && msg.phase === 'complete' && !progressCompleteReceived) {
-          progressCompleteReceived = true;
-          log('[采集] 收到 PROGRESS complete，等待 COLLECT_DONE...');
-          var completeKeyword = msg.keyword;
-          setTimeout(function () {
-            if (!settled) {
-              log('[采集] COLLECT_DONE 未到达，主动查询 content.js 结果...');
-              // 向 content.js 发送 GET_RESULT 消息查询采集结果
-              chrome.tabs.sendMessage(state.xhsTabId, { type: 'GET_RESULT' }, function (resp) {
-                if (chrome.runtime.lastError || !resp || !resp.ok) {
-                  // 查询也失败，从 IndexedDB 读取增量保存的数据
-                  if (!settled) {
-                    settled = true;
-                    clearTimeout(timer);
-                    if (doneHandler) {
-                      chrome.runtime.onMessage.removeListener(doneHandler);
-                      doneHandler = null;
-                    }
-                    log('[采集] 查询也失败，从 IndexedDB 读取增量保存数据...');
-                    // 从 IndexedDB 读取该关键词的增量保存数据
-                    readKeywordResult(completeKeyword).then(function (dbResult) {
-                      if (dbResult && dbResult.details && dbResult.details.length > 0) {
-                        log('[采集] 从 IndexedDB 恢复: ' + dbResult.notes.length + ' 笔记, ' + dbResult.details.length + ' 详情');
-                        resolve({ ok: true, data: {
-                          notes: dbResult.notes || [],
-                          details: dbResult.details || [],
-                          failures: dbResult.failures || [],
-                          stopped: false,
-                          recovered: true,
-                          recoveredFrom: 'indexeddb',
-                        }});
-                      } else {
-                        log('[采集] IndexedDB 无数据，使用空结果恢复');
-                        resolve({ ok: true, data: { notes: [], details: [], failures: [], stopped: false, recovered: true } });
-                      }
-                    }).catch(function (e) {
-                      log('[采集] IndexedDB 读取失败: ' + e.message);
-                      resolve({ ok: true, data: { notes: [], details: [], failures: [], stopped: false, recovered: true } });
-                    });
-                  }
-                  return;
-                }
-                if (!settled) {
-                  settled = true;
-                  clearTimeout(timer);
-                  if (doneHandler) {
-                    chrome.runtime.onMessage.removeListener(doneHandler);
-                    doneHandler = null;
-                  }
-                  log('[采集] 通过 GET_RESULT 恢复结果');
-                  resolve({ ok: true, data: resp.data });
-                }
-              });
-            }
-          }, 15000);
         }
       };
       chrome.runtime.onMessage.addListener(doneHandler);
@@ -1409,6 +1362,10 @@ function sendToContent(message) {
       if (doneHandler) {
         chrome.runtime.onMessage.removeListener(doneHandler);
         doneHandler = null;
+      }
+      // 清理全局 COLLECT 等待状态
+      if (message.type === 'COLLECT') {
+        collectWaitState = null;
       }
       if (chrome.runtime.lastError) {
         reject(new Error(chrome.runtime.lastError.message));
@@ -2151,6 +2108,54 @@ chrome.runtime.onMessage.addListener(function (message, sender, sendResponse) {
         (message.reason ? ' reason=' + message.reason : '');
       log(logMsg);
     }
+
+    // 第三道保险：收到 PROGRESS complete 时，检查是否有 COLLECT 在等待
+    // 不依赖 doneHandler 收到 PROGRESS（doneHandler 可能因通道问题未收到）
+    if (message.phase === 'complete' && collectWaitState && !collectWaitState.settled && !collectWaitState.progressCompleteReceived) {
+      collectWaitState.progressCompleteReceived = true;
+      var cwKeyword = collectWaitState.keyword;
+      log('[采集] 收到 PROGRESS complete，等待 COLLECT_DONE...');
+      setTimeout(function () {
+        if (collectWaitState && !collectWaitState.settled) {
+          log('[采集] COLLECT_DONE 未到达，主动查询 content.js 结果...');
+          chrome.tabs.sendMessage(state.xhsTabId, { type: 'GET_RESULT' }, function (resp) {
+            if (chrome.runtime.lastError || !resp || !resp.ok) {
+              // 从 IndexedDB 读取增量保存的数据
+              if (collectWaitState && !collectWaitState.settled) {
+                collectWaitState.settled = true;
+                log('[采集] 查询也失败，从 IndexedDB 读取增量保存数据...');
+                readKeywordResult(cwKeyword).then(function (dbResult) {
+                  if (dbResult && dbResult.details && dbResult.details.length > 0) {
+                    log('[采集] 从 IndexedDB 恢复: ' + dbResult.notes.length + ' 笔记, ' + dbResult.details.length + ' 详情');
+                    collectWaitState.resolve({ ok: true, data: {
+                      notes: dbResult.notes || [],
+                      details: dbResult.details || [],
+                      failures: dbResult.failures || [],
+                      stopped: false,
+                      recovered: true,
+                      recoveredFrom: 'indexeddb',
+                    }});
+                  } else {
+                    log('[采集] IndexedDB 无数据，使用空结果恢复');
+                    collectWaitState.resolve({ ok: true, data: { notes: [], details: [], failures: [], stopped: false, recovered: true } });
+                  }
+                }).catch(function (e) {
+                  log('[采集] IndexedDB 读取失败: ' + e.message);
+                  collectWaitState.resolve({ ok: true, data: { notes: [], details: [], failures: [], stopped: false, recovered: true } });
+                });
+              }
+              return;
+            }
+            if (collectWaitState && !collectWaitState.settled) {
+              collectWaitState.settled = true;
+              log('[采集] 通过 GET_RESULT 恢复结果');
+              collectWaitState.resolve({ ok: true, data: resp.data });
+            }
+          });
+        }
+      }, 15000);
+    }
+
     sendResponse({ ok: true });
     return false;
   }
