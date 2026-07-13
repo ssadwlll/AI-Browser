@@ -1614,6 +1614,21 @@
         success: success, fail: fail,
       });
 
+      // 增量保存：每 10 条详情发送一次到 background 保存到 IndexedDB
+      // 防止 COLLECT 响应丢失导致整个关键词数据全部丢失
+      if (details.length > 0 && details.length % 10 === 0) {
+        try {
+          chrome.runtime.sendMessage({
+            type: 'INCREMENT_SAVE',
+            keyword: keyword,
+            notes: notes,
+            details: details,
+            failures: failures,
+          }).catch(function () {});
+          bgLog('[采集] 增量保存: ' + details.length + ' 条详情');
+        } catch (e) {}
+      }
+
       // 每采集 N 条后通过新 tab 进行深度交互（点赞/收藏/关注/访问用户主页等）
       // 流程：随机选 1 条笔记 → 在页面找到链接 → 滚动到可视区域 → 右键模拟新窗口打开 → 新 tab 中深度交互 → 关闭 tab
       // 采集关键词后不再做深度交互（由 background.js 控制调用时机）
