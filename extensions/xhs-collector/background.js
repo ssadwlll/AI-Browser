@@ -1440,38 +1440,93 @@ async function startCollection(keywords, options) {
       if (!state.collecting) break;
 
       try {
-        // === 导航首页 → 搜索框输入(executeScript) → 滚动(executeScript) → 回顶部(executeScript) → 采集(BG) ===
-        // 搜索由 collectKeywordViaBg 通过 API 完成，但先在页面上模拟搜索框输入+点击（有 UI 交互行为）
+        // === 搜索(content.js行为模拟) → 滚动(executeScript) → 回顶部(executeScript) → 采集 ===
+        // 搜索用 content.js 消息（有人类行为模拟），滚动/回顶部用 executeScript（可靠）
 
-        // 1. 导航到首页（确保搜索框存在）
-        log('[行为] 导航到首页');
-        _pluginNavigation = true;
-        await pluginTabsUpdate(state.xhsTabId, { url: 'https://www.xiaohongshu.com/explore' });
-        await waitForTabComplete(state.xhsTabId);
-        _pluginNavigation = false;
-        await new Promise(function (r) { setTimeout(r, 2000); });
+        // 1. 页面搜索框输入关键词（content.js 执行 searchOnPage，含鼠标移动+逐字输入）
+        log('[行为] 页面搜索: ' + keyword);
+        try {
+          var searchR = await sendToContent({ type: 'SEARCH', keyword: keyword });
+          log('[行为] 搜索结果: ' + (searchR && searchR.ok ? 'ok' : (searchR && searchR.error || 'fail')));
+        } catch (e) {
+          log('[行为] 页面搜索异常（可能触发导航）: ' + e.message);
+          // 搜索异常时也发 STOP，防止 content.js 的 collecting 标志残留
+          try { await sendToContent({ type: 'STOP' }); } catch (stopErr) {}
+          // bfcache 错误：页面被移入前进/后退缓存，需要等待页面恢复
+          if (e.message && e.message.indexOf('back/forward cache') !== -1) {
+            log('[行为] 检测到 bfcache，等待页面恢复...');
+            await new Promise(function (r) { setTimeout(r, 3000); });
+          }
+        }
 
-        // 2. 搜索框输入关键词 + 点击搜索按钮（executeScript，不依赖 content.js 事件循环）
-        log('[行为] 搜索框输入: ' + keyword);
-        var searchResult = await searchOnPageViaScripting(state.xhsTabId, keyword);
-        log('[行为] 搜索结果: ' + searchResult);
-        await new Promise(function (r) { setTimeout(r, 3000); }); // 等待搜索结果加载
+        // 等待搜索结果加载（SPA 导航 + DOM 渲染）
+        await new Promise(function (r) { setTimeout(r, 3000); });
 
-        // 3. 关闭AI推荐弹窗（搜索后可能出现，遮挡搜索结果）
+        // 关闭AI推荐弹窗（搜索后可能出现，遮挡搜索结果）- 深度人类行为模拟
         try {
           await chrome.scripting.executeScript({
             target: { tabId: state.xhsTabId },
             func: function () {
-              var closeBtn = document.querySelector('button.xhs-ai-chat-header__close');
-              if (closeBtn) {
-                closeBtn.click();
+              function sleep(ms) { return new Promise(r => setTimeout(r, ms)) }
+              return (async function () {
+                var closeBtn = document.querySelector('button.xhs-ai-chat-header__close');
+                if (!closeBtn) return { ok: false, reason: 'not_found' };
+
+                var rect = closeBtn.getBoundingClientRect();
+                var targetX = rect.left + rect.width / 2;
+                var targetY = rect.top + rect.height / 2;
+
+                // 贝塞尔轨迹鼠标移动（3种加速度模式随机）
+                var startX = Math.max(0, targetX - 150 - Math.floor(Math.random() * 200));
+                var startY = Math.max(0, targetY - 100 - Math.floor(Math.random() * 150));
+                var steps = 8 + Math.floor(Math.random() * 8);
+                var accelMode = Math.floor(Math.random() * 3);
+                for (var i = 0; i <= steps; i++) {
+                  var t = i / steps;
+                  var eased;
+                  if (accelMode === 0) eased = 1 - Math.pow(1 - t, 3);
+                  else if (accelMode === 1) eased = Math.pow(t, 3);
+                  else eased = t < 0.5 ? 4*t*t*t : 1 - Math.pow(-2*t + 2, 3) / 2;
+                  document.dispatchEvent(new MouseEvent('mousemove', {
+                    bubbles: true, cancelable: true, view: window,
+                    clientX: Math.round(startX + (targetX - startX) * eased + (Math.random() * 8 - 4)),
+                    clientY: Math.round(startY + (targetY - startY) * eased + (Math.random() * 8 - 4)),
+                  }));
+                  if (i % 4 === 0) await sleep(10 + Math.random() * 15);
+                }
+
+                // 悬停微抖
+                var mouseOpts = { bubbles: true, cancelable: true, view: window, clientX: Math.round(targetX), clientY: Math.round(targetY) };
+                try {
+                  closeBtn.dispatchEvent(new MouseEvent('mouseenter', mouseOpts));
+                  closeBtn.dispatchEvent(new MouseEvent('mouseover', mouseOpts));
+                } catch (e) {}
+                await sleep(150 + Math.random() * 200);
+                for (var j = 0; j < 8; j++) {
+                  document.dispatchEvent(new MouseEvent('mousemove', {
+                    bubbles: true, cancelable: true, view: window,
+                    clientX: Math.round(targetX + (Math.random() * 6 - 3)),
+                    clientY: Math.round(targetY + (Math.random() * 6 - 3)),
+                  }));
+                  await sleep(20 + Math.random() * 30);
+                }
+
+                // 完整点击事件链
+                try { closeBtn.dispatchEvent(new MouseEvent('mousedown', mouseOpts)) } catch (e) {}
+                await sleep(50 + Math.random() * 50);
+                try { closeBtn.dispatchEvent(new MouseEvent('mouseup', mouseOpts)) } catch (e) {}
+                await sleep(20 + Math.random() * 30);
+                if (typeof closeBtn.click === 'function') closeBtn.click();
+                else { try { closeBtn.dispatchEvent(new MouseEvent('click', mouseOpts)) } catch (e) {} }
+
                 console.log('[行为] AI推荐弹窗已关闭');
-              }
+                return { ok: true };
+              })();
             },
           });
         } catch (e) {}
 
-        // 4. 确保 content script 就绪
+        // 重新检测 content script（搜索可能触发导航导致 content script 重新加载）
         var csReady = await waitForContentScript(state.xhsTabId);
         if (!csReady) {
           log('[行为] Content script 未就绪，重新注入...');
@@ -1479,17 +1534,17 @@ async function startCollection(keywords, options) {
           await new Promise(function (r) { setTimeout(r, 1500); });
         }
 
-        // 5. 滚动加载（模拟浏览搜索结果）
+        // 2. 滚动加载（通过 executeScript，自动查找滚动容器）
         log('[行为] 滚动加载笔记...');
-        var scrollTimes = 5 + Math.floor(Math.random() * 4);
+        var scrollTimes = 5 + Math.floor(Math.random() * 4); // 5-8次随机滚动
         await scrollViaScripting(state.xhsTabId, scrollTimes);
 
-        // 6. 回顶部
+        // 3. 回顶部（通过 executeScript）
         log('[行为] 回到顶部...');
         await scrollToTopViaScripting(state.xhsTabId);
         await new Promise(function (r) { setTimeout(r, 1000); });
 
-        // 7. 采集（Background 驱动，不依赖 content.js 事件循环）
+        // 4. 采集（Background 驱动，不依赖 content.js 事件循环）
         // 整个采集循环在 background.js 中运行，窗口最小化时也能正常工作
         var response;
         try {
@@ -2418,10 +2473,26 @@ async function collectKeywordViaBg(tabId, keyword, pages, feedDelayMin, feedDela
       var pickedNote = candidates[Math.floor(Math.random() * candidates.length)];
       log('[采集-BG] 深度交互: ' + pickedNote.noteId);
       try {
-        await doDeepInteractionViaBg(tabId, pickedNote);
+        // 总超时 90 秒保护（包括打开 tab + 等待就绪 + 交互 + 关闭）
+        await Promise.race([
+          doDeepInteractionViaBg(tabId, pickedNote),
+          new Promise(function (_, reject) {
+            setTimeout(function () { reject(new Error('深度交互总超时(90s)')); }, 90000);
+          })
+        ]);
         log('[采集-BG] 深度交互完成, state.collecting=' + state.collecting);
       } catch (e) {
         log('[采集-BG] 深度交互异常（不影响采集）: ' + e.message);
+        // 兜底：关闭可能残留的深度交互 tab
+        try {
+          var leftoverTabs = await chrome.tabs.query({ url: '*://*.xiaohongshu.com/explore/*' });
+          for (var lt = 0; lt < leftoverTabs.length; lt++) {
+            if (leftoverTabs[lt].id !== state.xhsTabId && leftoverTabs[lt].id !== tabId) {
+              log('[采集-BG] 兜底关闭残留 tab: ' + leftoverTabs[lt].id);
+              try { await chrome.tabs.remove(leftoverTabs[lt].id); } catch (e) {}
+            }
+          }
+        } catch (e2) {}
       }
       await _sleepBg(1000 + Math.random() * 1000);
     }
@@ -2456,7 +2527,7 @@ async function doDeepInteractionViaBg(tabId, note) {
   try {
     tab = await chrome.tabs.create({ url: noteUrl, active: false });
 
-    // 等待 content script 就绪
+    // 等待 content script 就绪（最多 30 秒）
     var ready = false;
     for (var attempt = 0; attempt < 60; attempt++) {
       await _sleepBg(500);
@@ -2480,13 +2551,13 @@ async function doDeepInteractionViaBg(tabId, note) {
       return { ok: false };
     }
 
-    // 发送深度交互指令
+    // 发送深度交互指令（带 60 秒超时保护，不阻塞采集循环太久）
     log('[深度交互-BG] 发送交互指令到 tab ' + tab.id);
     var interactionResult = await new Promise(function (resolve) {
       var settled = false;
       var timeout = setTimeout(function () {
-        if (!settled) { settled = true; resolve({ ok: false, error: '交互超时(120s)' }); }
-      }, 120000);
+        if (!settled) { settled = true; resolve({ ok: false, error: '交互超时(60s)' }); }
+      }, 60000);
 
       var interactionStart = Date.now();
       var onTabUpdated = function (tid, info) {
@@ -2516,6 +2587,17 @@ async function doDeepInteractionViaBg(tabId, note) {
     // 关闭 tab
     log('[深度交互-BG] 关闭 tab: ' + tab.id);
     try { await chrome.tabs.remove(tab.id); } catch (e) {}
+
+    // 兜底：关闭可能由 visit_homepage 打开的用户主页 tab
+    try {
+      var profileTabs = await chrome.tabs.query({ url: '*://*.xiaohongshu.com/user/profile/*' });
+      for (var pt = 0; pt < profileTabs.length; pt++) {
+        if (profileTabs[pt].id !== state.xhsTabId) {
+          log('[深度交互-BG] 兜底关闭用户主页 tab: ' + profileTabs[pt].id);
+          try { await chrome.tabs.remove(profileTabs[pt].id); } catch (e) {}
+        }
+      }
+    } catch (e) {}
   } catch (e) {
     log('[深度交互-BG] 异常: ' + e.message);
     if (tab) { try { await chrome.tabs.remove(tab.id); } catch (e2) {} }

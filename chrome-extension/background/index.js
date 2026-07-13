@@ -19,6 +19,7 @@ import { TaskArchiveService } from './services/task-archive-service.js'
 import { OutputService } from './services/output-service.js'
 import { ScratchpadService } from './services/scratchpad-service.js'
 import { CaptchaService } from './services/captcha-service.js'
+import { LocalScriptService } from './services/local-script-service.js'
 
 // ============ 常量 ============
 const MSG_TYPES = {
@@ -53,6 +54,7 @@ const taskTemplateService = new TaskTemplateService()
 const scratchpadService = new ScratchpadService()  // Feature: 中间推理持久化
 const outputService = new OutputService()          // Feature: 任务结果输出
 const captchaService = new CaptchaService(aiService, configService)  // 验证码自动识别
+const localScriptService = new LocalScriptService()                   // 本地脚本管理
 const taskArchiveService = new TaskArchiveService()  // Feature: 任务追溯复盘（内部会创建自己的实例，但这里单独注册供 callService）
 const humanInterventionService = new HumanInterventionService((request) => {
   // 人工介入请求回调：转发到 sidepanel
@@ -394,6 +396,4 @@ scratchpadService.init().then(async () => {
     // 通知用户可以通过对话记录面板查看之前的任务进度
     // 注意：当前架构不支持自动恢复任务（messages[]未保存），用户需要重新发起任务
   }
-}).catch(e => console.warn('[AI Browser] ScratchpadService 检测失败:', e.message))
-
-console.log('[AI Browser] Background Service Worker started')
+}).catch(e => console.warn('[AI Browser] ScratchpadService

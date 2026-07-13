@@ -2005,6 +2005,277 @@ document.getElementById('syncScriptsBtn').addEventListener('click', async () => 
   setTimeout(() => { btn.style.transform = '' }, 1000)
 })
 
+// ============ 脚本标签页切换 ============
+document.querySelectorAll('.scripts-tab-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.scripts-tab-btn').forEach(b => b.classList.remove('active'))
+    document.querySelectorAll('.scripts-tab-panel').forEach(p => p.classList.remove('active'))
+    btn.classList.add('active')
+    const tab = btn.dataset.stab
+    const panelMap = { remote: 'scriptsRemotePanel', local: 'scriptsLocalPanel', logs: 'scriptsLogsPanel' }
+    const panel = document.getElementById(panelMap[tab])
+    if (panel) panel.classList.add('active')
+    // 切换到对应标签时刷新数据
+    if (tab === 'local') loadLocalScripts()
+    if (tab === 'logs') loadScriptLogs()
+  })
+})
+
+// ============ 本地脚本编辑器 ============
+let currentLocalScriptId = null  // 当前编辑的本地脚本 ID
+
+async function loadLocalScripts() {
+  const select = document.getElementById('localScriptSelect')
+  const scripts = await callService('localScriptService', 'list') || []
+  // 保留当前选中
+  const curVal = select.value
+  select.innerHTML = '<option value="">-- 选择本地脚本 --</option>'
+  for (const s of scripts) {
+    const opt = document.createElement('option')
+    opt.value = s.id
+    opt.textContent = s.name || '未命名脚本'
+    select.appendChild(opt)
+  }
+  // 恢复选中
+  if (curVal && scripts.some(s => s.id === curVal)) {
+    select.value = curVal
+  } else if (currentLocalScriptId && scripts.some(s => s.id === currentLocalScriptId)) {
+    select.value = currentLocalScriptId
+  }
+  // 加载选中脚本的代码
+  if (select.value) {
+    await loadLocalScript(select.value)
+  } else {
+    clearLocalEditor()
+  }
+}
+
+async function loadLocalScript(id) {
+  const result = await callService('localScriptService', 'get', id)
+  if (result && result.ok !== false) {
+    const script = result.script || result
+    currentLocalScriptId = script.id
+    document.getElementById('localScriptName').value = script.name || ''
+    document.getElementById('localScriptPattern').value = script.urlPattern || ''
+    document.getElementById('localScriptCode').value = script.code || ''
+  }
+}
+
+function clearLocalEditor() {
+  currentLocalScriptId = null
+  document.getElementById('localScriptName').value = ''
+  document.getElementById('localScriptPattern').value = ''
+  document.getElementById('localScriptCode').value = ''
+}
+
+// 选择脚本下拉框
+document.getElementById('localScriptSelect').addEventListener('change', async (e) => {
+  const id = e.target.value
+  if (id) {
+    await loadLocalScript(id)
+  } else {
+    clearLocalEditor()
+  }
+})
+
+// 新建脚本
+document.getElementById('localScriptNewBtn').addEventListener('click', async () => {
+  clearLocalEditor()
+  const name = '新建脚本 ' + new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+  document.getElementById('localScriptName').value = name
+  document.getElementById('localScriptCode').value = '// ' + name + '\n\nconsole.log("Hello!");\n'
+  // 保存并刷新下拉框
+  await saveLocalScript()
+  await loadLocalScripts()
+})
+
+// 保存脚本
+async function saveLocalScript() {
+  const name = document.getElementById('localScriptName').value.trim()
+  const urlPattern = document.getElementById('localScriptPattern').value.trim()
+  const code = document.getElementById('localScriptCode').value
+  if (!name) {
+    alert('请输入脚本名称')
+    return
+  }
+  if (!code.trim()) {
+    alert('请输入脚本代码')
+    return
+  }
+  try {
+    const result = await callService('localScriptService', 'save', {
+      id: currentLocalScriptId || null,
+      name,
+      urlPattern: urlPattern || '*',
+      code,
+    })
+    if (result && result.ok) {
+      currentLocalScriptId = result.id || currentLocalScriptId
+      // 添加日志
+      addScriptLog('info', name, '脚本已保存', 0)
+      // 刷新下拉框
+      await loadLocalScripts()
+      // 恢复选中
+      if (currentLocalScriptId) {
+        document.getElementById('localScriptSelect').value = currentLocalScriptId
+      }
+    }
+  } catch (e) {
+    addScriptLog('error', name, '保存失败: ' + e.message, 0)
+  }
+}
+document.getElementById('localScriptSaveBtn').addEventListener('click', saveLocalScript)
+
+// 删除脚本
+document.getElementById('localScriptDeleteBtn').addEventListener('click', async () => {
+  if (!currentLocalScriptId) return
+  const name = document.getElementById('localScriptName').value || '未命名'
+  if (!confirm('确定删除脚本 "' + name + '" 吗？')) return
+  try {
+    await callService('localScriptService', 'delete', currentLocalScriptId)
+    addScriptLog('info', name, '脚本已删除', 0)
+    currentLocalScriptId = null
+    await loadLocalScripts()
+    clearLocalEditor()
+  } catch (e) {
+    addScriptLog('error', name, '删除失败: ' + e.message, 0)
+  }
+})
+
+// 注入执行本地脚本
+document.getElementById('localScriptRunBtn').addEventListener('click', async () => {
+  const code = document.getElementById('localScriptCode').value.trim()
+  const name = document.getElementById('localScriptName').value || '未命名脚本'
+  if (!code) {
+    alert('请先输入或选择脚本代码')
+    return
+  }
+  // 先自动保存
+  if (currentLocalScriptId || document.getElementById('localScriptName').value.trim()) {
+    await saveLocalScript()
+  }
+  const startTime = Date.now()
+  try {
+    addScriptLog('info', name, '开始执行...', 0)
+    const res = await callService('pageService', 'executeScript', code)
+    const durationMs = Date.now() - startTime
+    if (res && res.ok) {
+      const output = res.result !== undefined && res.result !== null
+        ? (typeof res.result === 'object' ? JSON.stringify(res.result, null, 2).slice(0, 500) : String(res.result).slice(0, 500))
+        : '执行成功（无返回值）'
+      addScriptLog('success', name, output, durationMs)
+    } else {
+      addScriptLog('error', name, '执行失败: ' + (res?.error || '未知错误'), durationMs)
+    }
+  } catch (e) {
+    const durationMs = Date.now() - startTime
+    addScriptLog('error', name, '注入异常: ' + e.message, durationMs)
+  }
+})
+
+// 编辑器 Tab 键支持
+document.getElementById('localScriptCode').addEventListener('keydown', (e) => {
+  if (e.key === 'Tab') {
+    e.preventDefault()
+    const ta = e.target
+    const start = ta.selectionStart
+    const end = ta.selectionEnd
+    ta.value = ta.value.substring(0, start) + '  ' + ta.value.substring(end)
+    ta.selectionStart = ta.selectionEnd = start + 2
+  }
+  // Ctrl+S 保存
+  if (e.key === 's' && (e.ctrlKey || e.metaKey)) {
+    e.preventDefault()
+    saveLocalScript()
+  }
+})
+
+// ============ 执行日志 ============
+let scriptLogs = []
+const MAX_SCRIPT_LOGS = 200
+
+function addScriptLog(level, scriptName, detail, durationMs) {
+  const entry = {
+    id: Date.now() + '-' + Math.random().toString(36).slice(2, 6),
+    level,        // 'success' | 'error' | 'info'
+    scriptName,
+    detail,
+    durationMs,
+    timestamp: Date.now(),
+  }
+  scriptLogs.unshift(entry)  // 最新的在前
+  if (scriptLogs.length > MAX_SCRIPT_LOGS) scriptLogs.length = MAX_SCRIPT_LOGS
+  renderScriptLogs()
+  // 持久化
+  try {
+    localStorage.setItem('aiBrowser_scriptLogs', JSON.stringify(scriptLogs.slice(0, 100)))
+  } catch {}
+}
+
+function renderScriptLogs() {
+  const container = document.getElementById('scriptLogsList')
+  const countEl = document.getElementById('scriptLogsCount')
+  countEl.textContent = scriptLogs.length + ' 条日志'
+
+  if (scriptLogs.length === 0) {
+    container.innerHTML = '<div class="script-logs-empty">暂无执行日志</div>'
+    return
+  }
+
+  container.innerHTML = scriptLogs.map(entry => {
+    const time = new Date(entry.timestamp).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+    const statusText = entry.level === 'success' ? '成功' : entry.level === 'error' ? '失败' : '信息'
+    const duration = entry.durationMs > 0 ? entry.durationMs + 'ms' : ''
+    const detailText = escapeHtml(entry.detail || '')
+    return `
+      <div class="script-log-entry log-${entry.level}">
+        <div class="script-log-header">
+          <span class="script-log-name">${escapeHtml(entry.scriptName)}</span>
+          <span class="script-log-time">${time}</span>
+          <span class="script-log-status log-status-${entry.level}">${statusText}</span>
+        </div>
+        ${detailText ? `<div class="script-log-detail">${detailText}</div>` : ''}
+        ${duration ? `<div class="script-log-duration">耗时 ${duration}</div>` : ''}
+      </div>
+    `
+  }).join('')
+}
+
+// 加载持久化日志
+function loadPersistedScriptLogs() {
+  try {
+    const raw = localStorage.getItem('aiBrowser_scriptLogs')
+    if (raw) {
+      scriptLogs = JSON.parse(raw)
+    }
+  } catch {
+    scriptLogs = []
+  }
+}
+
+// 清空日志
+document.getElementById('scriptLogsClearBtn').addEventListener('click', () => {
+  scriptLogs = []
+  localStorage.removeItem('aiBrowser_scriptLogs')
+  renderScriptLogs()
+})
+
+// 加载执行日志面板
+function loadScriptLogs() {
+  renderScriptLogs()
+}
+
+// 监听 background 发来的脚本执行结果通知，自动追加到日志
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (msg.type === 'scriptExecutionLog') {
+    addScriptLog(msg.level || 'info', msg.scriptName || '未知脚本', msg.detail || '', msg.durationMs || 0)
+    sendResponse({ ok: true })
+  }
+})
+
+// 初始化：加载持久化的脚本日志
+loadPersistedScriptLogs()
+
 // ============ 加载历史记录 ============
 async function loadChatHistory() {
   try {

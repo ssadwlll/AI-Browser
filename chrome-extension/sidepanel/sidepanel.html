@@ -213,7 +213,47 @@
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 4v6h-6M1 20v-6h6"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>
           </button>
         </div>
-        <div class="scripts-list" id="scriptsList"></div>
+        <!-- 脚本标签栏 -->
+        <div class="scripts-tab-bar">
+          <button class="scripts-tab-btn active" data-stab="remote">远程脚本</button>
+          <button class="scripts-tab-btn" data-stab="local">本地编辑器</button>
+          <button class="scripts-tab-btn" data-stab="logs">执行日志</button>
+        </div>
+        <!-- 远程脚本列表 -->
+        <div class="scripts-tab-panel active" id="scriptsRemotePanel">
+          <div class="scripts-list" id="scriptsList"></div>
+        </div>
+        <!-- 本地脚本编辑器 -->
+        <div class="scripts-tab-panel" id="scriptsLocalPanel">
+          <div class="local-scripts-toolbar">
+            <select id="localScriptSelect" class="local-script-select">
+              <option value="">-- 选择本地脚本 --</option>
+            </select>
+            <button class="fp-btn fp-btn-primary" id="localScriptNewBtn" title="新建">+ 新建</button>
+            <button class="fp-btn fp-btn-danger" id="localScriptDeleteBtn" title="删除">删除</button>
+          </div>
+          <div class="local-script-name-row">
+            <input type="text" id="localScriptName" class="fp-input" placeholder="脚本名称">
+            <input type="text" id="localScriptPattern" class="fp-input" placeholder="URL 匹配 (如 *.xiaohongshu.com)" style="flex:1.2">
+          </div>
+          <div class="local-editor-wrap">
+            <textarea id="localScriptCode" class="local-script-editor" spellcheck="false" placeholder="// 在此编写 JavaScript 代码&#10;// 保存后可在工具箱中执行，或设置 URL 匹配自动注入&#10;&#10;console.log('Hello from AI Browser!');"></textarea>
+          </div>
+          <div class="local-scripts-actions">
+            <button class="btn btn-primary" id="localScriptSaveBtn">保存</button>
+            <button class="btn" id="localScriptRunBtn" style="background:var(--brand-light);color:var(--brand);border:1px solid rgba(104,65,234,0.2)">注入执行</button>
+          </div>
+        </div>
+        <!-- 执行日志 -->
+        <div class="scripts-tab-panel" id="scriptsLogsPanel">
+          <div class="script-logs-toolbar">
+            <span class="script-logs-count" id="scriptLogsCount">0 条日志</span>
+            <button class="fp-btn fp-btn-danger" id="scriptLogsClearBtn">清空</button>
+          </div>
+          <div class="script-logs-list" id="scriptLogsList">
+            <div class="script-logs-empty">暂无执行日志</div>
+          </div>
+        </div>
       </div>
 
       <!-- 画图视图（预留） -->

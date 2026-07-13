@@ -294,7 +294,15 @@ body{font-family:var(--font-sans);background:var(--bg-white);color:var(--text-pr
 .btn-primary:hover{background:var(--brand-hover)}
 .btn-block{width:100%}
 
-/* ============ 脚本 ============ */
+/* ============ 脚本管理标签页 ============ */
+.scripts-tab-bar{display:flex;gap:0;border-bottom:1px solid var(--border-primary);background:#fff;flex-shrink:0}
+.scripts-tab-btn{border:none;padding:9px 0;font-size:var(--fs-xs);cursor:pointer;background:none;color:var(--text-quaternary);flex:1;text-align:center;transition:all .15s;border-bottom:2px solid transparent;font-weight:500}
+.scripts-tab-btn:hover{color:var(--text-secondary);background:var(--fill-tsp-tertiary)}
+.scripts-tab-btn.active{color:var(--brand);border-bottom-color:var(--brand);font-weight:600}
+.scripts-tab-panel{display:none;flex:1;flex-direction:column;overflow:hidden;min-height:0}
+.scripts-tab-panel.active{display:flex}
+
+/* ============ 远程脚本列表 ============ */
 .scripts-list{flex:1;overflow-y:auto;padding:12px}
 .script-card{background:var(--bg-white);border:1px solid var(--border-primary);border-radius:var(--radius-lg);padding:12px;margin-bottom:8px;transition:box-shadow .2s}
 .script-card:hover{box-shadow:var(--box-shadow-s1)}
@@ -305,6 +313,39 @@ body{font-family:var(--font-sans);background:var(--bg-white);color:var(--text-pr
 .script-card-desc{font-size:var(--fs-xs);color:var(--text-quaternary);margin-top:4px}
 .script-card-meta{font-size:var(--fs-xxs);color:var(--text-quaternary);margin-top:6px;display:flex;gap:8px}
 .empty{text-align:center;padding:32px;color:var(--text-quaternary);font-size:var(--fs-body)}
+
+/* ============ 本地脚本编辑器 ============ */
+.local-scripts-toolbar{display:flex;gap:6px;padding:8px 12px;align-items:center;flex-shrink:0}
+.local-script-select{flex:1;padding:6px 8px;border:1px solid var(--border-primary);border-radius:6px;font-size:var(--fs-xs);outline:none;background:var(--bg-white);cursor:pointer}
+.local-script-select:focus{border-color:var(--brand)}
+.local-script-name-row{display:flex;gap:6px;padding:0 12px 8px;flex-shrink:0}
+.local-script-name-row .fp-input{flex:1;min-width:80px}
+.local-editor-wrap{flex:1;min-height:0;padding:0 12px;display:flex}
+.local-script-editor{flex:1;min-height:120px;padding:10px;border:1px solid var(--border-primary);border-radius:var(--radius);font-family:var(--font-mono);font-size:12px;line-height:1.6;resize:none;outline:none;background:#1e1e1e;color:#d4d4d4;tab-size:2;white-space:pre;overflow:auto;transition:border-color .15s}
+.local-script-editor:focus{border-color:var(--brand)}
+.local-script-editor::placeholder{color:#6a6a6a}
+.local-scripts-actions{display:flex;gap:8px;padding:8px 12px;flex-shrink:0}
+.local-scripts-actions .btn{flex:1;padding:8px 12px;font-size:var(--fs-xs)}
+
+/* ============ 执行日志 ============ */
+.script-logs-toolbar{display:flex;justify-content:space-between;align-items:center;padding:8px 12px;flex-shrink:0}
+.script-logs-count{font-size:var(--fs-xs);color:var(--text-quaternary)}
+.script-logs-list{flex:1;overflow-y:auto;padding:0 12px 12px}
+.script-logs-empty{text-align:center;padding:32px;color:var(--text-quaternary);font-size:var(--fs-body)}
+.script-log-entry{padding:8px 10px;margin-bottom:6px;border-radius:var(--radius);border:1px solid var(--border-primary);background:var(--bg-white);font-size:var(--fs-xs);animation:logIn .15s ease-in}
+@keyframes logIn{0%{opacity:0;transform:translateY(6px)}100%{opacity:1;transform:translateY(0)}}
+.script-log-entry.log-success{border-left:3px solid var(--success)}
+.script-log-entry.log-error{border-left:3px solid var(--danger)}
+.script-log-entry.log-info{border-left:3px solid var(--info)}
+.script-log-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:4px}
+.script-log-name{font-weight:600;color:var(--text-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:55%}
+.script-log-time{font-size:var(--fs-xxs);color:var(--text-quaternary);flex-shrink:0}
+.script-log-status{font-size:var(--fs-xxs);font-weight:600;flex-shrink:0;margin-left:8px}
+.script-log-status.log-status-success{color:var(--success)}
+.script-log-status.log-status-error{color:var(--danger)}
+.script-log-status.log-status-info{color:var(--info)}
+.script-log-detail{font-family:var(--font-mono);font-size:11px;color:var(--text-tertiary);background:var(--bg-gray);border-radius:4px;padding:4px 6px;margin-top:4px;max-height:80px;overflow:hidden;overflow-y:auto;word-break:break-all;white-space:pre-wrap}
+.script-log-duration{font-size:var(--fs-xxs);color:var(--text-quaternary);margin-top:2px}
 
 /* ============ 滚动条 ============ */
 ::-webkit-scrollbar{width:4px}
