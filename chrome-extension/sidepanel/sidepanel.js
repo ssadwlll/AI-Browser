@@ -1571,6 +1571,62 @@ document.getElementById('uploadBtn').addEventListener('click', () => {
   fileInput.click()
 })
 
+// 验证码自动识别
+document.getElementById('captchaBtn').addEventListener('click', async () => {
+  const btn = document.getElementById('captchaBtn')
+  const originalOpacity = btn.style.opacity
+  btn.style.opacity = '0.5'
+  btn.style.pointerEvents = 'none'
+
+  try {
+    // 检查当前模型是否支持视觉
+    if (!currentModelInfo || !currentModelInfo.supportsVision) {
+      showUploadToast('当前模型不支持图片识别，请切换到视觉模型（GPT-4o、Qwen-VL 等）')
+      return
+    }
+
+    // 获取当前活动标签页
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
+    if (!tab) {
+      showUploadToast('未找到活动标签页')
+      return
+    }
+
+    showUploadToast('正在识别验证码...')
+
+    // 调用 captchaService
+    const { error, data } = await callServiceWithTimeout({
+      type: MSG_TYPES.CALL_SERVICE,
+      service: 'captchaService',
+      method: 'solveCaptcha',
+      args: [tab.id, {
+        modelId: currentModelInfo.modelId,
+        supportsVision: currentModelInfo.supportsVision,
+      }],
+    }, 60000)
+
+    if (error) {
+      showUploadToast('验证码识别失败: ' + error)
+      return
+    }
+
+    if (data && data.ok) {
+      if (data.solved) {
+        showUploadToast('✅ ' + data.message)
+      } else {
+        showUploadToast(data.message || '未检测到验证码或验证未通过')
+      }
+    } else {
+      showUploadToast(data?.message || '验证码识别失败')
+    }
+  } catch (e) {
+    showUploadToast('验证码识别异常: ' + e.message)
+  } finally {
+    btn.style.opacity = originalOpacity
+    btn.style.pointerEvents = ''
+  }
+})
+
 // Feature 21: 导出对话历史（支持 JSON/CSV/Markdown/HTML/TXT）
 document.getElementById('exportBtn').addEventListener('click', (e) => {
   e.stopPropagation()

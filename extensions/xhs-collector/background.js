@@ -1266,7 +1266,7 @@ function sendToContent(message) {
     }
     // 超时保护：避免 content script 无响应导致采集永久卡住（服务中断）
     var timeout = 120000; // 2 分钟超时（详情采集可能较久）
-    if (message.type === 'COLLECT') timeout = 1800000; // COLLECT 可能 10+ 分钟
+    if (message.type === 'COLLECT') timeout = 600000; // COLLECT 最多 10 分钟
     if (message.type === 'STOP' || message.type === 'PING' || message.type === 'CHECK_STATUS') timeout = 5000;
     if (message.type === 'SEARCH' || message.type === 'SCROLL' || message.type === 'SCROLL_TO_TOP' || message.type === 'BIG_MOUSE_MOVE' || message.type === 'DEEP_INTERACTION') timeout = 120000;
 
@@ -1443,6 +1443,8 @@ async function startCollection(keywords, options) {
           deepInteractionInterval: state.deepInteractionInterval,
         });
 
+        log('[采集] COLLECT 响应已收到: ' + (response ? (response.ok ? 'ok' : response.error) : 'null'));
+
         // 停止后立即退出，不处理结果
         if (!state.collecting) {
           log('采集已停止，退出关键词循环');
@@ -1519,6 +1521,19 @@ async function startCollection(keywords, options) {
           }
           break; // 跳出重试循环，继续下一个关键词
         }
+        // 超时：尝试恢复后继续下一个关键词（避免卡死）
+        if (e.message && e.message.indexOf('超时') !== -1) {
+          log('采集超时: ' + e.message + '，尝试恢复后继续下一个关键词...');
+          await new Promise(function (r) { setTimeout(r, 3000); });
+          try {
+            // 先发送 STOP 停止 content.js 可能仍在运行的采集
+            try { await sendToContent({ type: 'STOP' }); } catch (stopErr) {}
+            await ensureXhsTab();
+          } catch (e2) {
+            log('超时恢复失败: ' + e2.message);
+          }
+          break; // 跳出重试循环，继续下一个关键词
+        }
         log('采集异常: ' + e.message);
         break;
       }
@@ -1536,7 +1551,13 @@ async function startCollection(keywords, options) {
         // navigateHomepageAndClick 会：导航到首页 → 点击笔记 → 关闭详情 → 额外点击 → 侧边栏菜单浏览
         // 不传 searchUrl（下一个关键词通过搜索框输入，不需要导航到搜索页）
         try {
-          var navResult = await navigateHomepageAndClick(null);
+          // 超时保护：防止 navigateHomepageAndClick 卡死
+          var navResult = await Promise.race([
+            navigateHomepageAndClick(null),
+            new Promise(function (_, reject) {
+              setTimeout(function () { reject(new Error('navigateHomepageAndClick 超时(60s)')); }, 60000);
+            })
+          ]);
           log('[行为] 关键词间行为模拟完成: ' + navResult);
           // 重新注入 content script（navigateHomepageAndClick 内部多次导航，需确保脚本就绪）
           await ensureXhsTab();
@@ -2175,10 +2196,19 @@ chrome.runtime.onMessage.addListener(function (message, sender, sendResponse) {
           // 在后台新 tab 中打开笔记
           tab = await chrome.tabs.create({ url: noteUrl, active: false });
 
-          // 轮询等待 content script 就绪且页面完全加载（最多 20 秒）
+          // 轮询等待 content script 就绪且页面完全加载（最多 30 秒）
         var ready = false;
-        for (var attempt = 0; attempt < 40; attempt++) {
+        for (var attempt = 0; attempt < 60; attempt++) {
           await new Promise(function (r) { setTimeout(r, 500); });
+          // 10 秒后尝试主动注入 content script（MV3 可能不会自动注入）
+          if (attempt === 20) {
+            try {
+              await injectContentScripts(tab.id);
+              log('[深度交互] 主动注入 content script');
+            } catch (e) {
+              log('[深度交互] 注入 content script 失败: ' + e.message);
+            }
+          }
           try {
             var pingResp = await new Promise(function (resolve, reject) {
               chrome.tabs.sendMessage(tab.id, { type: 'PING' }, function (response) {
@@ -2295,6 +2325,19 @@ chrome.runtime.onMessage.addListener(function (message, sender, sendResponse) {
       }
 
       log('[深度交互] 完成，共交互 ' + interacted + ' 条');
+      // 确保深度交互后 state.xhsTabId 仍指向主 tab（防止 findXhsTab 返回错误 tab）
+      try {
+        var mainTab = await chrome.tabs.get(state.xhsTabId);
+        if (!mainTab || mainTab.status === 'unloaded') {
+          log('[深度交互] 主 tab 异常，重新查找...');
+          var found = await findXhsTab();
+          if (found) state.xhsTabId = found.id;
+        }
+      } catch (e) {
+        log('[深度交互] 主 tab 检查失败: ' + e.message + '，重新查找...');
+        var found2 = await findXhsTab();
+        if (found2) state.xhsTabId = found2.id;
+      }
       sendResponse({ ok: true, interacted: interacted });
     })();
 

@@ -18,6 +18,7 @@ import { HumanInterventionService } from './services/human-intervention-service.
 import { TaskArchiveService } from './services/task-archive-service.js'
 import { OutputService } from './services/output-service.js'
 import { ScratchpadService } from './services/scratchpad-service.js'
+import { CaptchaService } from './services/captcha-service.js'
 
 // ============ 常量 ============
 const MSG_TYPES = {
@@ -51,6 +52,7 @@ const agentService = new AgentService(configService, toolService, pageService, s
 const taskTemplateService = new TaskTemplateService()
 const scratchpadService = new ScratchpadService()  // Feature: 中间推理持久化
 const outputService = new OutputService()          // Feature: 任务结果输出
+const captchaService = new CaptchaService(aiService, configService)  // 验证码自动识别
 const taskArchiveService = new TaskArchiveService()  // Feature: 任务追溯复盘（内部会创建自己的实例，但这里单独注册供 callService）
 const humanInterventionService = new HumanInterventionService((request) => {
   // 人工介入请求回调：转发到 sidepanel
@@ -92,6 +94,7 @@ const services = {
   scratchpadService,   // Feature: 中间推理持久化
   outputService,       // Feature: 任务结果输出
   taskArchiveService,  // Feature: 任务追溯复盘
+  captchaService,      // 验证码自动识别
   dbService: DBService,
 }
 
