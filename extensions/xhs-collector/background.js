@@ -1306,6 +1306,26 @@ function sendToContent(message) {
 
     chrome.tabs.sendMessage(state.xhsTabId, message, function (response) {
       if (settled) return; // 已通过备用通道或超时处理
+
+      // MV3 长操作后消息通道可能已被 Chrome 静默关闭
+      // 此时 lastError 会被设置，但 COLLECT_DONE 备用消息可能仍在路上
+      // 不立即移除 doneHandler，等待 5 秒让 COLLECT_DONE 有机会到达
+      if (chrome.runtime.lastError && doneHandler && message.type === 'COLLECT') {
+        log('[采集] 消息通道可能已关闭: ' + chrome.runtime.lastError.message + '，等待 COLLECT_DONE...');
+        setTimeout(function () {
+          if (!settled) {
+            settled = true;
+            clearTimeout(timer);
+            if (doneHandler) {
+              chrome.runtime.onMessage.removeListener(doneHandler);
+              doneHandler = null;
+            }
+            reject(new Error(chrome.runtime.lastError.message));
+          }
+        }, 5000);
+        return;
+      }
+
       settled = true;
       clearTimeout(timer);
       if (doneHandler) {
@@ -1404,7 +1424,8 @@ async function startCollection(keywords, options) {
 
         // 2. 滚动加载（通过 executeScript，自动查找滚动容器）
         log('[行为] 滚动加载笔记...');
-        await scrollViaScripting(state.xhsTabId, 3);
+        var scrollTimes = 5 + Math.floor(Math.random() * 4); // 5-8次随机滚动
+        await scrollViaScripting(state.xhsTabId, scrollTimes);
 
         // 3. 回顶部（通过 executeScript）
         log('[行为] 回到顶部...');

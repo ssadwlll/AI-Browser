@@ -1757,19 +1757,19 @@
     if (message.type === 'COLLECT') {
       handleCollectRequest(message)
         .then(function (result) {
-          sendResponse({ ok: true, data: result });
-          // 备用通道：sendResponse 在 MV3 中可能因 SW 短暂终止而静默失败
-          // （消息通道断裂但 chrome.runtime.sendMessage 仍能工作）
-          // 用独立消息确保 background.js 能收到结果
+          // 先发 COLLECT_DONE 备用消息（更可靠，不依赖消息通道）
+          // MV3 长操作后 sendResponse 的消息通道可能已被 Chrome 静默关闭
           try {
             chrome.runtime.sendMessage({ type: 'COLLECT_DONE', ok: true, data: result }).catch(function () {});
           } catch (e) {}
+          // 再调 sendResponse（通道可能已失效，调用可能静默失败）
+          try { sendResponse({ ok: true, data: result }); } catch (e) {}
         })
         .catch(function (err) {
-          sendResponse({ ok: false, error: err.message });
           try {
             chrome.runtime.sendMessage({ type: 'COLLECT_DONE', ok: false, error: err.message }).catch(function () {});
           } catch (e) {}
+          try { sendResponse({ ok: false, error: err.message }); } catch (e) {}
         });
       return true; // 保持消息通道开放（异步响应）
     }
