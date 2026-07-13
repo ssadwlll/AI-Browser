@@ -128,6 +128,7 @@ export class PageService {
     const injectData = await this.scriptService.fetchInjectData(scriptId)
     if (!injectData?.code) return { ok: false, error: '无法获取脚本代码' }
 
+    const scriptName = injectData.name || '脚本#' + scriptId
     try {
       const results = await chrome.scripting.executeScript({
         target: { tabId: tab.id },
@@ -147,16 +148,34 @@ export class PageService {
       
       if (result?.__error) {
         this.reportScriptStats(scriptId, false, result.__error, durationMs).catch(() => {})
+        this._notifyLog('error', scriptName, result.__error, durationMs)
         return { ok: false, error: result.__error }
       }
       
       this.reportScriptStats(scriptId, true, null, durationMs).catch(() => {})
+      this._notifyLog('success', scriptName, '执行成功', durationMs)
       return { ok: true }
     } catch (e) {
       const durationMs = Date.now() - startTime
       this.reportScriptStats(scriptId, false, e.message, durationMs).catch(() => {})
+      this._notifyLog('error', scriptName, e.message, durationMs)
       console.warn('[PageService] injectToolboxScript error:', e.message)
       return { ok: false, error: e.message }
     }
+  }
+
+  /**
+   * 通知 sidepanel 脚本执行日志
+   */
+  _notifyLog(level, scriptName, detail, durationMs) {
+    try {
+      chrome.runtime.sendMessage({
+        type: 'scriptExecutionLog',
+        level,
+        scriptName,
+        detail: String(detail || '').slice(0, 500),
+        durationMs,
+      }).catch(() => {})
+    } catch {}
   }
 }

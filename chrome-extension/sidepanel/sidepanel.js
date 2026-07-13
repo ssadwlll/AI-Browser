@@ -27,6 +27,61 @@ let currentSelectedModelId = null  // 当前选中模型 ID（与配置同步）
 let attachedImage = null        // 已附加的图片 base64 data URL
 let attachedPdf = null          // 已附加的 PDF { name, text, chars, pages }
 
+// ============ 执行日志（全局，多处复用） ============
+let scriptLogs = []
+const MAX_SCRIPT_LOGS = 200
+
+function addScriptLog(level, scriptName, detail, durationMs) {
+  const entry = {
+    id: Date.now() + '-' + Math.random().toString(36).slice(2, 6),
+    level,        // 'success' | 'error' | 'info'
+    scriptName,
+    detail,
+    durationMs,
+    timestamp: Date.now(),
+  }
+  scriptLogs.unshift(entry)
+  if (scriptLogs.length > MAX_SCRIPT_LOGS) scriptLogs.length = MAX_SCRIPT_LOGS
+  renderScriptLogs()
+  try {
+    localStorage.setItem('aiBrowser_scriptLogs', JSON.stringify(scriptLogs.slice(0, 100)))
+  } catch {}
+}
+
+function renderScriptLogs() {
+  const container = document.getElementById('scriptLogsList')
+  const countEl = document.getElementById('scriptLogsCount')
+  if (!container || !countEl) return  // DOM 未就绪时跳过
+  countEl.textContent = scriptLogs.length + ' 条日志'
+  if (scriptLogs.length === 0) {
+    container.innerHTML = '<div class="script-logs-empty">暂无执行日志</div>'
+    return
+  }
+  container.innerHTML = scriptLogs.map(entry => {
+    const time = new Date(entry.timestamp).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+    const statusText = entry.level === 'success' ? '成功' : entry.level === 'error' ? '失败' : '信息'
+    const duration = entry.durationMs > 0 ? entry.durationMs + 'ms' : ''
+    const detailText = escapeHtml(entry.detail || '')
+    return `
+      <div class="script-log-entry log-${entry.level}">
+        <div class="script-log-header">
+          <span class="script-log-name">${escapeHtml(entry.scriptName)}</span>
+          <span class="script-log-time">${time}</span>
+          <span class="script-log-status log-status-${entry.level}">${statusText}</span>
+        </div>
+        ${detailText ? `<div class="script-log-detail">${detailText}</div>` : ''}
+        ${duration ? `<div class="script-log-duration">耗时 ${duration}</div>` : ''}
+      </div>
+    `
+  }).join('')
+}
+
+// 加载持久化日志
+try {
+  const raw = localStorage.getItem('aiBrowser_scriptLogs')
+  if (raw) scriptLogs = JSON.parse(raw)
+} catch {}
+
 // 附件预览：注册已发送气泡内的 PDF 数据（供点击预览时取回文本）
 const pdfPreviewRegistry = new Map()
 let pdfPreviewIdCounter = 0
@@ -191,38 +246,68 @@ document.getElementById('toolboxCloseBtn').addEventListener('click', (e) => {
 
 async function loadToolboxScripts() {
   const scripts = await callService('scriptService', 'getScripts')
+  const localScripts = await callService('localScriptService', 'list') || []
   const container = document.getElementById('toolboxScripts')
 
-  if (!scripts || scripts.length === 0) {
-    container.innerHTML = '<div class="toolbox-empty">暂无脚本<br>请先在脚本管理中同步</div>'
-    return
-  }
+  const allScripts = [
+    ...(scripts || []).filter(s => s.enabled).map(s => ({ ...s, _source: 'remote' })),
+    ...localScripts.filter(s => s.enabled).map(s => ({ ...s, _source: 'local' })),
+  ]
 
-  const enabledScripts = scripts.filter(s => s.enabled)
-  if (enabledScripts.length === 0) {
-    container.innerHTML = '<div class="toolbox-empty">暂无启用的脚本</div>'
+  if (allScripts.length === 0) {
+    container.innerHTML = '<div class="toolbox-empty">暂无脚本<br>请先在脚本管理中同步或创建</div>'
     return
   }
 
   const icons = ['📊', '⚡', '🔧', '🎯', '💡', '📌', '🔍', '📝']
-  container.innerHTML = enabledScripts.map((s, i) => `
-    <div class="toolbox-script" data-id="${s.id}" data-name="${escapeHtml(s.name)}">
+  container.innerHTML = allScripts.map((s, i) => {
+    const sourceTag = s._source === 'local' ? '<span style="font-size:10px;color:#6841ea;margin-left:4px">本地</span>' : ''
+    return `
+    <div class="toolbox-script" data-id="${s.id}" data-name="${escapeHtml(s.name)}" data-source="${s._source}">
       <div class="toolbox-script-icon">${icons[i % icons.length]}</div>
       <div class="toolbox-script-info">
-        <div class="toolbox-script-name">${escapeHtml(s.name)}</div>
-        <div class="toolbox-script-desc">${escapeHtml(s.description || s.category || '脚本工具')}</div>
+        <div class="toolbox-script-name">${escapeHtml(s.name)}${sourceTag}</div>
+        <div class="toolbox-script-desc">${escapeHtml(s.description || s.category || (s._source === 'local' ? '本地脚本' : '脚本工具'))}</div>
       </div>
     </div>
-  `).join('')
+  `}).join('')
 
-  // 点击直接注入
+  // 点击注入
   container.querySelectorAll('.toolbox-script').forEach(row => {
     row.addEventListener('click', () => {
-      const scriptId = parseInt(row.dataset.id)
+      const scriptId = row.dataset.id
+      const source = row.dataset.source
       closeToolbox()
-      callService('pageService', 'injectToolboxScript', scriptId).catch(e => {
-        console.warn('[工具箱] 注入异常:', e.message)
-      })
+      if (source === 'local') {
+        // 本地脚本：直接用代码注入
+        callService('localScriptService', 'get', scriptId).then(result => {
+          const script = result?.script || result
+          if (script?.code) {
+            const startTime = Date.now()
+            const name = script.name || '本地脚本'
+            callService('pageService', 'executeScript', script.code).then(res => {
+              const durationMs = Date.now() - startTime
+              if (res && res.ok) {
+                const output = res.result !== undefined && res.result !== null
+                  ? (typeof res.result === 'object' ? JSON.stringify(res.result, null, 2).slice(0, 500) : String(res.result).slice(0, 500))
+                  : '执行成功（无返回值）'
+                addScriptLog('success', name, output, durationMs)
+              } else {
+                addScriptLog('error', name, '执行失败: ' + (res?.error || '未知错误'), durationMs)
+              }
+            }).catch(e => {
+              addScriptLog('error', name, '注入异常: ' + e.message, Date.now() - startTime)
+            })
+          }
+        }).catch(e => {
+          console.warn('[工具箱] 本地脚本注入异常:', e.message)
+        })
+      } else {
+        // 远程脚本
+        callService('pageService', 'injectToolboxScript', parseInt(scriptId)).catch(e => {
+          console.warn('[工具箱] 注入异常:', e.message)
+        })
+      }
     })
   })
 }
@@ -258,19 +343,24 @@ async function executeJSInjection() {
   resultEl.textContent = '正在注入...'
   resultEl.className = 'js-injector-result show'
 
+  const startTime = Date.now()
   try {
     const res = await callService('pageService', 'executeScript', code)
+    const durationMs = Date.now() - startTime
     if (res && res.ok) {
       const output = res.result !== undefined ? JSON.stringify(res.result, null, 2) : '执行成功（无返回值）'
       resultEl.textContent = '✅ ' + output
       resultEl.className = 'js-injector-result show'
+      addScriptLog('success', 'JS注入', output.slice(0, 500), durationMs)
     } else {
       resultEl.textContent = '❌ ' + (res?.error || '执行失败')
       resultEl.className = 'js-injector-result error show'
+      addScriptLog('error', 'JS注入', res?.error || '执行失败', durationMs)
     }
   } catch (e) {
     resultEl.textContent = '❌ ' + e.message
     resultEl.className = 'js-injector-result error show'
+    addScriptLog('error', 'JS注入', e.message, Date.now() - startTime)
   }
 }
 
@@ -2190,70 +2280,9 @@ document.getElementById('localScriptCode').addEventListener('keydown', (e) => {
   }
 })
 
-// ============ 执行日志 ============
-let scriptLogs = []
-const MAX_SCRIPT_LOGS = 200
+// ============ 执行日志 UI 事件绑定 ============
 
-function addScriptLog(level, scriptName, detail, durationMs) {
-  const entry = {
-    id: Date.now() + '-' + Math.random().toString(36).slice(2, 6),
-    level,        // 'success' | 'error' | 'info'
-    scriptName,
-    detail,
-    durationMs,
-    timestamp: Date.now(),
-  }
-  scriptLogs.unshift(entry)  // 最新的在前
-  if (scriptLogs.length > MAX_SCRIPT_LOGS) scriptLogs.length = MAX_SCRIPT_LOGS
-  renderScriptLogs()
-  // 持久化
-  try {
-    localStorage.setItem('aiBrowser_scriptLogs', JSON.stringify(scriptLogs.slice(0, 100)))
-  } catch {}
-}
-
-function renderScriptLogs() {
-  const container = document.getElementById('scriptLogsList')
-  const countEl = document.getElementById('scriptLogsCount')
-  countEl.textContent = scriptLogs.length + ' 条日志'
-
-  if (scriptLogs.length === 0) {
-    container.innerHTML = '<div class="script-logs-empty">暂无执行日志</div>'
-    return
-  }
-
-  container.innerHTML = scriptLogs.map(entry => {
-    const time = new Date(entry.timestamp).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
-    const statusText = entry.level === 'success' ? '成功' : entry.level === 'error' ? '失败' : '信息'
-    const duration = entry.durationMs > 0 ? entry.durationMs + 'ms' : ''
-    const detailText = escapeHtml(entry.detail || '')
-    return `
-      <div class="script-log-entry log-${entry.level}">
-        <div class="script-log-header">
-          <span class="script-log-name">${escapeHtml(entry.scriptName)}</span>
-          <span class="script-log-time">${time}</span>
-          <span class="script-log-status log-status-${entry.level}">${statusText}</span>
-        </div>
-        ${detailText ? `<div class="script-log-detail">${detailText}</div>` : ''}
-        ${duration ? `<div class="script-log-duration">耗时 ${duration}</div>` : ''}
-      </div>
-    `
-  }).join('')
-}
-
-// 加载持久化日志
-function loadPersistedScriptLogs() {
-  try {
-    const raw = localStorage.getItem('aiBrowser_scriptLogs')
-    if (raw) {
-      scriptLogs = JSON.parse(raw)
-    }
-  } catch {
-    scriptLogs = []
-  }
-}
-
-// 清空日志
+// 清空日志按钮
 document.getElementById('scriptLogsClearBtn').addEventListener('click', () => {
   scriptLogs = []
   localStorage.removeItem('aiBrowser_scriptLogs')
@@ -2272,9 +2301,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     sendResponse({ ok: true })
   }
 })
-
-// 初始化：加载持久化的脚本日志
-loadPersistedScriptLogs()
 
 // ============ 加载历史记录 ============
 async function loadChatHistory() {

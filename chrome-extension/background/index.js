@@ -97,6 +97,7 @@ const services = {
   outputService,       // Feature: 任务结果输出
   taskArchiveService,  // Feature: 任务追溯复盘
   captchaService,      // 验证码自动识别
+  localScriptService,  // 本地脚本管理
   dbService: DBService,
 }
 
@@ -396,4 +397,20 @@ scratchpadService.init().then(async () => {
     // 通知用户可以通过对话记录面板查看之前的任务进度
     // 注意：当前架构不支持自动恢复任务（messages[]未保存），用户需要重新发起任务
   }
-}).catch(e => console.warn('[AI Browser] ScratchpadService
+}).catch(e => console.warn('[AI Browser] ScratchpadService 检测失败:', e.message))
+
+// ===== 标签页更新时自动注入匹配的脚本 =====
+chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
+  // 仅在页面完成加载时注入
+  if (changeInfo.status !== 'complete' || !tab.url) return
+  // 注入远程脚本
+  scriptService.injectScriptsForTab(tabId, tab.url).catch(e => {
+    console.warn('[Background] 远程脚本自动注入失败:', e.message)
+  })
+  // 注入本地脚本
+  localScriptService.injectMatchingScripts(tabId, tab.url).catch(e => {
+    console.warn('[Background] 本地脚本自动注入失败:', e.message)
+  })
+})
+
+console.log('[AI Browser] Background Service Worker started')

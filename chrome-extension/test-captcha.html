@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>验证码识别测试页</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f5f5f5; display: flex; flex-direction: column; align-items: center; padding: 40px 20px; min-height: 100vh; }
+h1 { font-size: 24px; color: #333; margin-bottom: 8px; }
+.subtitle { color: #999; font-size: 14px; margin-bottom: 30px; }
+.scenario-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; width: 100%; max-width: 900px; margin-bottom: 30px; }
+.card { background: #fff; border-radius: 12px; padding: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); cursor: pointer; transition: all .2s; border: 2px solid transparent; }
+.card:hover { box-shadow: 0 4px 16px rgba(0,0,0,0.12); transform: translateY(-2px); }
+.card.active { border-color: #6841ea; }
+.card-title { font-size: 16px; font-weight: 600; color: #333; margin-bottom: 6px; }
+.card-desc { font-size: 13px; color: #999; }
+.card-dom { font-size: 11px; color: #6841ea; font-family: monospace; margin-top: 8px; background: #f0edff; padding: 4px 8px; border-radius: 4px; }
+
+/* 模拟遮罩层 */
+.captcha-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); display: none; justify-content: center; align-items: center; z-index: 1000; }
+.captcha-overlay.show { display: flex; }
+
+/* ============ 小红书风格验证码 (#captcha-div) ============ */
+#captcha-div { background: #fff; border-radius: 12px; padding: 24px; width: 340px; text-align: center; box-shadow: 0 8px 32px rgba(0,0,0,0.2); }
+#captcha-div .tc-3 { font-size: 16px; font-weight: 600; color: #333; margin-bottom: 8px; }
+#captcha-div .lh-20.size-14 { font-size: 14px; color: #666; line-height: 20px; margin-bottom: 16px; }
+#captcha-div .img-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 16px; }
+#captcha-div .img-container { border-radius: 8px; overflow: hidden; cursor: pointer; aspect-ratio: 1; border: 2px solid transparent; transition: border-color .15s; position: relative; }
+#captcha-div .img-container:hover { border-color: #6841ea; }
+#captcha-div .img-container.selected { border-color: #6841ea; }
+#captcha-div .img-container.selected::after { content: '✓'; position: absolute; top: 4px; right: 4px; background: #6841ea; color: #fff; width: 20px; height: 20px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 12px; }
+#captcha-div .img-container img { width: 100%; height: 100%; object-fit: cover; display: block; }
+#captcha-div .btn { width: 100%; padding: 10px; border: none; border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer; transition: all .2s; }
+#captcha-div .btn-primary { background: #6841ea; color: #fff; }
+#captcha-div .btn-primary:hover { background: #522bd6; }
+#captcha-div .btn-disabled { background: #e0e0e0; color: #999; cursor: not-allowed; }
+
+/* ============ fe-captcha-app 风格 ============ */
+.fe-captcha-app { background: #fff; border-radius: 12px; padding: 24px; width: 340px; text-align: center; box-shadow: 0 8px 32px rgba(0,0,0,0.2); }
+.fe-captcha-app .font-600.tc-3 { font-size: 16px; font-weight: 600; color: #333; margin-bottom: 8px; }
+.fe-captcha-app .lh-20.size-14 { font-size: 14px; color: #666; line-height: 20px; margin-bottom: 16px; }
+.fe-captcha-app .img-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-bottom: 16px; }
+.fe-captcha-app .img-container { border-radius: 6px; overflow: hidden; cursor: pointer; aspect-ratio: 1; border: 2px solid transparent; transition: border-color .15s; position: relative; }
+.fe-captcha-app .img-container:hover { border-color: #ff2442; }
+.fe-captcha-app .img-container.selected { border-color: #ff2442; }
+.fe-captcha-app .img-container.selected::after { content: '✓'; position: absolute; top: 2px; right: 2px; background: #ff2442; color: #fff; width: 18px; height: 18px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 10px; }
+.fe-captcha-app .img-container img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.fe-captcha-app .btn { width: 100%; padding: 10px; border: none; border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer; background: #ff2442; color: #fff; }
+.fe-captcha-app .btn:hover { background: #e0203c; }
+
+/* 成功提示 */
+.success-banner { display: none; position: fixed; top: 20px; left: 50%; transform: translateX(-50%); background: #00aa5b; color: #fff; padding: 12px 24px; border-radius: 8px; font-size: 16px; font-weight: 600; z-index: 2000; animation: slideDown .3s ease-out; }
+.success-banner.show { display: block; }
+@keyframes slideDown { 0% { opacity: 0; transform: translateX(-50%) translateY(-20px); } 100% { opacity: 1; transform: translateX(-50%) translateY(0); } }
+
+/* 日志面板 */
+.log-panel { width: 100%; max-width: 900px; background: #fff; border-radius: 12px; padding: 16px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); margin-top: 20px; }
+.log-panel h3 { font-size: 14px; color: #333; margin-bottom: 10px; }
+.log-entries { max-height: 200px; overflow-y: auto; font-family: monospace; font-size: 12px; }
+.log-entry { padding: 4px 8px; border-bottom: 1px solid #f0f0f0; }
+.log-entry.log-info { color: #3bbfff; }
+.log-entry.log-success { color: #00aa5b; }
+.log-entry.log-error { color: #ea3639; }
+</style>
+</head>
+<body>
+
+<h1>AI Browser 验证码识别测试</h1>
+<p class="subtitle">模拟小红书等网站的点选验证码，用于测试 CaptchaService 的检测、截图、AI识别、模拟点击流程</p>
+
+<div class="scenario-cards">
+  <div class="card active" data-scenario="xhs-3x3" onclick="selectScenario(this)">
+    <div class="card-title">小红书 3x3 验证码</div>
+    <div class="card-desc">9宫格图片点选，选择2张目标图片</div>
+    <div class="card-dom">容器: #captcha-div | 选择器: .tc-3, .img-container, .btn</div>
+  </div>
+  <div class="card" data-scenario="xhs-4x4" onclick="selectScenario(this)">
+    <div class="card-title">小红书 4x4 验证码</div>
+    <div class="card-desc">16宫格图片点选，选择3张目标图片</div>
+    <div class="card-dom">容器: .fe-captcha-app | 选择器: .font-600.tc-3, .img-container, .btn</div>
+  </div>
+</div>
+
+<button onclick="showCaptcha()" style="background:#6841ea;color:#fff;border:none;padding:12px 32px;border-radius:8px;font-size:15px;font-weight:600;cursor:pointer;transition:all .2s">弹出验证码</button>
+
+<!-- 成功提示 -->
+<div class="success-banner" id="successBanner">验证通过！</div>
+
+<!-- 验证码遮罩层 -->
+<div class="captcha-overlay" id="captchaOverlay">
+  <!-- 小红书 3x3 验证码 -->
+  <div id="captcha-div" style="display:none">
+    <div class="tc-3" id="captchaPrompt3x3"></div>
+    <div class="lh-20 size-14" id="captchaDesc3x3"></div>
+    <div class="img-grid" id="captchaGrid3x3"></div>
+    <button class="btn btn-primary" id="verifyBtn3x3">验证</button>
+  </div>
+  <!-- fe-captcha-app 4x4 验证码 -->
+  <div class="fe-captcha-app" id="captcha4x4" style="display:none">
+    <div class="font-600 tc-3" id="captchaPrompt4x4"></div>
+    <div class="lh-20 size-14" id="captchaDesc4x4"></div>
+    <div class="img-grid" id="captchaGrid4x4"></div>
+    <button class="btn" id="verifyBtn4x4">验证</button>
+  </div>
+</div>
+
+<!-- 日志面板 -->
+<div class="log-panel">
+  <h3>测试日志</h3>
+  <div class="log-entries" id="logEntries">
+    <div class="log-entry log-info">等待弹出验证码...</div>
+  </div>
+</div>
+
+<script>
+let currentScenario = 'xhs-3x3'
+let selectedIndices = []
+let correctIndices = []
+
+function log(level, msg) {
+  const el = document.getElementById('logEntries')
+  const entry = document.createElement('div')
+  entry.className = 'log-entry log-' + level
+  const time = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+  entry.textContent = `[${time}] ${msg}`
+  el.appendChild(entry)
+  el.scrollTop = el.scrollHeight
+}
+
+function selectScenario(card) {
+  document.querySelectorAll('.card').forEach(c => c.classList.remove('active'))
+  card.classList.add('active')
+  currentScenario = card.dataset.scenario
+  log('info', '切换场景: ' + currentScenario)
+}
+
+// 生成验证码图片（使用 picsum 随机图片）
+function generateCaptchaImages(count) {
+  const images = []
+  const seedBase = Math.floor(Math.random() * 10000)
+  for (let i = 0; i < count; i++) {
+    images.push(`https://picsum.photos/seed/${seedBase + i}/200/200`)
+  }
+  return images
+}
+
+// 3x3 验证码主题列表
+const themes3x3 = [
+  { prompt: '请选出包含【交通信号灯】的图片', desc: '请选出2张包含交通信号灯的图片', count: 2 },
+  { prompt: '请选出包含【自行车】的图片', desc: '请选出2张包含自行车的图片', count: 2 },
+  { prompt: '请选出包含【桥梁】的图片', desc: '请选出2张包含桥梁的图片', count: 2 },
+  { prompt: '请选出包含【山】的图片', desc: '请选出2张包含山的图片', count: 2 },
+  { prompt: '请选出包含【河流】的图片', desc: '请选出2张包含河流的图片', count: 2 },
+]
+
+// 4x4 验证码主题列表
+const themes4x4 = [
+  { prompt: '请选出包含【红绿灯】的图片', desc: '请选出3张包含红绿灯的图片', count: 3 },
+  { prompt: '请选出包含【大巴车】的图片', desc: '请选出3张包含大巴车的图片', count: 3 },
+  { prompt: '请选出包含【斑马线】的图片', desc: '请选出3张包含斑马线的图片', count: 3 },
+]
+
+function showCaptcha() {
+  selectedIndices = []
+  correctIndices = []
+
+  if (currentScenario === 'xhs-3x3') {
+    show3x3Captcha()
+  } else {
+    show4x4Captcha()
+  }
+
+  document.getElementById('captchaOverlay').classList.add('show')
+  log('info', '验证码已弹出，场景: ' + currentScenario)
+}
+
+function show3x3Captcha() {
+  // 隐藏其他验证码
+  document.getElementById('captcha4x4').style.display = 'none'
+  const div = document.getElementById('captcha-div')
+  div.style.display = ''
+
+  const theme = themes3x3[Math.floor(Math.random() * themes3x3.length)]
+  document.getElementById('captchaPrompt3x3').textContent = theme.prompt
+  document.getElementById('captchaDesc3x3').textContent = theme.desc
+
+  // 随机选择正确答案
+  correctIndices = []
+  while (correctIndices.length < theme.count) {
+    const idx = Math.floor(Math.random() * 9)
+    if (!correctIndices.includes(idx)) correctIndices.push(idx)
+  }
+
+  const grid = document.getElementById('captchaGrid3x3')
+  const images = generateCaptchaImages(9)
+  grid.innerHTML = images.map((src, i) => `
+    <div class="img-container" data-index="${i}" onclick="toggleSelect(this, ${i})">
+      <img src="${src}" alt="图片${i+1}" loading="lazy">
+    </div>
+  `).join('')
+
+  // 验证按钮
+  const btn = document.getElementById('verifyBtn3x3')
+  btn.className = 'btn btn-primary'
+  btn.textContent = '验证'
+  btn.onclick = () => verify3x3()
+
+  log('info', `3x3验证码: 主题="${theme.prompt}", 正确答案=[${correctIndices.map(i => i+1).join(',')}]`)
+}
+
+function show4x4Captcha() {
+  document.getElementById('captcha-div').style.display = 'none'
+  const div = document.getElementById('captcha4x4')
+  div.style.display = ''
+
+  const theme = themes4x4[Math.floor(Math.random() * themes4x4.length)]
+  document.getElementById('captchaPrompt4x4').textContent = theme.prompt
+  document.getElementById('captchaDesc4x4').textContent = theme.desc
+
+  correctIndices = []
+  while (correctIndices.length < theme.count) {
+    const idx = Math.floor(Math.random() * 16)
+    if (!correctIndices.includes(idx)) correctIndices.push(idx)
+  }
+
+  const grid = document.getElementById('captchaGrid4x4')
+  const images = generateCaptchaImages(16)
+  grid.innerHTML = images.map((src, i) => `
+    <div class="img-container" data-index="${i}" onclick="toggleSelect(this, ${i})">
+      <img src="${src}" alt="图片${i+1}" loading="lazy">
+    </div>
+  `).join('')
+
+  const btn = document.getElementById('verifyBtn4x4')
+  btn.className = 'btn'
+  btn.textContent = '验证'
+  btn.onclick = () => verify4x4()
+
+  log('info', `4x4验证码: 主题="${theme.prompt}", 正确答案=[${correctIndices.map(i => i+1).join(',')}]`)
+}
+
+function toggleSelect(el, index) {
+  if (el.classList.contains('selected')) {
+    el.classList.remove('selected')
+    selectedIndices = selectedIndices.filter(i => i !== index)
+  } else {
+    el.classList.add('selected')
+    selectedIndices.push(index)
+  }
+  log('info', `当前选中: [${selectedIndices.map(i => i+1).join(',')}]`)
+}
+
+function verify3x3() {
+  const sorted = [...selectedIndices].sort((a, b) => a - b)
+  const sortedCorrect = [...correctIndices].sort((a, b) => a - b)
+  const isCorrect = sorted.length === sortedCorrect.length && sorted.every((v, i) => v === sortedCorrect[i])
+
+  if (isCorrect) {
+    log('success', '验证通过！选中正确')
+    showSuccess()
+  } else {
+    log('error', `验证失败！选中=[${sorted.map(i => i+1).join(',')}], 正确=[${sortedCorrect.map(i => i+1).join(',')}]`)
+    // 添加 success 类让 _checkCaptchaGone 检测到（模拟验证失败后仍存在的情况）
+    const btn = document.getElementById('verifyBtn3x3')
+    btn.textContent = '验证失败，重试'
+    // 重置选择
+    selectedIndices = []
+    document.querySelectorAll('#captcha-div .img-container').forEach(el => el.classList.remove('selected'))
+  }
+}
+
+function verify4x4() {
+  const sorted = [...selectedIndices].sort((a, b) => a - b)
+  const sortedCorrect = [...correctIndices].sort((a, b) => a - b)
+  const isCorrect = sorted.length === sortedCorrect.length && sorted.every((v, i) => v === sortedCorrect[i])
+
+  if (isCorrect) {
+    log('success', '验证通过！选中正确')
+    showSuccess()
+  } else {
+    log('error', `验证失败！选中=[${sorted.map(i => i+1).join(',')}], 正确=[${sortedCorrect.map(i => i+1).join(',')}]`)
+    const btn = document.getElementById('verifyBtn4x4')
+    btn.textContent = '验证失败，重试'
+    selectedIndices = []
+    document.querySelectorAll('.fe-captcha-app .img-container').forEach(el => el.classList.remove('selected'))
+  }
+}
+
+function showSuccess() {
+  // 模拟验证通过：隐藏验证码
+  document.getElementById('captchaOverlay').classList.remove('show')
+  const banner = document.getElementById('successBanner')
+  banner.classList.add('show')
+  setTimeout(() => { banner.classList.remove('show') }, 3000)
+}
+
+// 点击遮罩层不关闭（与真实验证码一致）
+document.getElementById('captchaOverlay').addEventListener('click', (e) => {
+  if (e.target === e.currentTarget) {
+    log('info', '点击遮罩层（不关闭，模拟真实行为）')
+  }
+})
+
+log('info', '测试页已加载。点击"弹出验证码"开始测试。')
+log('info', '使用 AI Browser 的验证码识别功能（侧边栏工具栏验证码按钮）来自动识别。')
+</script>
+</body>
+</html>

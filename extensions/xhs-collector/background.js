@@ -44,6 +44,10 @@ var state = {
 // 标记插件自身发起的导航（避免 onUpdated 误触发停止采集）
 var _pluginNavigation = false;
 
+// 采集代际计数器：每次开始新关键词时递增
+// navigateHomepageAndClick 等异步函数通过检查此计数器判断是否应该中止
+var _collectGeneration = 0;
+
 // COLLECT 等待状态（全局，供 PROGRESS 处理器访问）
 var collectWaitState = null;  // { resolve, reject, settled, progressCompleteReceived, keyword }
 
@@ -304,6 +308,7 @@ async function preCollectionBehavior(searchUrl) {
 async function navigateHomepageAndClick(searchUrl) {
   var tabId = state.xhsTabId;
   if (!tabId) return 'no_tab';
+  var myGeneration = _collectGeneration;  // 记录当前代际，用于中止僵尸实例
 
   try {
     // 1. 导航到首页
@@ -314,12 +319,20 @@ async function navigateHomepageAndClick(searchUrl) {
     await waitForTabComplete(tabId);
     await new Promise(function (r) { setTimeout(r, 2000); }); // 等待页面渲染
 
+    // 代际检查：如果已进入新关键词，中止僵尸实例
+    if (myGeneration !== _collectGeneration) {
+      log('[行为] 代际变更，中止 navigateHomepageAndClick');
+      return 'aborted';
+    }
+
     // 2. 在首页点击笔记（通过 executeScript 执行）
     var clickResult = await clickNoteViaScripting(tabId);
     log('[行为] 首页点击: ' + clickResult);
 
     // 3. 等待阅读
     await new Promise(function (r) { setTimeout(r, 2000 + Math.random() * 2000); });
+
+    if (myGeneration !== _collectGeneration) return 'aborted';
 
     // 4. 关闭详情层
     var closeResult = await closeNoteDetailViaScripting(tabId);
@@ -330,6 +343,7 @@ async function navigateHomepageAndClick(searchUrl) {
     // 5. 再随机点击 1-2 个笔记
     var extraClicks = Math.floor(Math.random() * 2) + 1;
     for (var i = 0; i < extraClicks; i++) {
+      if (myGeneration !== _collectGeneration) return 'aborted';
       var r = await clickNoteViaScripting(tabId);
       log('[行为] 额外点击 ' + (i + 1) + ': ' + r);
       await new Promise(function (resolve) { setTimeout(resolve, 2500 + Math.random() * 2000); });
@@ -340,6 +354,7 @@ async function navigateHomepageAndClick(searchUrl) {
     // 6. 随机点击侧边栏菜单（点点/世界杯/RED/直播/通知/我），模拟人类浏览不同频道
     var menuClicks = Math.floor(Math.random() * 2) + 1; // 1-2 个
     for (var m = 0; m < menuClicks; m++) {
+      if (myGeneration !== _collectGeneration) return 'aborted';
       if (!state.collecting) return 'stopped';
       var menuResult = await clickSidebarMenuViaScripting(tabId);
       log('[行为] 侧边栏菜单点击 ' + (m + 1) + '/' + menuClicks + ': ' + menuResult);
@@ -358,6 +373,8 @@ async function navigateHomepageAndClick(searchUrl) {
           });
         } catch (e) {}
         await new Promise(function (r) { setTimeout(r, 2000 + Math.random() * 2000); });
+
+        if (myGeneration !== _collectGeneration) return 'aborted';
 
         // 返回首页
         log('[行为] 返回首页...');
@@ -1434,6 +1451,7 @@ async function startCollection(keywords, options) {
     saveState();
 
     log('开始采集关键词: ' + keyword);
+    _collectGeneration++;  // 递增代际计数器，让僵尸 navigateHomepageAndClick 中止
 
     var keywordRetried = false; // 当前关键词是否已因 300011 重试过
     while (true) {
@@ -1445,9 +1463,13 @@ async function startCollection(keywords, options) {
 
         // 1. 页面搜索框输入关键词（content.js 执行 searchOnPage，含鼠标移动+逐字输入）
         log('[行为] 页面搜索: ' + keyword);
+        var searchOk = true;
         try {
           var searchR = await sendToContent({ type: 'SEARCH', keyword: keyword });
           log('[行为] 搜索结果: ' + (searchR && searchR.ok ? 'ok' : (searchR && searchR.error || 'fail')));
+          if (!searchR || !searchR.ok) {
+            searchOk = false;
+          }
         } catch (e) {
           log('[行为] 页面搜索异常（可能触发导航）: ' + e.message);
           // 搜索异常时也发 STOP，防止 content.js 的 collecting 标志残留
@@ -1457,12 +1479,30 @@ async function startCollection(keywords, options) {
             log('[行为] 检测到 bfcache，等待页面恢复...');
             await new Promise(function (r) { setTimeout(r, 3000); });
           }
+          searchOk = false;
         }
 
-        // 等待搜索结果加载（SPA 导航 + DOM 渲染）
-        await new Promise(function (r) { setTimeout(r, 3000); });
+        // 搜索失败时执行拯救，而不是继续无用的滚动
+        if (!searchOk) {
+          log('[行为] 搜索失败，执行拯救...');
+          await rescueSearchFailure(state.xhsTabId, keyword);
+          // 拯救后跳过滚动（页面可能不在搜索结果页），直接进入采集
+          // API 搜索不依赖页面搜索结果
+          log('[行为] 跳过滚动，直接进入 API 采集');
 
-        // 关闭AI推荐弹窗（搜索后可能出现，遮挡搜索结果）- 深度人类行为模拟
+          // 采集前确保环境就绪
+          var envReady = await ensureCollectReady(state.xhsTabId, 'pre-collect');
+          if (!envReady) {
+            log('[行为] 环境恢复失败，跳过此关键词');
+            break;
+          }
+        } else {
+          // 搜索成功，继续正常流程
+
+          // 等待搜索结果加载（SPA 导航 + DOM 渲染）
+          await new Promise(function (r) { setTimeout(r, 3000); });
+
+          // 关闭AI推荐弹窗（搜索后可能出现，遮挡搜索结果）- 深度人类行为模拟
         try {
           await chrome.scripting.executeScript({
             target: { tabId: state.xhsTabId },
@@ -1543,6 +1583,14 @@ async function startCollection(keywords, options) {
         log('[行为] 回到顶部...');
         await scrollToTopViaScripting(state.xhsTabId);
         await new Promise(function (r) { setTimeout(r, 1000); });
+        } // 结束 else（搜索成功分支）
+
+        // 采集前确保环境就绪（无论搜索成功还是失败）
+        var preCollectReady = await ensureCollectReady(state.xhsTabId, 'pre-collect');
+        if (!preCollectReady) {
+          log('[行为] 采集前环境恢复失败，跳过此关键词');
+          break;
+        }
 
         // 4. 采集（Background 驱动，不依赖 content.js 事件循环）
         // 整个采集循环在 background.js 中运行，窗口最小化时也能正常工作
@@ -2269,6 +2317,228 @@ function _randomDelayBg(min, max) {
 function _sleepBg(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
 
 /**
+ * 拯救预案：确保采集环境就绪
+ * 检查页面状态，如果异常则自动恢复
+ * 
+ * 检查项:
+ * 1. 标签页是否还在小红书域名下
+ * 2. content script 是否存活
+ * 3. mnsv2 签名函数是否可用
+ * 4. XHS_SIGN 是否可用
+ * 
+ * 恢复流程:
+ * 导航到首页 → 等待加载 → 重新注入脚本 → 验证签名函数
+ */
+async function ensureCollectReady(tabId, label) {
+  label = label || 'unknown';
+  var needsRescue = false;
+  var reasons = [];
+
+  // 检查1: 标签页 URL 是否在小红书域名下
+  try {
+    var tab = await chrome.tabs.get(tabId);
+    if (!tab.url || (tab.url.indexOf('xiaohongshu.com') === -1 && tab.url.indexOf('xhslink.com') === -1)) {
+      needsRescue = true;
+      reasons.push('URL不在小红书: ' + (tab.url || 'unknown'));
+    }
+  } catch (e) {
+    needsRescue = true;
+    reasons.push('标签页不存在: ' + e.message);
+  }
+
+  // 检查2: mnsv2 是否可用（MAIN world）
+  if (!needsRescue) {
+    try {
+      var mnsv2Check = await chrome.scripting.executeScript({
+        target: { tabId: tabId },
+        world: 'MAIN',
+        func: function () { return typeof window.mnsv2 === 'function'; }
+      });
+      if (!mnsv2Check || !mnsv2Check[0] || !mnsv2Check[0].result) {
+        needsRescue = true;
+        reasons.push('mnsv2不可用');
+      }
+    } catch (e) {
+      needsRescue = true;
+      reasons.push('mnsv2检查异常: ' + e.message);
+    }
+  }
+
+  // 检查3: XHS_SIGN 是否可用（ISOLATED world）
+  if (!needsRescue) {
+    try {
+      var signCheck = await chrome.scripting.executeScript({
+        target: { tabId: tabId },
+        func: function () { return typeof window.XHS_SIGN === 'object'; }
+      });
+      if (!signCheck || !signCheck[0] || !signCheck[0].result) {
+        needsRescue = true;
+        reasons.push('XHS_SIGN不可用');
+      }
+    } catch (e) {
+      needsRescue = true;
+      reasons.push('XHS_SIGN检查异常: ' + e.message);
+    }
+  }
+
+  if (!needsRescue) {
+    log('[拯救-' + label + '] 环境正常，无需恢复');
+    return true;
+  }
+
+  // ======================= 执行恢复 =======================
+  log('[拯救-' + label + '] 检测到异常: ' + reasons.join(', '));
+  log('[拯救-' + label + '] 开始恢复...');
+
+  // 步骤1: 导航到首页
+  log('[拯救-' + label + '] 导航到首页...');
+  _pluginNavigation = true;
+  try {
+    await chrome.tabs.update(tabId, { url: 'https://www.xiaohongshu.com/explore' });
+  } catch (e) {
+    log('[拯救-' + label + '] 导航失败: ' + e.message);
+    return false;
+  }
+
+  // 步骤2: 等待页面加载完成
+  await waitForTabComplete(tabId);
+  await _sleepBg(3000); // 等待页面渲染和 vendor-dynamic.js 加载
+
+  // 步骤3: 重新注入 content script
+  log('[拯救-' + label + '] 重新注入 content script...');
+  try {
+    await injectContentScripts(tabId);
+  } catch (e) {
+    log('[拯救-' + label + '] content script 注入失败: ' + e.message);
+  }
+  await _sleepBg(1000);
+
+  // 步骤4: 重新注入 MAIN world 脚本
+  log('[拯救-' + label + '] 重新注入 MAIN world 脚本...');
+  try {
+    await chrome.scripting.executeScript({
+      target: { tabId: tabId },
+      files: ['content/injected.js']
+    });
+  } catch (e) {
+    log('[拯救-' + label + '] MAIN world 注入失败: ' + e.message);
+  }
+  await _sleepBg(1000);
+
+  // 步骤5: 验证恢复结果
+  var recovered = false;
+
+  // 验证 mnsv2
+  try {
+    var mnsv2Recheck = await chrome.scripting.executeScript({
+      target: { tabId: tabId },
+      world: 'MAIN',
+      func: function () { return typeof window.mnsv2 === 'function'; }
+    });
+    if (mnsv2Recheck && mnsv2Recheck[0] && mnsv2Recheck[0].result) {
+      log('[拯救-' + label + '] mnsv2 已恢复');
+    } else {
+      log('[拯救-' + label + '] mnsv2 仍未恢复，尝试刷新页面...');
+      // 最后手段：刷新页面
+      _pluginNavigation = true;
+      await chrome.tabs.update(tabId, { url: 'https://www.xiaohongshu.com/explore' });
+      await waitForTabComplete(tabId);
+      await _sleepBg(5000);
+      try { await injectContentScripts(tabId); } catch (e) {}
+      await chrome.scripting.executeScript({
+        target: { tabId: tabId },
+        files: ['content/injected.js']
+      });
+      await _sleepBg(2000);
+
+      var mnsv2Final = await chrome.scripting.executeScript({
+        target: { tabId: tabId },
+        world: 'MAIN',
+        func: function () { return typeof window.mnsv2 === 'function'; }
+      });
+      if (mnsv2Final && mnsv2Final[0] && mnsv2Final[0].result) {
+        recovered = true;
+      } else {
+        log('[拯救-' + label + '] mnsv2 最终恢复失败');
+        return false;
+      }
+    }
+  } catch (e) {
+    log('[拯救-' + label + '] mnsv2 验证异常: ' + e.message);
+    return false;
+  }
+
+  // 验证 XHS_SIGN
+  try {
+    var signRecheck = await chrome.scripting.executeScript({
+      target: { tabId: tabId },
+      func: function () { return typeof window.XHS_SIGN === 'object'; }
+    });
+    if (signRecheck && signRecheck[0] && signRecheck[0].result) {
+      recovered = true;
+    } else {
+      log('[拯救-' + label + '] XHS_SIGN 不可用，但 mnsv2 已就绪，尝试继续');
+      recovered = true; // mnsv2 可用就足够了，XHS_SIGN 可能需要重新注入
+    }
+  } catch (e) {
+    log('[拯救-' + label + '] XHS_SIGN 验证异常: ' + e.message);
+  }
+
+  _pluginNavigation = false;
+  log('[拯救-' + label + '] 恢复' + (recovered ? '成功' : '失败'));
+  return recovered;
+}
+
+/**
+ * 拯救预案：搜索框输入失败后恢复
+ * 重新导航到首页 → 重新注入脚本 → 重新搜索
+ */
+async function rescueSearchFailure(tabId, keyword) {
+  log('[拯救-搜索] 搜索失败，执行恢复...');
+
+  // 1. 导航到首页
+  _pluginNavigation = true;
+  try {
+    await chrome.tabs.update(tabId, { url: 'https://www.xiaohongshu.com/explore' });
+  } catch (e) {
+    log('[拯救-搜索] 导航失败: ' + e.message);
+    return false;
+  }
+  await waitForTabComplete(tabId);
+  await _sleepBg(3000);
+
+  // 2. 重新注入脚本
+  try { await injectContentScripts(tabId); } catch (e) {}
+  await _sleepBg(1000);
+  try {
+    await chrome.scripting.executeScript({
+      target: { tabId: tabId },
+      files: ['content/injected.js']
+    });
+  } catch (e) {}
+  await _sleepBg(1000);
+
+  // 3. 重新搜索
+  log('[拯救-搜索] 重新搜索: ' + keyword);
+  try {
+    var searchR = await sendToContent({ type: 'SEARCH', keyword: keyword });
+    if (searchR && searchR.ok) {
+      log('[拯救-搜索] 重新搜索成功');
+      await _sleepBg(3000);
+      return true;
+    }
+    log('[拯救-搜索] 重新搜索仍失败: ' + (searchR && searchR.error || 'unknown'));
+  } catch (e) {
+    log('[拯救-搜索] 重新搜索异常: ' + e.message);
+  }
+
+  _pluginNavigation = false;
+  // 搜索失败不阻塞采集，API 搜索不依赖页面搜索结果
+  log('[拯救-搜索] 搜索失败，但 API 搜索不依赖页面，继续采集');
+  return true;
+}
+
+/**
  * Background 驱动的单关键词采集（搜索 + 详情）
  * 整个循环在 background.js 中运行，不依赖 content.js 事件循环
  * 窗口最小化时也能正常工作
@@ -2441,8 +2711,14 @@ async function collectKeywordViaBg(tabId, keyword, pages, feedDelayMin, feedDela
     }
 
     if (consecutiveFail >= 3) {
-      log('[采集-BG] 连续失败 ' + consecutiveFail + ' 次，暂停 10s');
-      await _sleepBg(10000);
+      log('[采集-BG] 连续失败 ' + consecutiveFail + ' 次，检查环境...');
+      // 连续失败可能是环境问题（标签页被导航/脚本丢失），执行环境检查
+      var envCheck = await ensureCollectReady(tabId, 'detail-fail');
+      if (!envCheck) {
+        log('[采集-BG] 环境恢复失败，终止当前关键词采集');
+        return { notes: notes, details: details, failures: failures, stopped: false, envFailed: true };
+      }
+      await _sleepBg(5000);
       consecutiveFail = 0;
     }
 
