@@ -1407,6 +1407,9 @@ async function startCollection(keywords, options) {
   // 清除可能残留的 alarm（不再创建新 alarm，端口保活已足够）
   stopAlarmKeepalive();
 
+  // 创建 offscreen 离屏文档保活（防止窗口最小化时 SW 被终止）
+  await ensureOffscreenDocument();
+
   saveState();
 
   // 确保标签页就绪
@@ -1689,6 +1692,7 @@ async function startCollection(keywords, options) {
   state.collecting = false;
   state.currentKeyword = '';
   stopAlarmKeepalive();
+  closeOffscreenDocument();
   saveState();
 
   log('采集完成，共 ' + allResults.length + ' 个关键词');
@@ -1705,6 +1709,8 @@ function stopCollection(reason) {
 
   // 停止 alarm 兜底保活
   stopAlarmKeepalive();
+  // 关闭 offscreen 离屏文档
+  closeOffscreenDocument();
 
   saveState();
 
@@ -1920,7 +1926,6 @@ function clearResults() {
 chrome.runtime.onConnect.addListener(function (port) {
   if (port.name === 'keepalive') {
     log('[保活] content script 已连接保活端口');
-    // 只要有活跃端口连接，SW 就不会休眠
     // 响应 ping 消息，保持端口活跃（防止 Chrome 视端口为空闲而终止 SW）
     port.onMessage.addListener(function (msg) {
       if (msg && msg.type === 'PING') {
@@ -1929,6 +1934,17 @@ chrome.runtime.onConnect.addListener(function (port) {
     });
     port.onDisconnect.addListener(function () {
       log('[保活] content script 断开保活端口');
+    });
+  } else if (port.name === 'offscreen-keepalive') {
+    // offscreen 离屏文档保活端口（不受窗口最小化影响）
+    log('[保活] offscreen 离屏文档已连接保活端口');
+    port.onMessage.addListener(function (msg) {
+      if (msg && msg.type === 'PING') {
+        try { port.postMessage({ type: 'PONG', time: Date.now() }); } catch (e) {}
+      }
+    });
+    port.onDisconnect.addListener(function () {
+      log('[保活] offscreen 离屏文档断开保活端口');
     });
   }
 });
@@ -1959,6 +1975,59 @@ function stopAlarmKeepalive() {
   }).catch(function (e) {
     log('[保活] alarm 清除失败: ' + (e && e.message || e));
   });
+}
+
+// ======================= Offscreen 离屏文档保活 =======================
+// 离屏文档不受窗口最小化/标签页冻结影响，定时器正常运行
+// 这是窗口最小化时唯一的可靠保活方式（content script 定时器会被 Chrome 冻结）
+
+var _offscreenCreating = false;
+
+async function ensureOffscreenDocument() {
+  if (_offscreenCreating) return;
+  _offscreenCreating = true;
+
+  try {
+    // 检查是否已存在 offscreen 文档
+    var existingContexts = await chrome.runtime.getContexts({
+      contextTypes: ['OFFSCREEN_DOCUMENT']
+    }).catch(function () { return []; });
+
+    if (existingContexts && existingContexts.length > 0) {
+      _offscreenCreating = false;
+      return;
+    }
+
+    // 创建 offscreen 文档
+    await chrome.offscreen.createDocument({
+      url: 'offscreen.html',
+      reasons: ['BLOBS'],
+      justification: 'Keep service worker alive during long collection tasks'
+    });
+    log('[保活] offscreen 离屏文档已创建');
+  } catch (e) {
+    // 如果已存在会报错，忽略
+    if (e.message && e.message.indexOf('already exists') === -1) {
+      log('[保活] offscreen 创建异常: ' + e.message);
+    }
+  } finally {
+    _offscreenCreating = false;
+  }
+}
+
+async function closeOffscreenDocument() {
+  try {
+    var existingContexts = await chrome.runtime.getContexts({
+      contextTypes: ['OFFSCREEN_DOCUMENT']
+    }).catch(function () { return []; });
+
+    if (existingContexts && existingContexts.length > 0) {
+      await chrome.offscreen.closeDocument();
+      log('[保活] offscreen 离屏文档已关闭');
+    }
+  } catch (e) {
+    // 忽略关闭错误
+  }
 }
 
 chrome.runtime.onMessage.addListener(function (message, sender, sendResponse) {
@@ -2157,6 +2226,17 @@ chrome.runtime.onMessage.addListener(function (message, sender, sendResponse) {
     }
 
     sendResponse({ ok: true });
+    return false;
+  }
+
+  // offscreen 离屏文档检查是否还需要保活
+  if (message.type === 'OFFSCREEN_CHECK_ALIVE') {
+    if (!state.collecting) {
+      // 采集已停止，通知 offscreen 关闭
+      sendResponse({ ok: true, alive: false });
+    } else {
+      sendResponse({ ok: true, alive: true });
+    }
     return false;
   }
 
@@ -2663,6 +2743,8 @@ _initPromise = loadState().then(function () {
         // SW 重启，但不中断采集——content script 仍在运行
         // 端口自动重连 + 排队消息会正常处理，无需发 STOP
         log('[重启] Service Worker 重启，采集继续（不中断 content script）');
+        // SW 重启后重新创建 offscreen 文档（防止窗口最小化时 SW 再次被终止）
+        ensureOffscreenDocument();
       }
 
       // 通知 content script：SW 已重启，重连端口
