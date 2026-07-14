@@ -576,6 +576,50 @@ function registerIpcHandlers() {
     return { success: true }
   })
 
+  // ============ 小红书采集模块已迁移为插件（plugins/xhs-collector），主程序不再保留 ============
+  // 通过插件中心启用「小红书采集」插件即可使用，相关能力（SignServer）由 PluginManager 按需启动
+
+  // --- 插件中心窗口 ---
+  let pluginCenterWindow = null
+  ipcMain.handle('plugin-center:open', async () => {
+    if (pluginCenterWindow && !pluginCenterWindow.isDestroyed()) {
+      if (pluginCenterWindow.isMinimized()) pluginCenterWindow.restore()
+      pluginCenterWindow.focus()
+      return { success: true }
+    }
+    pluginCenterWindow = new BrowserWindow({
+      width: 900, height: 650,
+      minWidth: 600, minHeight: 400,
+      parent: mainWindow,
+      frame: false,
+      resizable: true, minimizable: true, maximizable: true, fullscreenable: true,
+      skipTaskbar: false,
+      alwaysOnTop: false,
+      backgroundColor: '#1a1a2e',
+      title: '插件中心',
+      webPreferences: {
+        nodeIntegration: false,
+        contextIsolation: true,
+        preload: path.join(__dirname, 'preload.js'),
+      },
+    })
+    if (process.env.NODE_ENV === 'development') {
+      pluginCenterWindow.loadURL('http://localhost:5173/?window=plugin-center')
+    } else {
+      pluginCenterWindow.loadFile(path.join(__dirname, '../dist/index.html'), { query: { window: 'plugin-center' } })
+    }
+    pluginCenterWindow.on('closed', () => { pluginCenterWindow = null })
+    return { success: true }
+  })
+
+  ipcMain.handle('plugin-center:close', async () => {
+    if (pluginCenterWindow && !pluginCenterWindow.isDestroyed()) {
+      pluginCenterWindow.close()
+      pluginCenterWindow = null
+    }
+    return { success: true }
+  })
+
   // --- 数据报告窗口（独立 BrowserWindow，Agent 完成时自动弹出） ---
   let historyWindow = null
   ipcMain.handle('history-window:open', async () => {
@@ -1958,73 +2002,7 @@ function registerIpcHandlers() {
     }
   })
 
-  // --- 小红书 API 直连（方案 A：Headless 浏览器）---
-  const xhsApiService = require('./services/xhs_api_service')
-
-  // 环境检查：确认当前页面是小红书且 mnsv2 可用
-  ipcMain.handle('xhs:check-env', async () => {
-    const bv = tabManager.getActiveBrowserView()
-    return xhsApiService.checkEnvironment(bv)
-  })
-
-  // 搜索笔记
-  ipcMain.handle('xhs:search', async (event, { keyword, page, pageSize, sort }) => {
-    const bv = tabManager.getActiveBrowserView()
-    return xhsApiService.searchNotes(bv, keyword, page || 1, pageSize || 20, sort || 'general')
-  })
-
-  // 获取笔记详情
-  ipcMain.handle('xhs:get-note', async (event, { noteId }) => {
-    const bv = tabManager.getActiveBrowserView()
-    return xhsApiService.getNoteDetail(bv, noteId)
-  })
-
-  // 批量获取笔记详情
-  ipcMain.handle('xhs:batch-get-notes', async (event, { noteIds }) => {
-    const bv = tabManager.getActiveBrowserView()
-    return xhsApiService.batchGetNoteDetail(bv, noteIds)
-  })
-
-  // 获取评论
-  ipcMain.handle('xhs:get-comments', async (event, { noteId, cursor }) => {
-    const bv = tabManager.getActiveBrowserView()
-    return xhsApiService.getComments(bv, noteId, cursor || '')
-  })
-
-  // 获取用户信息
-  ipcMain.handle('xhs:get-user', async (event, { userId }) => {
-    const bv = tabManager.getActiveBrowserView()
-    return xhsApiService.getUserProfile(bv, userId)
-  })
-
-  // 获取用户笔记
-  ipcMain.handle('xhs:get-user-notes', async (event, { userId, cursor }) => {
-    const bv = tabManager.getActiveBrowserView()
-    return xhsApiService.getUserNotes(bv, userId, cursor || '')
-  })
-
-  // 清除小红书 Cookie 并刷新页面（重置 a1 标记）
-  ipcMain.handle('xhs:reset-session', async () => {
-    const bv = tabManager.getActiveBrowserView()
-    if (!bv) return { ok: false, error: '无活动标签页' }
-    try {
-      const ses = bv.webContents.session
-      // 清除小红书相关 cookie
-      await ses.clearStorageData({
-        origin: 'https://www.xiaohongshu.com',
-        storages: ['cookies'],
-      })
-      await ses.clearStorageData({
-        origin: 'https://edith.xiaohongshu.com',
-        storages: ['cookies'],
-      })
-      // 刷新页面获取新的 a1
-      bv.webContents.reload()
-      return { ok: true, message: 'Cookie已清除，页面正在刷新。请等待页面加载完成后重新登录并重试' }
-    } catch (e) {
-      return { ok: false, error: '清除Cookie失败: ' + e.message }
-    }
-  })
+  // --- 小红书 API 直连已迁移为插件能力（plugins/xhs-collector），主程序不再提供 xhs:* IPC ---
 }
 
 // ============ 请求拦截 ============
@@ -2049,10 +2027,11 @@ app.whenReady().then(() => {
   createTray()
   tabManager = new TabManager(mainWindow)
 
-  // 启动签名桥接 HTTP 服务（供外部采集脚本调用）
-  const SignServer = require('./services/sign_server')
-  const signServer = new SignServer(tabManager)
-  signServer.start(3721)
+  // 初始化插件管理器（SignServer 由 PluginManager 在小红书插件启用时按需创建，不再主程序启动）
+  const pluginManager = require('./services/plugin_manager')
+  pluginManager.init({ tabManager }).catch(err => {
+    console.error('[PluginManager] 初始化失败:', err)
+  })
 
   // 注册页面加载完成回调 → 自动注入脚本
   tabManager.onPageLoaded(async (browserView, url) => {
@@ -2124,6 +2103,9 @@ app.on('before-quit', () => {
   app.isQuitting = true
   // 清理迁移服务的资源（定时器、存储刷新等）
   serviceManager.cleanup()
+  // 清理插件子进程
+  const pluginManager = require('./services/plugin_manager')
+  pluginManager.cleanup()
 })
 
 app.on('activate', () => {

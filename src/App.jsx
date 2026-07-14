@@ -412,6 +412,7 @@ export default function App() {
             </div>
           )}
           <button className={`nav-btn ${activeTab === 'settings' ? 'nav-btn-active' : ''}`} onClick={() => setActiveTab(activeTab === 'settings' ? 'assistant' : 'settings')} title="设置">⚙</button>
+          <button className="nav-btn-icon" onClick={() => window.api.pluginCenterWindow.open()} title="插件中心">🧩</button>
         </div>
       </div>
 

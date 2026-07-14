@@ -61,6 +61,24 @@ contextBridge.exposeInMainWorld('api', {
     open: () => ipcRenderer.invoke('script-center:open'),
     close: () => ipcRenderer.invoke('script-center:close'),
   },
+  // 插件中心
+  pluginCenter: {
+    list: () => ipcRenderer.invoke('plugin:list'),
+    install: (zipPath) => ipcRenderer.invoke('plugin:install', { zipPath }),
+    uninstall: (id) => ipcRenderer.invoke('plugin:uninstall', { id }),
+    enable: (id) => ipcRenderer.invoke('plugin:enable', { id }),
+    disable: (id) => ipcRenderer.invoke('plugin:disable', { id }),
+    openWindow: (id) => ipcRenderer.invoke('plugin:open-window', { id }),
+    closeWindow: (id) => ipcRenderer.invoke('plugin:close-window', { id }),
+    getConfig: (id) => ipcRenderer.invoke('plugin:config-get', { id }),
+    saveConfig: (id, config) => ipcRenderer.invoke('plugin:config-save', { id, config }),
+  },
+  // 插件中心窗口
+  pluginCenterWindow: {
+    open: () => ipcRenderer.invoke('plugin-center:open'),
+    close: () => ipcRenderer.invoke('plugin-center:close'),
+  },
+  // 小红书采集模块已迁移为插件（plugins/xhs-collector），通过插件中心使用
   // 历史记录管理窗口
   historyWindow: {
     open: () => ipcRenderer.invoke('history-window:open'),
@@ -246,22 +264,7 @@ contextBridge.exposeInMainWorld('api', {
     upload: ({ serverUrl, appKey, appSecret, name, code, description, categoryId, urlPattern, toolType, toolConfig, metadata }) =>
       ipcRenderer.invoke('scripts:upload', { serverUrl, appKey, appSecret, name, code, description, categoryId, urlPattern, toolType, toolConfig, metadata }),
   },
-  // 小红书 API 直连（方案 A：Headless 浏览器）
-  xhs: {
-    checkEnv: () => ipcRenderer.invoke('xhs:check-env'),
-    search: ({ keyword, page, pageSize, sort }) =>
-      ipcRenderer.invoke('xhs:search', { keyword, page, pageSize, sort }),
-    getNote: ({ noteId }) =>
-      ipcRenderer.invoke('xhs:get-note', { noteId }),
-    batchGetNotes: ({ noteIds }) =>
-      ipcRenderer.invoke('xhs:batch-get-notes', { noteIds }),
-    getComments: ({ noteId, cursor }) =>
-      ipcRenderer.invoke('xhs:get-comments', { noteId, cursor }),
-    getUser: ({ userId }) =>
-      ipcRenderer.invoke('xhs:get-user', { userId }),
-    getUserNotes: ({ userId, cursor }) =>
-      ipcRenderer.invoke('xhs:get-user-notes', { userId, cursor }),
-  },
+  // 小红书 API 直连已迁移为插件能力（plugins/xhs-collector），通过插件中心使用
   // 智能体
   agent: {
     run: (task, config, maxRounds) => ipcRenderer.invoke('agent:run', { task, config, maxRounds }),

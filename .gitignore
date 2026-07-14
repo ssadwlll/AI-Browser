@@ -5,3 +5,25 @@ dist/
 browser-use-main/
 .env
 package-lock.json
+
+# 不开源目录
+docs/*
+!docs/plugin-development.md
+!docs/backend-development.md
+anti-bot-demo/
+chrome-extension/
+extensions/
+scripts/
+
+# 小红书采集插件不开源（保留插件框架本身）
+plugins/xhs-collector/
+
+# 数据库上传文件（含用户数据）
+admin-server/uploads/
+
+# 插件数据目录
+plugins/*/data/
+
+# 编译产物
+admin-server/public/models/
+admin-server/services/all-MiniLM-L6-v2/
