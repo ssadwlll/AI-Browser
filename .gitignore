@@ -10,6 +10,7 @@ package-lock.json
 docs/*
 !docs/plugin-development.md
 !docs/backend-development.md
+!docs/小红书逆向分析报告.md
 anti-bot-demo/
 chrome-extension/
 extensions/

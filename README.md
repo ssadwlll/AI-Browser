@@ -144,7 +144,8 @@ ai-browser/
 │   └── registry.json               # 插件注册表
 ├── docs/                           # 开发文档
 │   ├── plugin-development.md       # 插件开发指南
-│   └── backend-development.md      # 管理后台开发指南
+│   ├── backend-development.md      # 管理后台开发指南
+│   └── 小红书逆向分析报告.md        # 小红书逆向分析报告
 ├── package.json
 ├── vite.config.js
 └── index.html
@@ -210,7 +211,7 @@ LLM 返回最终文本回复（不再调用工具），任务完成
 
 ## 实战案例：逆向小红书
 
-本项目用 AI Browser 的逆向分析能力完整破解了小红书 Web 端的签名体系，并在纯 Node.js 环境中复现签名算法，实现脱离浏览器的批量数据采集。
+本项目用 AI Browser 的逆向分析能力完整破解了小红书 Web 端的签名体系，并在纯 Node.js 环境中复现签名算法，实现脱离浏览器的批量数据采集。完整的逆向过程与技术细节见 [小红书逆向分析报告](docs/小红书逆向分析报告.md)。
 
 ### 反爬体系
 
@@ -308,7 +309,7 @@ function seccoreSignV2(apiPath, body) {
 | 300015 | 浏览器环境异常 | 确认使用 XYS_ 格式而非 XYW_ |
 | 300031 | 笔记不可浏览 | 笔记已下架 |
 
-> 以上为逆向成果概要，完整的字节码解释器分析、环境 Mock 要求、从零获取运行时资源的指南等细节未随开源仓库分发。
+> 以上为逆向成果概要，完整的字节码解释器分析、环境 Mock 要求、从零获取运行时资源的指南等细节见 [小红书逆向分析报告](docs/小红书逆向分析报告.md)。
 
 ## 插件系统
 
@@ -359,8 +360,7 @@ npm run dev        # 开发模式（nodemon）
 
 - [插件开发指南](docs/plugin-development.md)
 - [管理后台开发指南](docs/backend-development.md)
-
-> 完整架构说明、操作文档、产品技术说明书、技术架构分析报告、小红书逆向分析报告等文档随仓库分发，位于 `docs/` 目录。
+- [小红书逆向分析报告](docs/小红书逆向分析报告.md)
 
 ## 贡献指南
 
