@@ -7,6 +7,18 @@
 ![React](https://img.shields.io/badge/React-18-61DAFB.svg)
 ![Vite](https://img.shields.io/badge/Vite-5-646CFF.svg)
 
+---
+
+> ## 📞 联系方式 / Contact
+>
+> 微信（WeChat）：**`1085459519`**
+>
+> 欢迎交流 AI Browser、浏览器自动化、网页逆向分析、插件开发等话题。
+>
+> ---
+
+
+
 ## 核心特性
 
 - **AI Agent**：通过 LLM + Function Calling 自动操控浏览器完成多步骤任务，支持工具调用循环、循环检测与不确定性感知
